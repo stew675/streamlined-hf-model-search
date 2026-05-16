@@ -132,6 +132,8 @@
     <div class="ds-track-fill" id="ds-fill"></div>
     <input type="range" id="ds-from" min="-25" max="0" value="-6" step="1">
     <input type="range" id="ds-to" min="-25" max="0" value="0" step="1">
+    <div class="ps-tooltip" id="ds-tooltip-from" style="left:76%">6 mo ago</div>
+    <div class="ps-tooltip" id="ds-tooltip-to" style="left:100%">Now</div>
   </div>
   <div class="ds-labels">
     <span><span class="ds-l">From:</span> <span class="ds-v" id="ds-from-label">6 mo ago</span></span>
@@ -1209,6 +1211,11 @@ function updateDateUI() {
   const fill = document.getElementById("ds-fill");
   fill.style.left = left + "%";
   fill.style.width = (right - left) + "%";
+
+  const tipFrom = document.getElementById("ds-tooltip-from");
+  const tipTo = document.getElementById("ds-tooltip-to");
+  if (tipFrom) { tipFrom.style.left = left + "%"; tipFrom.textContent = sliderValueToLabel(sliderFrom); }
+  if (tipTo) { tipTo.style.left = right + "%"; tipTo.textContent = sliderValueToLabel(sliderTo); }
 }
 
 // ── Param slider ──
