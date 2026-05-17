@@ -53,7 +53,7 @@ AGENTS.md                — This file
 | `isBase(model)` | Checks if a model is a base model (no `cardData.base_model`, or same-author fine-tune) |
 | `isInDateRange(createdAt)` | Date slider range check (null dates pass through) |
 | `isInParamRange(paramB)` | Param slider range check |
-| `getParamCount(model)` | Extracts param count from `safetensors.total` or B/M suffix in model ID. Returns null for quant models without a B/M in the name (GGUF, AWQ, etc.), which are resolved via parent lookup in the post-deepening pass |
+| `getParamCount(model)` | Extracts param count from `safetensors.total`, `gguf.total`, or B/M suffix in model ID. Returns null for quant models without a B/M in the name (GGUF, AWQ, etc.), which are resolved via individual API fetch or parent lookup in the post-deepening pass |
 | `paramValueToLabel(val)` | Formats param count for display (int ≥5B, 1 decimal ≥1B, int M <1B) |
 | `buildDateSlider()` | Builds the date dual-range slider |
 | `buildParamSlider()` | Builds the param size dual-range slider |

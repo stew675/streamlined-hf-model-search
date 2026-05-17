@@ -426,6 +426,7 @@ function isInDateRange(dateStr) {
 }
 function getParamCount(m) {
   if (m.safetensors && m.safetensors.total) return m.safetensors.total / 1e9;
+  if (m.gguf && m.gguf.total) return m.gguf.total / 1e9;
   const bMatch = m.id.match(/(\d+\.?\d*)[Bb]/);
   if (bMatch) return parseFloat(bMatch[1]);
   const mMatch = m.id.match(/(\d+\.?\d*)[Mm]/);
