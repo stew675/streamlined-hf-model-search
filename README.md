@@ -11,9 +11,9 @@ Open `streamlined-hf-model-search.html` in any modern browser. Select your From/
 | Level | What You See | Sortable By |
 |-------|-------------|-------------|
 | **1 — Model Authors** | Organizations with base models matching all active filters | Model Author, Base Models, Total Downloads, Total Likes |
-| **2 — Base Models** | Individual base models by that author | Model ID, Params, Created, Downloads, Likes |
+| **2 — Base Models** | Individual base models by that author | Model ID, Params, Updated, Downloads, Likes |
 | **3 — Quant Authors** | Who made quantizations, grouped by author | Author, Models, Downloads |
-| **4 — Quantizations** | Individual quantized models with method badges | Model ID, Quant, Downloads, Likes, Created, Updated |
+| **4 — Quantizations** | Individual quantized models with method badges | Model ID, Quant, Downloads, Likes, Updated |
 
 ## Filter Bars
 
@@ -27,7 +27,7 @@ Active pipeline tags are displayed as blue chips. Changing filters and clicking 
 
 ## Dual-Range Sliders
 
-Two sliders let you filter by **date** (months ago, up to 25 months back or "Anytime") and **parameter size** (220 positions with piecewise linear mapping across 7 zoom segments, live tooltips on drag). Changes immediately re-render L1 and all open sections (debounced at 200ms).
+Two sliders let you filter by **date** (0=Anytime, 1-79=YYYY/MM/DD at 14-day increments, 80=Now, live tooltips) and **parameter size** (220 positions with piecewise linear mapping across 7 zoom segments, live tooltips on drag). Changes immediately re-render L1 and all open sections (debounced at 200ms). Knobs have a configurable minimum gap with bi-directional push.
 
 ## Quantization Filter
 
@@ -42,11 +42,11 @@ Quant method detection checks both model name and tags for known keywords (awq, 
 - **Dark theme** matching GitHub/HF styling
 - **From/To modality filter bars** for pipeline tag selection
 - **Special toggles** (include untagged)
-- **Dual-range sliders** for date and parameter size filtering (piecewise linear scale, live tooltips)
+- **Dual-range sliders** for date and parameter size filtering (piecewise linear scale, 14-day date increments, live tooltips, bi-directional push)
 - **Column sorting** at every level (click headers)
 - **Expandable rows** — click any row (not a link) to expand
 - **Cached results** — re-expanding is instant; task fetches are skipped once complete
-- **Param deepening** — unknown param counts fetched in batches of 5 via individual model API with loading indicator (only for visible models)
+- **Param deepening** — unknown param counts fetched in batches of 5 via individual model API with loading indicator (only for visible models); quant models without B/M suffix inherit their parent's param count with zero extra API calls (e.g. `Qwen3-Coder-Next-GGUF` resolves params from `Qwen3-Coder-Next`)
 - **API rate limiting** — max 10 requests per second to the HuggingFace API with automatic retry on failure (exponential backoff, up to 3 retries)
 - **API call counter** — displays total requests made in the session
 - **Quant badges** — color-coded by method (FP4, FP8, AWQ, GGUF, MLX, etc.)

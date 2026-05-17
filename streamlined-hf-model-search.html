@@ -814,6 +814,20 @@ async function loadAuthorModels(idx, author, container) {
           }
         }));
       }
+      for (const m of unknownModels) {
+        if (m.paramB != null) continue;
+        const bits = m.id.split('/');
+        let name = bits[1];
+        while (name.length > 0) {
+          const dash = name.lastIndexOf('-');
+          if (dash <= 0) break;
+          name = name.substring(0, dash);
+          const candId = bits[0] + '/' + name;
+          const parent = baseModels.find(b => b.id === candId && b.paramB != null) ||
+            (window._allFetched || []).find(f => f.id === candId && f.paramB != null);
+          if (parent) { m.paramB = parent.paramB; break; }
+        }
+      }
       statusEl.textContent = "";
       const updated = filterApplied();
       const detailRow = document.getElementById(`d1-${idx}`);
