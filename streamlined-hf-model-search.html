@@ -57,6 +57,7 @@
   .badge { display: inline-block; font-size: 0.7rem; padding: 1px 6px; border-radius: 12px;
            background: #1f6feb33; color: #58a6ff; border: 1px solid #1f6feb55; margin: 1px 2px; box-shadow: 0 0 4px #1f6feb22; }
   .badge.deriv { background: #23863633; color: #3fb950; border-color: #23863655; box-shadow: 0 0 4px #23863622; }
+  .badge.orphan { background: #d2992233; color: #e3b341; border-color: #d2992255; box-shadow: 0 0 4px #d2992222; }
   .likes-icon { color: #f85149; margin-right: 2px; }
   .cell-flex { display: flex; align-items: center; }
 
@@ -414,6 +415,32 @@ function isBase(model) {
   return false;
 }
 
+function inferParent(modelId, knownIds) {
+  const bits = modelId.split('/');
+  let name = bits[1];
+  while (name.length > 0) {
+    const dash = name.lastIndexOf('-');
+    if (dash <= 0) break;
+    name = name.substring(0, dash);
+    const candId = bits[0] + '/' + name;
+    if (knownIds.has(candId)) return candId;
+  }
+  return null;
+}
+
+function isOrphanQuant(model, knownIds) {
+  const cd = model.cardData;
+  if (cd && cd.base_model) return false;
+  const idLower = model.id.toLowerCase();
+  if (!Q_METHODS.some(t => idLower.includes(t))) return false;
+  return inferParent(model.id, knownIds) !== null;
+}
+
+function getOrphanQuantMethod(modelId) {
+  const idLower = modelId.toLowerCase();
+  return Q_METHODS.filter(t => idLower.includes(t));
+}
+
 function fmt(n) { return n.toLocaleString(); }
 function fmtDate(d) { return d ? new Date(d).toISOString().slice(0, 10) : "—"; }
 function fmtAge(d) {
@@ -510,10 +537,12 @@ function modelPassesAllFilters(m) {
 
 function computeAuthorData() {
   const all = _allFetched || [];
+  const knownIds = new Set(all.map(x => x.id));
   const map = {};
   all.forEach(m => {
     if (!modelPassesAllFilters(m)) return;
     if (!isBase(m)) return;
+    if (isOrphanQuant(m, knownIds)) return;
     const author = m.id.split("/")[0];
     if (!map[author]) map[author] = { author, count: 0, totalDownloads: 0, totalLikes: 0 };
     map[author].count++;
@@ -843,6 +872,7 @@ async function loadAuthorModels(idx, author, container) {
     );
     if (!cacheGet(author + "_models")) cacheSet(author + "_models", models);
 
+    const authorKnownIds = new Set(models.map(x => x.id));
     const baseModels = models.filter(m => isBase(m)).map(m => ({
       id: m.id,
       downloads: m.downloads || 0,
@@ -852,12 +882,13 @@ async function loadAuthorModels(idx, author, container) {
       lastModified: m.lastModified || "",
       tags: m.tags || [],
       paramB: getParamCount(m),
-      pipeline_tag: m.pipeline_tag || ""
+      pipeline_tag: m.pipeline_tag || "",
+      _orphanQuant: isOrphanQuant(m, authorKnownIds)
     }));
 
     cacheSet(author, baseModels);
 
-    const filterApplied = () => baseModels.filter(m => modelPassesAllFilters(m));
+    const filterApplied = () => baseModels.filter(m => !m._orphanQuant && modelPassesAllFilters(m));
 
     const dated = filterApplied();
 
@@ -949,8 +980,10 @@ function renderL2(idx, author, models, container) {
   html += `</tr></thead><tbody>`;
 
   sorted.forEach((m, mIdx) => {
+    const qMethods = getOrphanQuantMethod(m.id);
+    const orphanBadge = qMethods.length ? `<span class="badge orphan">${escapeHtml(qMethods[0].toUpperCase())}</span>&nbsp;` : '';
     html += `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}">
-      <td><span class="toggle" id="t2-${idx}-${mIdx}">▶</span><a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(truncate(m.id.split("/").slice(1).join("/"), 40))}</a></td>
+      <td><span class="toggle" id="t2-${idx}-${mIdx}">▶</span>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(truncate(m.id.split("/").slice(1).join("/"), 40))}</a></td>
       <td class="right" style="width:60px;font-size:0.78rem">${m.paramB != null ? paramValueToLabel(m.paramB) : "—"}</td>
       <td class="right">${fmtDate(m.lastModified)} <span style="color:#484f58;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
       <td class="right">${fmt(m.downloads)}</td>
@@ -959,7 +992,7 @@ function renderL2(idx, author, models, container) {
     <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none"><td colspan="5"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
   });
 
-  html += `</tbody></table><div class="detail-count">${models.length} base model(s)</div>`;
+  html += `</tbody></table><div class="detail-count">${models.length} model(s)</div>`;
   container.innerHTML = html;
   container._l2State = { idx, author, models };
 
@@ -1041,13 +1074,13 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
         const nameMatches = idLower.includes(modelName.toLowerCase());
 
         if (hasBaseModel || (nameMatches && isQuant)) {
-          const childAuthor = m.id.split("/")[0];
-          const parentAuthor = parentId.split("/")[0];
-          if (hasBaseModel && childAuthor === parentAuthor) continue;
-          if (!hasBaseModel && childAuthor === parentAuthor) continue;
-          const qMethods = Q_METHODS.filter(t => idLower.includes(t) || tagsStr.includes(t));
-          let qMethod = qMethods.length ? qMethods.join(", ") : (hasBaseModel ? "finetune" : (tagsStr.includes("safetensors") ? "safetensors" : "derivative"));
-          results.push({
+            const childAuthor = m.id.split("/")[0];
+            const parentAuthor = parentId.split("/")[0];
+            if (hasBaseModel && childAuthor === parentAuthor) continue;
+            if (!hasBaseModel && !isQuant && childAuthor === parentAuthor) continue;
+            const qMethods = Q_METHODS.filter(t => idLower.includes(t) || tagsStr.includes(t));
+            let qMethod = qMethods.length ? qMethods.join(", ") : (hasBaseModel ? "finetune" : (tagsStr.includes("safetensors") ? "safetensors" : "derivative"));
+            results.push({
             id: m.id,
             author: m.id.split("/")[0],
             downloads: m.downloads || 0,
@@ -1232,7 +1265,7 @@ function refreshAllExpanded() {
     if (tog) tog.classList.add("open");
     const models = cacheGet(author);
     if (models) {
-      renderL2(idx, author, models.filter(m => modelPassesAllFilters(m)), inner);
+      renderL2(idx, author, models.filter(m => !m._orphanQuant && modelPassesAllFilters(m)), inner);
     }
   }
 
@@ -1532,7 +1565,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
         inner.innerHTML = '<div class="detail-loading">Fetching base models…</div>';
         loadAuthorModels(idx, author, inner);
       } else {
-        renderL2(idx, author, baseModels.filter(m => modelPassesAllFilters(m)), inner);
+        renderL2(idx, author, baseModels.filter(m => !m._orphanQuant && modelPassesAllFilters(m)), inner);
       }
     } else {
       detailRow.style.display = "none";
