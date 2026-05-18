@@ -37,6 +37,7 @@
   .right { text-align: right; }
   th.right { text-align: right; }
   th.center, td.center { text-align: center; }
+  .detail-inner td.center { text-align: center !important; padding-left: 8px !important; padding-right: 8px !important; }
   .arrow-left { margin-right: 4px; font-size: 0.7rem; color: #58a6ff; }
   .task { text-align: left; white-space: nowrap; }
   #count { font-size: 0.85rem; color: #8b949e; margin-top: 8px; }
@@ -66,7 +67,7 @@
   tr.l3-row:hover td { background: #1a2030; }
   tr.l3-row td:first-child { padding-left: 48px !important; }
 
-  tr.l4-row td { padding-left: 64px !important; }
+  tr.l4-row td { padding-left: 32px !important; }
   tr.l4-row td:first-child { padding-left: 64px !important; }
   tr.l4-row:nth-child(even) td { background: #080b10; }
 
@@ -1062,12 +1063,12 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
   const cols = [
     { key: "id", label: "Model ID" },
     { key: "paramB", label: "Params", cls: "params-cell" },
-    { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header" },
     { key: "downloads", label: "Downloads", cls: "right" },
-    { key: "likes", label: "Likes", cls: "center" }
+    { key: "likes", label: "Likes", cls: "center" },
+    { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header" }
   ];
 
-  let html = `<table><colgroup><col><col width="80"><col width="140"><col width="110"><col width="80"></colgroup><thead><tr>`;
+  let html = `<table><colgroup><col><col width="160"><col width="110"><col width="80"><col width="135"></colgroup><thead><tr>`;
   cols.forEach(c => { html += thHtml(c, state, "2"); });
   html += `</tr></thead><tbody>`;
 
@@ -1077,9 +1078,9 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
     html += `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}">
       <td><span class="toggle" id="t2-${idx}-${mIdx}">▶</span>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(truncate(m.id.split("/").slice(1).join("/"), 40))}</a></td>
       <td class="params-cell" style="font-size:0.78rem">${m.paramB != null ? paramValueToLabel(m.paramB) : "—"}</td>
-      <td class="updated-cell">${fmtDate(m.lastModified)} <span style="color:#484f58;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
       <td class="right">${fmt(m.downloads)}</td>
       <td class="center"><span class="likes-icon">♥</span>${fmt(m.likes)}</td>
+      <td class="updated-cell">${fmtDate(m.lastModified)} <span style="color:#484f58;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
     </tr>
     <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none"><td colspan="5"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
   });
@@ -1298,7 +1299,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
     { key: "lastModified", label: "Updated", cls: "right" }
   ];
 
-  let html = `<table><colgroup><col><col width="160"><col width="110"><col width="100"><col width="140"></colgroup><thead><tr>`;
+  let html = `<table><colgroup><col><col width="160"><col width="110"><col width="80"><col width="110"></colgroup><thead><tr>`;
   cols.forEach(c => { html += thHtml(c, st, "4"); });
   html += `</tr></thead><tbody>`;
 
