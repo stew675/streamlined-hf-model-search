@@ -17,8 +17,8 @@
   th.sorted { background: #1c2129; border-bottom-color: #58a6ff; }
   th .arrow { margin-left: 4px; font-size: 0.7rem; color: #58a6ff; }
   td { padding: 6px 10px; border-bottom: 1px solid #21262d; transition: background 0.1s; }
-  tr.l1-row:nth-child(4n+1) td { background: #0d1117; }
-  tr.l1-row:nth-child(4n+2) td { background: #0f1318; }
+  tr.l1-row.row-even td { background: #0d1117; }
+  tr.l1-row.row-odd td { background: #0f1318; }
   a { color: #58a6ff; text-decoration: none; transition: color 0.15s; }
   a:hover { text-decoration: underline; color: #79c0ff; }
   .right { text-align: right; }
@@ -400,6 +400,7 @@ function fmtAge(d) {
   return `${(days / 365).toFixed(1)}y`;
 }
 function truncate(s, max) { return s.length > max ? s.slice(0, max) + "…" : s; }
+function escapeHtml(str) { return String(str).replace(/[&<>"']/g, function(m) { if (m === '&') return '&amp;'; if (m === '<') return '&lt;'; if (m === '>') return '&gt;'; if (m === '"') return '&quot;'; return '&#39;'; }); }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 function sliderValueToDate(val) {
@@ -741,8 +742,9 @@ function renderMain(authorData) {
 
   let html = "";
   sorted.forEach((a, idx) => {
-    html += `<tr class="l1-row" data-l1-idx="${idx}" data-author="${a.author}">
-      <td><span class="toggle" id="t1-${idx}">▶</span><a href="https://huggingface.co/${a.author}" target="_blank">${a.author}</a></td>
+    const zebra = idx % 2 === 0 ? "row-even" : "row-odd";
+    html += `<tr class="l1-row ${zebra}" data-l1-idx="${idx}" data-author="${escapeHtml(a.author)}">
+      <td><span class="toggle" id="t1-${idx}">▶</span><a href="https://huggingface.co/${escapeHtml(a.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(a.author)}</a></td>
       <td class="right">${a.count}</td>
       <td class="right">${fmt(a.totalDownloads)}</td>
       <td class="right">${fmt(a.totalLikes)}</td>
@@ -861,8 +863,8 @@ function renderL2(idx, models, container) {
   html += `</tr></thead><tbody>`;
 
   sorted.forEach((m, mIdx) => {
-    html += `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${m.id}">
-      <td><span class="toggle" id="t2-${idx}-${mIdx}">▶</span><a href="https://huggingface.co/${m.id}" target="_blank" title="${m.id.split("/").slice(1).join("/")}">${truncate(m.id.split("/").slice(1).join("/"), 40)}</a></td>
+    html += `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}">
+      <td><span class="toggle" id="t2-${idx}-${mIdx}">▶</span><a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(truncate(m.id.split("/").slice(1).join("/"), 40))}</a></td>
       <td class="right" style="width:60px;font-size:0.78rem">${m.paramB != null ? paramValueToLabel(m.paramB) : "—"}</td>
       <td class="right">${fmtDate(m.lastModified)} <span style="color:#484f58;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
       <td class="right">${fmt(m.downloads)}</td>
@@ -1012,8 +1014,8 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   html += `</tr></thead><tbody>`;
 
   sorted.forEach((g, gIdx) => {
-    html += `<tr class="l3-row" data-l3-l2="${l2Idx}" data-l3-model-idx="${modelIdx}" data-l3-parent="${parentId}" data-l3-idx="${gIdx}" data-l3-author="${g.author}">
-      <td><span class="toggle" id="t3-${l2Idx}-${modelIdx}-${gIdx}">▶</span><a href="https://huggingface.co/${g.author}" target="_blank">${g.author}</a></td>
+    html += `<tr class="l3-row" data-l3-l2="${l2Idx}" data-l3-model-idx="${modelIdx}" data-l3-parent="${escapeHtml(parentId)}" data-l3-idx="${gIdx}" data-l3-author="${escapeHtml(g.author)}">
+      <td><span class="toggle" id="t3-${l2Idx}-${modelIdx}-${gIdx}">▶</span><a href="https://huggingface.co/${escapeHtml(g.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(g.author)}</a></td>
       <td class="right">${g.count}</td>
       <td class="right">${fmt(g.totalDownloads)}</td>
       <td class="right"></td>
@@ -1096,8 +1098,8 @@ function renderL4(l2Idx, modelIdx, gIdx, quants, container) {
 
   sorted.forEach(q => {
     html += `<tr class="l4-row">
-      <td><a href="https://huggingface.co/${q.id}" target="_blank" title="${q.id.split("/").slice(1).join("/")}">${truncate(q.id.split("/").slice(1).join("/"), 64)}</a></td>
-      <td><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${q.q_method}</span></td>
+      <td><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.id.split("/").slice(1).join("/"))}">${escapeHtml(truncate(q.id.split("/").slice(1).join("/"), 64))}</a></td>
+      <td><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
       <td class="right">${fmt(q.downloads)}</td>
       <td class="right"><span class="likes-icon">♥</span>${fmt(q.likes)}</td>
       <td class="right">${fmtDate(q.lastModified)}</td>
@@ -1424,58 +1426,60 @@ async function fetchTasks(tasks) {
 }
 
 async function injectBaseModels(all) {
-  const needed = new Map();
-  const seen = new Set(all.map(m => m.id));
-  const snapshot = all.slice();
-  const existingParents = new Set();
-
-  for (const m of snapshot) {
-    if (!isInDateRange(m.lastModified)) continue;
-    const cd = m.cardData;
-    if (!cd) continue;
-    const bm = cd.base_model;
-    if (!bm) continue;
-    const baseId = Array.isArray(bm) ? bm[0] : bm;
-    if (seen.has(baseId)) {
-      existingParents.add(baseId);
-    } else if (!isBase(m)) {
-      needed.set(baseId, baseId.split("/")[0]);
-    }
-  }
-
   _injectedBaseIds.clear();
-  for (const baseId of existingParents) {
-    const parent = all.find(m => m.id === baseId);
-    if (parent) {
-      parent._injected = true;
-      _injectedBaseIds.add(baseId);
-    }
-  }
-
-  if (needed.size === 0) return;
-
+  const seen = new Set(all.map(m => m.id));
   const status = document.getElementById("status");
-  status.textContent = `Resolving ${needed.size} referenced base models…`;
+  let total = 0;
 
-  let count = 0;
-  const entries = [...needed.entries()];
-  for (let i = 0; i < entries.length; i += 5) {
-    const batch = entries.slice(i, i + 5);
-    await Promise.all(batch.map(async ([baseId]) => {
+  for (let i = 0; i < all.length; i++) {
+    const m = all[i];
+    if (!isInDateRange(m.lastModified)) continue;
+
+    let baseId = null;
+    const cd = m.cardData;
+    const bm = cd && cd.base_model;
+
+    if (bm) {
+      baseId = Array.isArray(bm) ? bm[0] : bm;
+    } else {
+      const idLower = m.id.toLowerCase();
+      if (!Q_METHODS.some(t => idLower.includes(t))) continue;
+      const bits = m.id.split('/');
+      let name = bits[1];
+      while (name.length > 0) {
+        const dash = name.lastIndexOf('-');
+        if (dash <= 0) break;
+        name = name.substring(0, dash);
+        const candId = bits[0] + '/' + name;
+        if (seen.has(candId)) { baseId = candId; break; }
+        if (name.match(/\d+\.?\d*[Bb]/) || name.match(/\d+[Mm]/)) { baseId = candId; break; }
+      }
+      if (!baseId) continue;
+    }
+
+    if (seen.has(baseId)) {
+      const parent = all.find(p => p.id === baseId);
+      if (parent) {
+        parent._injected = true;
+        _injectedBaseIds.add(baseId);
+      }
+    } else if (!bm || !isBase(m)) {
       try {
+        total++;
+        status.textContent = `Resolving base models… (${total})`;
         const full = await fetchJson(`https://huggingface.co/api/models/${baseId}?full=true`);
         full.paramB = getParamCount(full);
         full._injected = true;
         all.push(full);
+        seen.add(baseId);
         _injectedBaseIds.add(baseId);
-        count++;
       } catch (e) {
         console.warn("Failed to fetch base model", baseId, e);
       }
-    }));
-    status.textContent = `Resolving referenced base models… (${Math.min(count, needed.size)}/${needed.size})`;
+    }
   }
 
+  all.forEach(m => { if (m._injected) _injectedBaseIds.add(m.id); });
   status.textContent = "";
 }
 (() => {
