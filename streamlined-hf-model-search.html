@@ -441,6 +441,15 @@ function getOrphanQuantMethod(modelId) {
   return Q_METHODS.filter(t => idLower.includes(t));
 }
 
+function isNestedQuant(m, knownIds) {
+  const cd = m.cardData;
+  if (!cd || !cd.base_model) return false;
+  const idLower = m.id.toLowerCase();
+  if (!Q_METHODS.some(t => idLower.includes(t))) return false;
+  const bm = Array.isArray(cd.base_model) ? cd.base_model[0] : cd.base_model;
+  return knownIds.has(bm);
+}
+
 function buildCanonicalAuthors() {
   _canonicalAuthor = {};
   const byName = {};
@@ -568,6 +577,7 @@ function computeAuthorData() {
     if (!modelPassesAllFilters(m)) return;
     if (!isBase(m)) return;
     if (isOrphanQuant(m, knownIds)) return;
+    if (isNestedQuant(m, knownIds)) return;
     if (isCanonicalCopy(m)) return;
     const author = m.id.split("/")[0];
     if (!map[author]) map[author] = { author, count: 0, totalDownloads: 0, totalLikes: 0 };
@@ -909,12 +919,18 @@ async function loadAuthorModels(idx, author, container) {
       tags: m.tags || [],
       paramB: getParamCount(m),
       pipeline_tag: m.pipeline_tag || "",
-      _orphanQuant: isOrphanQuant(m, authorKnownIds)
+      _orphanQuant: isOrphanQuant(m, authorKnownIds),
+      _nestedQuant: m.cardData && m.cardData.base_model ? (() => {
+          const idLower = m.id.toLowerCase();
+          if (!Q_METHODS.some(t => idLower.includes(t))) return false;
+          const bm = Array.isArray(m.cardData.base_model) ? m.cardData.base_model[0] : m.cardData.base_model;
+          return authorKnownIds.has(bm);
+        })() : false
     }));
 
     cacheSet(author, baseModels);
 
-    const filterApplied = () => baseModels.filter(m => !m._orphanQuant && modelPassesAllFilters(m));
+    const filterApplied = () => baseModels.filter(m => !m._orphanQuant && !m._nestedQuant && modelPassesAllFilters(m));
 
     const dated = filterApplied();
 
@@ -1102,7 +1118,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
         if (hasBaseModel || (nameMatches && isQuant)) {
             const childAuthor = m.id.split("/")[0];
             const parentAuthor = parentId.split("/")[0];
-            if (hasBaseModel && childAuthor === parentAuthor) continue;
+            if (hasBaseModel && childAuthor === parentAuthor && !isQuant) continue;
             if (!hasBaseModel && !isQuant && childAuthor === parentAuthor) continue;
             const qMethods = Q_METHODS.filter(t => idLower.includes(t) || tagsStr.includes(t));
             let qMethod = qMethods.length ? qMethods.join(", ") : (hasBaseModel ? "finetune" : (tagsStr.includes("safetensors") ? "safetensors" : "derivative"));
@@ -1291,7 +1307,7 @@ function refreshAllExpanded() {
     if (tog) tog.classList.add("open");
     const models = cacheGet(author);
     if (models) {
-      renderL2(idx, author, models.filter(m => !m._orphanQuant && modelPassesAllFilters(m)), inner);
+      renderL2(idx, author, models.filter(m => !m._orphanQuant && !m._nestedQuant && modelPassesAllFilters(m)), inner);
     }
   }
 
@@ -1591,7 +1607,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
         inner.innerHTML = '<div class="detail-loading">Fetching base models…</div>';
         loadAuthorModels(idx, author, inner);
       } else {
-        renderL2(idx, author, baseModels.filter(m => !m._orphanQuant && modelPassesAllFilters(m)), inner);
+        renderL2(idx, author, baseModels.filter(m => !m._orphanQuant && !m._nestedQuant && modelPassesAllFilters(m)), inner);
       }
     } else {
       detailRow.style.display = "none";
