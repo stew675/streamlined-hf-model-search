@@ -1357,22 +1357,22 @@ function buildDateSlider() {
   const sliderMarkDirty = debounce(markDirty, CONFIG.DEBOUNCE_MS);
   from.addEventListener("input", () => {
     let nv = parseInt(from.value), tv = parseInt(to.value);
-    if (nv >= tv - 1) { to.value = String(Math.min(nv + 1, CONFIG.DATE_SLIDER_MAX)); read(); } else { read(); }
+    if (nv >= tv - 1) { to.value = String(Math.min(nv + 1, CONFIG.DATE_SLIDER_MAX)); read(); if (sliderFrom >= sliderTo - 1) { from.value = String(sliderTo - 1); read(); } } else { read(); }
     updateDateUI();
   });
   from.addEventListener("change", () => {
     let fv = parseInt(from.value), tv = parseInt(to.value);
-    if (fv >= tv - 1) { to.value = String(Math.min(fv + 1, CONFIG.DATE_SLIDER_MAX)); read(); }
+    if (fv >= tv - 1) { to.value = String(Math.min(fv + 1, CONFIG.DATE_SLIDER_MAX)); read(); if (sliderFrom >= sliderTo - 1) { from.value = String(sliderTo - 1); read(); } }
     sliderMarkDirty();
   });
   to.addEventListener("input", () => {
     let nv = parseInt(to.value), fv = parseInt(from.value);
-    if (nv <= fv + 1) { from.value = String(Math.max(nv - 1, 0)); read(); } else { read(); }
+    if (nv <= fv + 1) { from.value = String(Math.max(nv - 1, 0)); read(); if (sliderTo <= sliderFrom + 1) { to.value = String(sliderFrom + 1); read(); } } else { read(); }
     updateDateUI();
   });
   to.addEventListener("change", () => {
     let fv = parseInt(from.value), tv = parseInt(to.value);
-    if (tv <= fv + 1) { from.value = String(Math.max(tv - 1, 0)); read(); }
+    if (tv <= fv + 1) { from.value = String(Math.max(tv - 1, 0)); read(); if (sliderTo <= sliderFrom + 1) { to.value = String(sliderFrom + 1); read(); } }
     sliderMarkDirty();
   });
 
@@ -1502,22 +1502,22 @@ function buildParamSlider() {
   const sliderMarkDirty = debounce(markDirty, CONFIG.DEBOUNCE_MS);
   from.addEventListener("input", () => {
     let nv = parseInt(from.value), tv = parseInt(to.value);
-    if (nv >= tv - (CONFIG.PARAM_MIN_GAP - 1)) { to.value = String(Math.min(nv + CONFIG.PARAM_MIN_GAP, parseInt(to.max))); read(); } else { read(); }
+    if (nv >= tv - (CONFIG.PARAM_MIN_GAP - 1)) { to.value = String(Math.min(nv + CONFIG.PARAM_MIN_GAP, parseInt(to.max))); read(); if (paramSliderFrom >= paramSliderTo - (CONFIG.PARAM_MIN_GAP - 1)) { from.value = String(paramSliderTo - CONFIG.PARAM_MIN_GAP); read(); } } else { read(); }
     updateParamUI();
   });
   from.addEventListener("change", () => {
     let fv = parseInt(from.value), tv = parseInt(to.value);
-    if (fv >= tv - (CONFIG.PARAM_MIN_GAP - 1)) { to.value = String(Math.min(fv + CONFIG.PARAM_MIN_GAP, parseInt(to.max))); read(); }
+    if (fv >= tv - (CONFIG.PARAM_MIN_GAP - 1)) { to.value = String(Math.min(fv + CONFIG.PARAM_MIN_GAP, parseInt(to.max))); read(); if (paramSliderFrom >= paramSliderTo - (CONFIG.PARAM_MIN_GAP - 1)) { from.value = String(paramSliderTo - CONFIG.PARAM_MIN_GAP); read(); } }
     sliderMarkDirty();
   });
   to.addEventListener("input", () => {
     let nv = parseInt(to.value), fv = parseInt(from.value);
-    if (nv <= fv + (CONFIG.PARAM_MIN_GAP - 1)) { from.value = String(Math.max(nv - CONFIG.PARAM_MIN_GAP, 0)); read(); } else { read(); }
+    if (nv <= fv + (CONFIG.PARAM_MIN_GAP - 1)) { from.value = String(Math.max(nv - CONFIG.PARAM_MIN_GAP, 0)); read(); if (paramSliderTo <= paramSliderFrom + (CONFIG.PARAM_MIN_GAP - 1)) { to.value = String(paramSliderFrom + CONFIG.PARAM_MIN_GAP); read(); } } else { read(); }
     updateParamUI();
   });
   to.addEventListener("change", () => {
     let fv = parseInt(from.value), tv = parseInt(to.value);
-    if (tv <= fv + (CONFIG.PARAM_MIN_GAP - 1)) { from.value = String(Math.max(tv - CONFIG.PARAM_MIN_GAP, 0)); read(); }
+    if (tv <= fv + (CONFIG.PARAM_MIN_GAP - 1)) { from.value = String(Math.max(tv - CONFIG.PARAM_MIN_GAP, 0)); read(); if (paramSliderTo <= paramSliderFrom + (CONFIG.PARAM_MIN_GAP - 1)) { to.value = String(paramSliderFrom + CONFIG.PARAM_MIN_GAP); read(); } }
     sliderMarkDirty();
   });
 
