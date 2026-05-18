@@ -14,8 +14,8 @@
   th.right, td.right { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .updated-cell { padding-left: 10px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .updated-header { text-align: center !important; }
-  td.params-cell { padding-right: 10px; text-align: right; }
-  td.models-cell { padding-right: 10px; text-align: right; }
+  th.params-cell, td.params-cell { padding-right: 20px; text-align: center;  }
+  td.models-cell { padding-right: 20px; text-align: right; }
   /* L1 column widths */
   #main-table > thead > tr > th:nth-child(2),
   #main-table > tbody > tr > td:nth-child(2) { width: 130px; }
@@ -24,7 +24,8 @@
   #main-table > thead > tr > th:nth-child(4),
   #main-table > tbody > tr > td:nth-child(4) { width: 120px; }
   th { background: #161b22; padding: 8px 10px; text-align: left; cursor: pointer;
-       user-select: none; border-bottom: 2px solid #30363d; position: sticky; top: 0; transition: background 0.15s, border-color 0.15s; }
+        user-select: none; border-bottom: 2px solid #30363d; position: sticky; top: 0; transition: background 0.15s, border-color 0.15s; }
+   tr > th:not(:last-child), tr > td:not(:last-child) { border-right: 1px solid #21262d; }
   th:hover { background: #1c2129; }
   th.sorted { background: #1c2129; border-bottom-color: #58a6ff; }
   th .arrow { margin-left: 4px; font-size: 0.7rem; color: #58a6ff; }
@@ -34,6 +35,7 @@
   a { color: #58a6ff; text-decoration: none; transition: color 0.15s; }
   a:hover { text-decoration: underline; color: #79c0ff; }
   .right { text-align: right; }
+  th.center, td.center { text-align: center; }
   .task { text-align: left; white-space: nowrap; }
   #count { font-size: 0.85rem; color: #8b949e; margin-top: 8px; }
 
@@ -1046,7 +1048,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
     { key: "paramB", label: "Params", cls: "params-cell" },
     { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header" },
     { key: "downloads", label: "Downloads", cls: "right" },
-    { key: "likes", label: "Likes", cls: "right" }
+    { key: "likes", label: "Likes", cls: "center" }
   ];
 
   let html = `<table><colgroup><col><col width="80"><col width="140"><col width="110"><col width="80"></colgroup><thead><tr>`;
@@ -1064,7 +1066,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
       <td class="params-cell" style="font-size:0.78rem">${m.paramB != null ? paramValueToLabel(m.paramB) : "—"}</td>
       <td class="updated-cell">${fmtDate(m.lastModified)} <span style="color:#484f58;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
       <td class="right">${fmt(m.downloads)}</td>
-      <td class="right"><span class="likes-icon">♥</span>${fmt(m.likes)}</td>
+      <td class="center"><span class="likes-icon">♥</span>${fmt(m.likes)}</td>
     </tr>
     <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none"><td colspan="5"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
   });
