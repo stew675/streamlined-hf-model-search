@@ -997,7 +997,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
 
 // ── Level 3: Quant Author Groups ──
 function renderL3(l2Idx, modelIdx, parentId, children, container) {
-  const filtered = children.filter(c => matchesFilter(c.q_method));
+  const filtered = children.filter(c => matchesFilter(c.q_method) && isInDateRange(c.lastModified));
   const groups = {};
   filtered.forEach(c => {
     if (!groups[c.author]) groups[c.author] = [];
@@ -1073,7 +1073,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
           tog.classList.add("open");
           expandedSections.add(detailRow.id);
           const allChildren = cache[`children-${parentId}`] || [];
-          const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method));
+          const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
           renderL4(l2Idx, modelIdx, gIdx, quants, inner);
         } else {
           detailRow.style.display = "none";
@@ -1180,7 +1180,7 @@ function refreshAllExpanded() {
       const parentId = tr.dataset.l3Parent;
       const author = tr.dataset.l3Author;
       const allChildren = cache[`children-${parentId}`] || [];
-      const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method));
+      const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
       const inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
       renderL4(l2Idx, modelIdx, gIdx, quants, inner);
     }
