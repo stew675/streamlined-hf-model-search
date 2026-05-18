@@ -1528,6 +1528,9 @@ async function injectBaseModels(all) {
   buildDateSlider();
   buildParamSlider();
   buildParamLegend();
+  const sliderResize = new ResizeObserver(() => { updateDateUI(); updateParamUI(); });
+  sliderResize.observe(document.getElementById("date-slider"));
+  sliderResize.observe(document.getElementById("param-slider"));
   reseedActiveTaskFilters();
   syncFilterChips();
   markDirty();
