@@ -75,7 +75,7 @@
            background: #1f6feb33; color: #58a6ff; border: 1px solid #1f6feb55; margin: 1px 2px; box-shadow: 0 0 4px #1f6feb22; }
   .badge.deriv { background: #23863633; color: #3fb950; border-color: #23863655; box-shadow: 0 0 4px #23863622; }
   .badge.orphan { background: #d2992233; color: #e3b341; border-color: #d2992255; box-shadow: 0 0 4px #d2992222; }
-  .likes-icon { color: #f85149; margin-right: 2px; }
+  .likes-icon { color: #f85149; margin-left: 2px; }
   .cell-flex { display: flex; align-items: center; }
 
  /* Filter bar */
@@ -1077,7 +1077,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
     { key: "id", label: "Model ID" },
     { key: "paramB", label: "Params", cls: "params-cell", width: 160 },
     { key: "downloads", label: "Downloads", cls: "right", width: 110 },
-    { key: "likes", label: "Likes", cls: "center", width: 80 },
+    { key: "likes", label: "Likes", cls: "right", width: 80 },
     { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header", width: 135 }
   ];
 
@@ -1092,7 +1092,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
       <td><span class="toggle" id="t2-${idx}-${mIdx}">▶</span>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(truncate(m.id.split("/").slice(1).join("/"), 40))}</a></td>
       <td class="params-cell" style="font-size:0.78rem">${m.paramB != null ? paramValueToLabel(m.paramB) : "—"}</td>
       <td class="right">${fmt(m.downloads)}</td>
-      <td class="center"><span class="likes-icon">♥</span>${fmt(m.likes)}</td>
+      <td class="right">${fmt(m.likes)}<span class="likes-icon">♥</span></td>
       <td class="updated-cell">${fmtDate(m.lastModified)} <span style="color:#484f58;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
     </tr>
     <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none"><td colspan="5"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
@@ -1337,7 +1337,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
       <td><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.id.split("/").slice(1).join("/"))}">${escapeHtml(truncate(q.id.split("/").slice(1).join("/"), 64))}</a></td>
       <td class="center"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
       <td class="right">${fmt(q.downloads)}</td>
-      <td class="right"><span class="likes-icon">♥</span>${fmt(q.likes)}</td>
+      <td class="right">${fmt(q.likes)}<span class="likes-icon">♥</span></td>
       <td class="right">${fmtDate(q.lastModified)}</td>
     </tr>`;
   });
