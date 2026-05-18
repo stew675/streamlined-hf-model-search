@@ -296,10 +296,10 @@ const CONFIG = {
   AUTHOR_LIMIT: 1000,
   CHILD_LIMIT: 1000,
   DEBOUNCE_MS: 200,
-  INIT_SLIDER_FROM: 68,
+  INIT_SLIDER_FROM: 79,
   INIT_SLIDER_TO: 80,
-  INIT_PARAM_SLIDER_FROM: 30,
-  INIT_PARAM_SLIDER_TO: 220,
+  INIT_PARAM_SLIDER_FROM: 100,
+  INIT_PARAM_SLIDER_TO: 130,
   CACHE_MAX: 50,
   ALL_FETCHED_MAX: 16384,
 };
@@ -317,7 +317,7 @@ let paramSliderFrom = CONFIG.INIT_PARAM_SLIDER_FROM;
 let paramSliderTo = CONFIG.INIT_PARAM_SLIDER_TO;
 const Q_METHODS = ["awq", "gptq", "bitsandbytes", "eetq", "aqlm", "gguf", "exl2", "marlin", "mlx", "bnb", "fp4", "fp8", "nf4", "int8", "int4", "q8", "q4"];
 const FILTER_DISPLAY = ["awq", "fp4", "fp8", "finetune", "gguf", "mlx", "safetensors", "others"];
-const activeFilters = new Set(FILTER_DISPLAY);
+const activeFilters = new Set(["finetune", "gguf", "safetensors"]);
 const activeTaskFilters = new Set();
 function resolveTasks() {
   return TO_TAGS.filter(t => {
