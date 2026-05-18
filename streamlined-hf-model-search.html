@@ -951,7 +951,7 @@ async function loadAuthorModels(idx, author, container) {
       cells[3].textContent = fmt(dated.reduce((s, m) => s + m.likes, 0));
     }
 
-    renderL2(idx, author, dated, container);
+    renderL2(idx, author, dated, container, baseModels.length);
 
     const unknownModels = dated.filter(m => m.paramB === null);
     if (unknownModels.length > 0) {
@@ -972,7 +972,7 @@ async function loadAuthorModels(idx, author, container) {
         const pruned = filterApplied();
         const detailRow = document.getElementById(`d1-${idx}`);
         if (detailRow && detailRow.style.display !== "none") {
-          renderL2(idx, author, pruned, container);
+          renderL2(idx, author, pruned, container, baseModels.length);
         }
       }
       for (const m of unknownModels) {
@@ -993,7 +993,7 @@ async function loadAuthorModels(idx, author, container) {
       const updated = filterApplied();
       const detailRow = document.getElementById(`d1-${idx}`);
       if (detailRow && detailRow.style.display !== "none") {
-        renderL2(idx, author, updated, container);
+        renderL2(idx, author, updated, container, baseModels.length);
       }
     }
   } catch (err) {
@@ -1002,7 +1002,7 @@ async function loadAuthorModels(idx, author, container) {
 }
 
 // ── Level 2: Base Models ──
-function renderL2(idx, author, models, container) {
+function renderL2(idx, author, models, container, totalBeforeFilter) {
   const state = detailSort[`l2-${author}`] || { key: "downloads", asc: false };
   const sorted = sortRows(models, state.key, state.asc);
 
@@ -1034,9 +1034,10 @@ function renderL2(idx, author, models, container) {
     <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none"><td colspan="5"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
   });
 
-  html += `</tbody></table><div class="detail-count">${models.length} model(s)</div>`;
+  const hidden = (totalBeforeFilter != null && totalBeforeFilter > models.length) ? totalBeforeFilter - models.length : 0;
+  html += `</tbody></table><div class="detail-count">${models.length} model(s)` + (hidden > 0 ? `, <span style="color:#484f58;font-size:0.75rem">+${hidden} hidden by search settings</span>` : '') + `</div>`;
   container.innerHTML = html;
-  container._l2State = { idx, author, models };
+  container._l2State = { idx, author, models, totalBeforeFilter };
 
   if (!container._l2Delegated) {
     container._l2Delegated = true;
@@ -1052,7 +1053,7 @@ function renderL2(idx, author, models, container) {
         if (st.key === key) st.asc = !st.asc;
         else { st.key = key; st.asc = false; }
         detailSort[`l2-${s.author}`] = st;
-        renderL2(s.idx, s.author, s.models, this);
+        renderL2(s.idx, s.author, s.models, this, s.totalBeforeFilter);
         return;
       }
       const tr = e.target.closest("tr.l2-row");
@@ -1307,7 +1308,8 @@ function refreshAllExpanded() {
     if (tog) tog.classList.add("open");
     const models = cacheGet(author);
     if (models) {
-      renderL2(idx, author, models.filter(m => !m._orphanQuant && !m._nestedQuant && modelPassesAllFilters(m)), inner);
+     const filtered = models.filter(m => !m._orphanQuant && !m._nestedQuant && modelPassesAllFilters(m));
+      renderL2(idx, author, filtered, inner, models.length);
     }
   }
 
@@ -1607,7 +1609,8 @@ document.querySelector("#main-table").addEventListener("click", e => {
         inner.innerHTML = '<div class="detail-loading">Fetching base models…</div>';
         loadAuthorModels(idx, author, inner);
       } else {
-        renderL2(idx, author, baseModels.filter(m => !m._orphanQuant && !m._nestedQuant && modelPassesAllFilters(m)), inner);
+        const filtered = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant && modelPassesAllFilters(m));
+        renderL2(idx, author, filtered, inner, baseModels.length);
       }
     } else {
       detailRow.style.display = "none";
