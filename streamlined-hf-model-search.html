@@ -1356,24 +1356,24 @@ function buildDateSlider() {
 
   const sliderMarkDirty = debounce(markDirty, CONFIG.DEBOUNCE_MS);
   from.addEventListener("input", () => {
-    let tv = parseInt(to.value);
-    if (parseInt(from.value) >= tv) from.value = String(tv - 1);
-    read(); updateDateUI();
+    let nv = parseInt(from.value), tv = parseInt(to.value);
+    if (nv >= tv - 1) { to.value = String(Math.min(nv + 1, CONFIG.DATE_SLIDER_MAX)); read(); } else { read(); }
+    updateDateUI();
   });
   from.addEventListener("change", () => {
     let fv = parseInt(from.value), tv = parseInt(to.value);
-    if (fv >= tv) { to.value = String(Math.min(fv + 1, CONFIG.DATE_SLIDER_MAX)); tv = parseInt(to.value); from.value = String(tv - 1); }
-    read(); sliderMarkDirty();
+    if (fv >= tv - 1) { to.value = String(Math.min(fv + 1, CONFIG.DATE_SLIDER_MAX)); read(); }
+    sliderMarkDirty();
   });
   to.addEventListener("input", () => {
-    let fv = parseInt(from.value);
-    if (parseInt(to.value) <= fv) to.value = String(fv + 1);
-    read(); updateDateUI();
+    let nv = parseInt(to.value), fv = parseInt(from.value);
+    if (nv <= fv + 1) { from.value = String(Math.max(nv - 1, 0)); read(); } else { read(); }
+    updateDateUI();
   });
   to.addEventListener("change", () => {
     let fv = parseInt(from.value), tv = parseInt(to.value);
-    if (tv <= fv) { from.value = String(Math.max(tv - 1, 0)); fv = parseInt(from.value); to.value = String(fv + 1); }
-    read(); sliderMarkDirty();
+    if (tv <= fv + 1) { from.value = String(Math.max(tv - 1, 0)); read(); }
+    sliderMarkDirty();
   });
 
   updateDateUI();
@@ -1501,24 +1501,24 @@ function buildParamSlider() {
 
   const sliderMarkDirty = debounce(markDirty, CONFIG.DEBOUNCE_MS);
   from.addEventListener("input", () => {
-    let tv = parseInt(to.value);
-    if (parseInt(from.value) >= tv - (CONFIG.PARAM_MIN_GAP - 1)) from.value = String(Math.max(tv - CONFIG.PARAM_MIN_GAP, 0));
-    read(); updateParamUI();
+    let nv = parseInt(from.value), tv = parseInt(to.value);
+    if (nv >= tv - (CONFIG.PARAM_MIN_GAP - 1)) { to.value = String(Math.min(nv + CONFIG.PARAM_MIN_GAP, parseInt(to.max))); read(); } else { read(); }
+    updateParamUI();
   });
   from.addEventListener("change", () => {
     let fv = parseInt(from.value), tv = parseInt(to.value);
-    if (fv >= tv - (CONFIG.PARAM_MIN_GAP - 1)) { to.value = String(Math.min(fv + CONFIG.PARAM_MIN_GAP, parseInt(to.max))); tv = parseInt(to.value); from.value = String(tv - CONFIG.PARAM_MIN_GAP); }
-    read(); sliderMarkDirty();
+    if (fv >= tv - (CONFIG.PARAM_MIN_GAP - 1)) { to.value = String(Math.min(fv + CONFIG.PARAM_MIN_GAP, parseInt(to.max))); read(); }
+    sliderMarkDirty();
   });
   to.addEventListener("input", () => {
-    let fv = parseInt(from.value);
-    if (parseInt(to.value) <= fv + (CONFIG.PARAM_MIN_GAP - 1)) to.value = String(fv + CONFIG.PARAM_MIN_GAP);
-    read(); updateParamUI();
+    let nv = parseInt(to.value), fv = parseInt(from.value);
+    if (nv <= fv + (CONFIG.PARAM_MIN_GAP - 1)) { from.value = String(Math.max(nv - CONFIG.PARAM_MIN_GAP, 0)); read(); } else { read(); }
+    updateParamUI();
   });
   to.addEventListener("change", () => {
     let fv = parseInt(from.value), tv = parseInt(to.value);
-    if (tv <= fv + (CONFIG.PARAM_MIN_GAP - 1)) { from.value = String(Math.max(tv - CONFIG.PARAM_MIN_GAP, 0)); fv = parseInt(from.value); to.value = String(fv + CONFIG.PARAM_MIN_GAP); }
-    read(); sliderMarkDirty();
+    if (tv <= fv + (CONFIG.PARAM_MIN_GAP - 1)) { from.value = String(Math.max(tv - CONFIG.PARAM_MIN_GAP, 0)); read(); }
+    sliderMarkDirty();
   });
 
   updateParamUI();
