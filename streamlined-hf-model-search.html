@@ -867,22 +867,44 @@ function applyBarLogic(option, options, activeSet) {
   }
 }
 
-function sortRows(rows, key, asc) {
+function sortRows(rows, key, asc, subKey) {
+  const coerce = v => {
+    let va = v;
+    if (["downloads", "likes", "totalDownloads", "totalLikes", "count", "paramB"].includes(key)) { va = Number(va); }
+    else if (["created_at", "updated_at", "lastModified"].includes(key)) { va = new Date(va || 0).getTime(); }
+    else { va = String(va || "").toLowerCase(); }
+    return va;
+  };
+  const subCoerce = v => {
+    if (!subKey) return null;
+    let sv = v;
+    if (["downloads", "likes", "totalDownloads", "totalLikes", "count", "paramB"].includes(subKey)) { sv = Number(sv); }
+    else if (["created_at", "updated_at", "lastModified"].includes(subKey)) { sv = new Date(sv || 0).getTime(); }
+    else { sv = String(sv || "").toLowerCase(); }
+    return sv;
+  };
   return rows.slice().sort((a, b) => {
-    let va = a[key], vb = b[key];
-    if (["downloads", "likes", "totalDownloads", "totalLikes", "count", "paramB"].includes(key)) { va = Number(va); vb = Number(vb); }
-    else if (["created_at", "updated_at", "lastModified"].includes(key)) { va = new Date(va || 0).getTime(); vb = new Date(vb || 0).getTime(); }
-    else { va = String(va || "").toLowerCase(); vb = String(vb || "").toLowerCase(); }
-    if (va < vb) return asc ? -1 : 1;
-    if (va > vb) return asc ? 1 : -1;
-    return 0;
+    let cmp = 0;
+    if (subKey && a[key] != null && b[key] != null && a[key] === b[key]) {
+      const sa = subCoerce(a[subKey]);
+      const sb = subCoerce(b[subKey]);
+      if (sa < sb) return -1;
+      if (sa > sb) return 1;
+      cmp = 0;
+    } else {
+      let va = coerce(a[key]), vb = coerce(b[key]);
+      if (va < vb) cmp = -1;
+      else if (va > vb) cmp = 1;
+      else cmp = 0;
+    }
+    return asc ? cmp : -cmp;
   });
 }
 
 // ── Level 1: Authors ──
 function renderMain(authorData) {
   const tbody = document.getElementById("body");
-  const sorted = sortRows(authorData, sortKey, sortAsc);
+  const sorted = sortRows(authorData, sortKey, sortAsc, sortKey === "author" ? undefined : "author");
 
   let html = "";
   sorted.forEach((a, idx) => {
@@ -930,7 +952,8 @@ async function loadAuthorModels(idx, author, container) {
 
     cacheSet(author, baseModels);
 
-    const filterApplied = () => baseModels.filter(m => !m._orphanQuant && !m._nestedQuant && modelPassesAllFilters(m));
+    const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
+    const filterApplied = () => nonQuantBase.filter(m => modelPassesAllFilters(m));
 
     const dated = filterApplied();
 
@@ -951,7 +974,7 @@ async function loadAuthorModels(idx, author, container) {
       cells[3].textContent = fmt(dated.reduce((s, m) => s + m.likes, 0));
     }
 
-    renderL2(idx, author, dated, container, baseModels.length);
+    renderL2(idx, author, dated, container, nonQuantBase.length);
 
     const unknownModels = dated.filter(m => m.paramB === null);
     if (unknownModels.length > 0) {
@@ -1004,7 +1027,7 @@ async function loadAuthorModels(idx, author, container) {
 // ── Level 2: Base Models ──
 function renderL2(idx, author, models, container, totalBeforeFilter) {
   const state = detailSort[`l2-${author}`] || { key: "downloads", asc: false };
-  const sorted = sortRows(models, state.key, state.asc);
+  const sorted = sortRows(models, state.key, state.asc, state.key === "id" ? undefined : "id");
 
   const cols = [
     { key: "id", label: "Model ID" },
@@ -1162,7 +1185,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   }));
 
   const state = detailSort[`l3-${parentId}`] || { key: "totalDownloads", asc: false };
-  const sorted = sortRows(groupEntries, state.key, state.asc);
+  const sorted = sortRows(groupEntries, state.key, state.asc, state.key === "author" ? undefined : "author");
 
   const cols = [
     { key: "author", label: "Quant Author" },
@@ -1242,7 +1265,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
   const st = detailSort[`l4-${parentId}-${author}`] || { key: "downloads", asc: false };
   
   // FIX: Pass st.key and st.asc explicitly to sortRows
-  const sorted = sortRows(quants, st.key, st.asc);
+  const sorted = sortRows(quants, st.key, st.asc, st.key === "id" ? undefined : "id");
 
   const cols = [
     { key: "id", label: "Model ID" },
@@ -1308,8 +1331,9 @@ function refreshAllExpanded() {
     if (tog) tog.classList.add("open");
     const models = cacheGet(author);
     if (models) {
-     const filtered = models.filter(m => !m._orphanQuant && !m._nestedQuant && modelPassesAllFilters(m));
-      renderL2(idx, author, filtered, inner, models.length);
+     const nonQuantBase = models.filter(m => !m._orphanQuant && !m._nestedQuant);
+      const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
+      renderL2(idx, author, filtered, inner, nonQuantBase.length);
     }
   }
 
@@ -1609,8 +1633,9 @@ document.querySelector("#main-table").addEventListener("click", e => {
         inner.innerHTML = '<div class="detail-loading">Fetching base models…</div>';
         loadAuthorModels(idx, author, inner);
       } else {
-        const filtered = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant && modelPassesAllFilters(m));
-        renderL2(idx, author, filtered, inner, baseModels.length);
+        const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
+        const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
+        renderL2(idx, author, filtered, inner, nonQuantBase.length);
       }
     } else {
       detailRow.style.display = "none";
