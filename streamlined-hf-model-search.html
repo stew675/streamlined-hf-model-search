@@ -627,6 +627,7 @@ function cacheGet(key) {
   return v;
 }
 const expandedSections = new Set();
+const _inflightChildren = new Map();
 
 function pruneExpiredExpansions() {
   for (const key of [...expandedSections]) {
@@ -941,6 +942,7 @@ function renderMain(authorData) {
 }
 
 async function loadAuthorModels(idx, author, container) {
+  const gen = _fetchGeneration;
   try {
     const models = cacheGet(author + "_models") || await fetchJson(
       `https://huggingface.co/api/models?author=${author}&sort=downloads&direction=-1&limit=${CONFIG.AUTHOR_LIMIT}&full=true&cardData=true`
@@ -974,6 +976,7 @@ async function loadAuthorModels(idx, author, container) {
 
     const dated = filterApplied();
 
+    if (gen !== _fetchGeneration) return;
     const ad = _authorData;
     for (const a of ad) {
       if (a.author === author) {
@@ -991,6 +994,7 @@ async function loadAuthorModels(idx, author, container) {
       cells[3].textContent = fmt(dated.reduce((s, m) => s + m.likes, 0));
     }
 
+    if (gen !== _fetchGeneration) return;
     renderL2(idx, author, dated, container, nonQuantBase.length);
 
     const unknownModels = dated.filter(m => m.paramB === null);
@@ -1009,6 +1013,7 @@ async function loadAuthorModels(idx, author, container) {
             console.warn("Failed to fetch param for", m.id, e);
           }
         }));
+        if (gen !== _fetchGeneration) return;
         const pruned = filterApplied();
         const detailRow = document.getElementById(`d1-${idx}`);
         if (detailRow && detailRow.style.display !== "none") {
@@ -1029,6 +1034,7 @@ async function loadAuthorModels(idx, author, container) {
           if (parent) { m.paramB = parent.paramB; break; }
         }
       }
+      if (gen !== _fetchGeneration) return;
       statusEl.textContent = "";
       const updated = filterApplied();
       const detailRow = document.getElementById(`d1-${idx}`);
@@ -1142,58 +1148,74 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
 }
 
 async function loadChildren(l2Idx, modelIdx, parentId, container) {
-  try {
-    const modelName = parentId.split("/").slice(1).join("/");
-    const results = [];
-    const seen = new Set();
+  const cacheKey = `children-${parentId}`;
 
-    const searches = [
-      `https://huggingface.co/api/models?search=${encodeURIComponent(parentId)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`,
-      `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`
-    ];
+  // Deduplicate concurrent fetches for the same parent
+  if (_inflightChildren.has(cacheKey)) {
+    await _inflightChildren.get(cacheKey);
+    const cached = cacheGet(cacheKey);
+    if (cached) renderL3(l2Idx, modelIdx, parentId, cached, container);
+    return;
+  }
 
-    for (const url of searches) {
-      const models = await fetchJson(url);
-      for (const m of models) {
-        if (m.id === parentId || seen.has(m.id)) continue;
-        seen.add(m.id);
+  const promise = (async () => {
+    try {
+      const modelName = parentId.split("/").slice(1).join("/");
+      const results = [];
+      const seen = new Set();
 
-        const cd = m.cardData || {};
-        const baseModel = cd.base_model;
-        const idLower = m.id.toLowerCase();
-        const tagsStr = (m.tags || []).join(" ").toLowerCase();
-        const isQuant = Q_METHODS.some(t => idLower.includes(t) || tagsStr.includes(t));
-        const hasBaseModel = baseModel === parentId ||
-                             Array.isArray(baseModel) && baseModel.some(b => b === parentId);
-        const nameMatches = idLower.includes(modelName.toLowerCase());
+      const searches = [
+        `https://huggingface.co/api/models?search=${encodeURIComponent(parentId)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`,
+        `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`
+      ];
 
-        if (hasBaseModel || (nameMatches && isQuant)) {
-            const childAuthor = m.id.split("/")[0];
-            const parentAuthor = parentId.split("/")[0];
-            if (hasBaseModel && childAuthor === parentAuthor && !isQuant) continue;
-            if (!hasBaseModel && !isQuant && childAuthor === parentAuthor) continue;
-            const qMethods = Q_METHODS.filter(t => idLower.includes(t) || tagsStr.includes(t));
-            let qMethod = qMethods.length ? qMethods.join(", ") : (hasBaseModel ? "finetune" : (tagsStr.includes("safetensors") ? "safetensors" : "derivative"));
-            results.push({
-            id: m.id,
-            author: m.id.split("/")[0],
-            downloads: m.downloads || 0,
-            likes: m.likes || 0,
-            created_at: m.createdAt || "",
-            updated_at: m.lastModified || "",
-            lastModified: m.lastModified || "",
-            q_method: qMethod,
-            tags: m.tags || []
-          });
+      for (const url of searches) {
+        const models = await fetchJson(url);
+        for (const m of models) {
+          if (m.id === parentId || seen.has(m.id)) continue;
+          seen.add(m.id);
+
+          const cd = m.cardData || {};
+          const baseModel = cd.base_model;
+          const idLower = m.id.toLowerCase();
+          const tagsStr = (m.tags || []).join(" ").toLowerCase();
+          const isQuant = Q_METHODS.some(t => idLower.includes(t) || tagsStr.includes(t));
+          const hasBaseModel = baseModel === parentId ||
+                               Array.isArray(baseModel) && baseModel.some(b => b === parentId);
+          const nameMatches = idLower.includes(modelName.toLowerCase());
+
+          if (hasBaseModel || (nameMatches && isQuant)) {
+              const childAuthor = m.id.split("/")[0];
+              const parentAuthor = parentId.split("/")[0];
+              if (hasBaseModel && childAuthor === parentAuthor && !isQuant) continue;
+              if (!hasBaseModel && !isQuant && childAuthor === parentAuthor) continue;
+              const qMethods = Q_METHODS.filter(t => idLower.includes(t) || tagsStr.includes(t));
+              let qMethod = qMethods.length ? qMethods.join(", ") : (hasBaseModel ? "finetune" : (tagsStr.includes("safetensors") ? "safetensors" : "derivative"));
+              results.push({
+              id: m.id,
+              author: m.id.split("/")[0],
+              downloads: m.downloads || 0,
+              likes: m.likes || 0,
+              created_at: m.createdAt || "",
+              updated_at: m.lastModified || "",
+              lastModified: m.lastModified || "",
+              q_method: qMethod,
+              tags: m.tags || []
+            });
+          }
         }
       }
-    }
 
-    cacheSet(`children-${parentId}`, results);
-    renderL3(l2Idx, modelIdx, parentId, results, container);
-  } catch (err) {
-    container.innerHTML = `<div class="detail-error">Error: ${err.message}</div>`;
-  }
+      cacheSet(cacheKey, results);
+      renderL3(l2Idx, modelIdx, parentId, results, container);
+    } catch (err) {
+      container.innerHTML = `<div class="detail-error">Error: ${err.message}</div>`;
+    }
+  })();
+
+  _inflightChildren.set(cacheKey, promise);
+  await promise;
+  _inflightChildren.delete(cacheKey);
 }
 
 // ── Level 3: Quant Author Groups ──
@@ -1456,60 +1478,66 @@ function applyFilters() {
   const needUntagged = activeSpecialFilters.has("include untagged") && !fetchedUntagged;
   if (newTasks.length > 0 || needUntagged) {
     (async () => {
-      const status = document.getElementById("status");
-      status.textContent = `Fetching models…`;
-      let fresh = [];
-      if (newTasks.length > 0) {
-        fresh = await fetchTasks(newTasks);
-      }
-      if (gen !== _fetchGeneration) return;
-      if (needUntagged) {
-        const raw = await fetchUntaggedModels();
-        fresh = fresh.concat(raw.filter(m => !m.pipeline_tag));
-        fetchedUntagged = true;
-      }
-      if (gen !== _fetchGeneration) return;
-      const seen = new Set((_allFetched || []).map(m => m.id));
-      const all = [...(_allFetched || [])];
-      for (const m of fresh) {
-        if (!seen.has(m.id)) {
-          seen.add(m.id);
-          all.push(m);
-        }
-      }
-      _allFetched = all;
-      _authorData = computeAuthorData();
-      renderMain(_authorData);
-      updateArrows();
-      pruneExpiredExpansions();
-      saveRestoreExpansions(savedExpansions);
-      refreshAllExpanded();
-      status.textContent = `Rendered ${_authorData.length} authors, resolving base models…`;
       try {
-        await injectBaseModels(all, () => {
-          if (gen !== _fetchGeneration) return;
-          const saved = new Set(expandedSections);
-          _authorData = computeAuthorData();
-          renderMain(_authorData);
-          updateArrows();
-          pruneExpiredExpansions();
-          saveRestoreExpansions(saved);
-          refreshAllExpanded();
-        });
+        const status = document.getElementById("status");
+        status.textContent = `Fetching models…`;
+        let fresh = [];
+        if (newTasks.length > 0) {
+          fresh = await fetchTasks(newTasks);
+        }
+        if (gen !== _fetchGeneration) return;
+        if (needUntagged) {
+          const raw = await fetchUntaggedModels();
+          fresh = fresh.concat(raw.filter(m => !m.pipeline_tag));
+          fetchedUntagged = true;
+        }
+        if (gen !== _fetchGeneration) return;
+        const seen = new Set((_allFetched || []).map(m => m.id));
+        const all = [...(_allFetched || [])];
+        for (const m of fresh) {
+          if (!seen.has(m.id)) {
+            seen.add(m.id);
+            all.push(m);
+          }
+        }
+        _allFetched = all;
+        _authorData = computeAuthorData();
+        renderMain(_authorData);
+        updateArrows();
+        pruneExpiredExpansions();
+        saveRestoreExpansions(savedExpansions);
+        refreshAllExpanded();
+        status.textContent = `Rendered ${_authorData.length} authors, resolving base models…`;
+        try {
+          await injectBaseModels(all, () => {
+            if (gen !== _fetchGeneration) return;
+            const saved = new Set(expandedSections);
+            _authorData = computeAuthorData();
+            renderMain(_authorData);
+            updateArrows();
+            pruneExpiredExpansions();
+            saveRestoreExpansions(saved);
+            refreshAllExpanded();
+          });
+        } catch (e) {
+          console.warn("Base model injection error:", e);
+        }
+        if (gen !== _fetchGeneration) return;
+        if (all.length > CONFIG.ALL_FETCHED_MAX) console.warn(`Cache size ${all.length} exceeds limit ${CONFIG.ALL_FETCHED_MAX}`);
+        status.textContent = "";
+        _authorData = computeAuthorData();
+        renderMain(_authorData);
+        updateArrows();
+        pruneExpiredExpansions();
+        saveRestoreExpansions(savedExpansions);
+        refreshAllExpanded();
       } catch (e) {
-        console.warn("Base model injection error:", e);
+        console.warn("applyFilters error:", e);
+        document.getElementById("status").textContent = "Error: " + e.message;
+      } finally {
+        btn.classList.remove("disabled");
+        btn.textContent = "Refresh";
       }
-      if (gen !== _fetchGeneration) return;
-      if (all.length > CONFIG.ALL_FETCHED_MAX) console.warn(`Cache size ${all.length} exceeds limit ${CONFIG.ALL_FETCHED_MAX}`);
-      status.textContent = "";
-      document.getElementById("get-results-btn").textContent = "Refresh";
-      document.getElementById("get-results-btn").classList.remove("disabled");
-      _authorData = computeAuthorData();
-      renderMain(_authorData);
-      updateArrows();
-      pruneExpiredExpansions();
-      saveRestoreExpansions(savedExpansions);
-      refreshAllExpanded();
     })();
   } else {
     document.getElementById("get-results-btn").textContent = "Refresh";
@@ -1708,6 +1736,8 @@ async function fetchTasks(tasks) {
 }
 
 async function injectBaseModels(all, onBatch) {
+  const gen = _fetchGeneration;
+  if (gen !== _fetchGeneration) return;
   _injectedBaseIds.clear();
   const seen = new Set(all.map(m => m.id));
   const status = document.getElementById("status");
@@ -1715,6 +1745,7 @@ async function injectBaseModels(all, onBatch) {
   const fetchQueue = new Map();
 
   for (let i = 0; i < all.length; i++) {
+    if (gen !== _fetchGeneration) return;
     const m = all[i];
     if (!isInDateRange(m.lastModified)) continue;
 
@@ -1744,7 +1775,7 @@ async function injectBaseModels(all, onBatch) {
       const parent = all.find(p => p.id === baseId);
       if (parent) {
         parent._injected = true;
-        _injectedBaseIds.add(baseId);
+        if (gen === _fetchGeneration) _injectedBaseIds.add(baseId);
       }
     } else if (bm && !isBase(m)) {
       if (!fetchQueue.has(baseId)) {
@@ -1756,6 +1787,7 @@ async function injectBaseModels(all, onBatch) {
   const baseIds = [...fetchQueue.keys()];
   let total = 0;
   for (let i = 0; i < baseIds.length; i += CONFIG.PARAM_BATCH_SIZE) {
+    if (gen !== _fetchGeneration) return;
     const batch = baseIds.slice(i, i + CONFIG.PARAM_BATCH_SIZE);
     total += batch.length;
     status.textContent = `Resolving base models… (${total})`;
@@ -1770,16 +1802,18 @@ async function injectBaseModels(all, onBatch) {
         const full = r.value;
         injected.push(full);
         seen.add(full.id);
-        _injectedBaseIds.add(full.id);
+        if (gen === _fetchGeneration) _injectedBaseIds.add(full.id);
       } else {
         console.warn("Failed to fetch base model", r.reason);
       }
     }
+    if (gen !== _fetchGeneration) return;
     if (onBatch) onBatch();
   }
 
+  if (gen !== _fetchGeneration) return;
   all.push(...injected);
-  all.forEach(m => { if (m._injected) _injectedBaseIds.add(m.id); });
+  all.forEach(m => { if (m._injected && gen === _fetchGeneration) _injectedBaseIds.add(m.id); });
   status.textContent = "";
 }
 (() => {
