@@ -18,9 +18,9 @@
   td.models-cell { padding-right: 10px; text-align: right; }
   /* L1 column widths */
   #main-table > thead > tr > th:nth-child(2),
-  #main-table > tbody > tr > td:nth-child(2) { width: 80px; }
+  #main-table > tbody > tr > td:nth-child(2) { width: 130px; }
   #main-table > thead > tr > th:nth-child(3),
-  #main-table > tbody > tr > td:nth-child(3) { width: 130px; }
+  #main-table > tbody > tr > td:nth-child(3) { width: 160px; }
   #main-table > thead > tr > th:nth-child(4),
   #main-table > tbody > tr > td:nth-child(4) { width: 120px; }
   th { background: #161b22; padding: 8px 10px; text-align: left; cursor: pointer;
@@ -1049,7 +1049,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
     { key: "likes", label: "Likes", cls: "right" }
   ];
 
-  let html = `<table><colgroup><col><col width="65"><col width="140"><col width="120"><col width="90"></colgroup><thead><tr>`;
+  let html = `<table><colgroup><col><col width="80"><col width="140"><col width="110"><col width="80"></colgroup><thead><tr>`;
   cols.forEach(c => {
     const isSorted = state.key === c.key;
     html += `<th data-key="${c.key}" data-level="2" class="${(c.headerCls || c.cls) || ''}${isSorted ? ' sorted' : ''}"${isSorted ? ` aria-sort="${state.asc ? 'ascending' : 'descending'}"` : ''}>${c.label} <span class="arrow">${isSorted ? (state.asc ? "▲" : "▼") : ""}</span></th>`;
