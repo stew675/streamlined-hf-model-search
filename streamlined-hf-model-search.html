@@ -512,12 +512,7 @@ function computeAuthorData() {
   const all = _allFetched || [];
   const map = {};
   all.forEach(m => {
-    if (!m._injected && !isInDateRange(m.lastModified)) return;
-    const tag = m.pipeline_tag;
-    if (!tag && !activeSpecialFilters.has("include untagged")) return;
-    if (!isInParamRange(m.paramB)) return;
-    if (!matchesTaskFilter(tag)) return;
-    if (tag && !activeTaskFilters.has(tag)) return;
+    if (!modelPassesAllFilters(m)) return;
     if (!isBase(m)) return;
     const author = m.id.split("/")[0];
     if (!map[author]) map[author] = { author, count: 0, totalDownloads: 0, totalLikes: 0 };
@@ -861,7 +856,7 @@ async function loadAuthorModels(idx, author, container) {
       cells[3].textContent = fmt(dated.reduce((s, m) => s + m.likes, 0));
     }
 
-    renderL2(idx, dated, container);
+    renderL2(idx, author, dated, container);
 
     const unknownModels = dated.filter(m => m.paramB === null);
     if (unknownModels.length > 0) {
@@ -897,7 +892,7 @@ async function loadAuthorModels(idx, author, container) {
       const updated = filterApplied();
       const detailRow = document.getElementById(`d1-${idx}`);
       if (detailRow && detailRow.style.display !== "none") {
-        renderL2(idx, updated, container);
+        renderL2(idx, author, updated, container);
       }
     }
   } catch (err) {
@@ -906,8 +901,8 @@ async function loadAuthorModels(idx, author, container) {
 }
 
 // ── Level 2: Base Models ──
-function renderL2(idx, models, container) {
-  const state = detailSort[`l2-${idx}`] || { key: "downloads", asc: false };
+function renderL2(idx, author, models, container) {
+  const state = detailSort[`l2-${author}`] || { key: "downloads", asc: false };
   const sorted = sortRows(models, state.key, state.asc);
 
   const cols = [
@@ -938,7 +933,7 @@ function renderL2(idx, models, container) {
 
   html += `</tbody></table><div class="detail-count">${models.length} base model(s)</div>`;
   container.innerHTML = html;
-  container._l2State = { idx, models };
+  container._l2State = { idx, author, models };
 
   if (!container._l2Delegated) {
     container._l2Delegated = true;
@@ -950,11 +945,11 @@ function renderL2(idx, models, container) {
       if (th) {
         if (th.dataset.level !== "2") return;
         const key = th.dataset.key;
-        const st = detailSort[`l2-${s.idx}`] || { key: "downloads", asc: false };
+        const st = detailSort[`l2-${s.author}`] || { key: "downloads", asc: false };
         if (st.key === key) st.asc = !st.asc;
         else { st.key = key; st.asc = false; }
-        detailSort[`l2-${s.idx}`] = st;
-        renderL2(s.idx, s.models, this);
+        detailSort[`l2-${s.author}`] = st;
+        renderL2(s.idx, s.author, s.models, this);
         return;
       }
       const tr = e.target.closest("tr.l2-row");
@@ -1062,7 +1057,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
     quants
   }));
 
-  const state = detailSort[`l3-${l2Idx}-${modelIdx}`] || { key: "totalDownloads", asc: false };
+  const state = detailSort[`l3-${parentId}`] || { key: "totalDownloads", asc: false };
   const sorted = sortRows(groupEntries, state.key, state.asc);
 
   const cols = [
@@ -1103,10 +1098,10 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
         if (th.dataset.level !== "3") return;
         const key = th.dataset.key;
         if (!key) return;
-        const st = detailSort[`l3-${s.l2Idx}-${s.modelIdx}`] || { key: "totalDownloads", asc: false };
+        const st = detailSort[`l3-${s.parentId}`] || { key: "totalDownloads", asc: false };
         if (st.key === key) st.asc = !st.asc;
         else { st.key = key; st.asc = false; }
-        detailSort[`l3-${s.l2Idx}-${s.modelIdx}`] = st;
+        detailSort[`l3-${s.parentId}`] = st;
         renderL3(s.l2Idx, s.modelIdx, s.parentId, s.children, this);
         return;
       }
@@ -1127,7 +1122,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
           expandedSections.add(groupKey);
           const allChildren = cacheGet(`children-${parentId}`) || [];
           const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
-          renderL4(l2Idx, modelIdx, gIdx, quants, inner);
+          renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, inner);
         } else {
           detailRow.style.display = "none";
           tog.classList.remove("open");
@@ -1139,9 +1134,8 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
 }
 
 // ── Level 4: Individual Quantizations ──
-function renderL4(l2Idx, modelIdx, gIdx, quants, container) {
-  // FIX: Define state object first
-  const st = detailSort[`l4-${l2Idx}-${modelIdx}-${gIdx}`] || { key: "downloads", asc: false };
+function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
+  const st = detailSort[`l4-${parentId}-${author}`] || { key: "downloads", asc: false };
   
   // FIX: Pass st.key and st.asc explicitly to sortRows
   const sorted = sortRows(quants, st.key, st.asc);
@@ -1173,7 +1167,7 @@ function renderL4(l2Idx, modelIdx, gIdx, quants, container) {
 
   html += `</tbody></table>`;
   container.innerHTML = html;
-  container._l4State = { l2Idx, modelIdx, gIdx, quants };
+  container._l4State = { l2Idx, modelIdx, gIdx, parentId, author, quants };
 
   if (!container._l4Delegated) {
     container._l4Delegated = true;
@@ -1182,11 +1176,11 @@ function renderL4(l2Idx, modelIdx, gIdx, quants, container) {
       if (!th || th.dataset.level !== "4") return;
       const s = this._l4State;
       const key = th.dataset.key;
-      const st = detailSort[`l4-${s.l2Idx}-${s.modelIdx}-${s.gIdx}`] || { key: "downloads", asc: false };
+      const st = detailSort[`l4-${s.parentId}-${s.author}`] || { key: "downloads", asc: false };
       if (st.key === key) st.asc = !st.asc;
       else { st.key = key; st.asc = false; }
-      detailSort[`l4-${s.l2Idx}-${s.modelIdx}-${s.gIdx}`] = st;
-      renderL4(s.l2Idx, s.modelIdx, s.gIdx, s.quants, this);
+      detailSort[`l4-${s.parentId}-${s.author}`] = st;
+      renderL4(s.l2Idx, s.modelIdx, s.gIdx, s.parentId, s.author, s.quants, this);
     });
   }
 }
@@ -1210,7 +1204,7 @@ function refreshAllExpanded() {
     if (tog) tog.classList.add("open");
     const models = cacheGet(author);
     if (models) {
-      renderL2(idx, models.filter(m => modelPassesAllFilters(m) || _injectedBaseIds.has(m.id)), inner);
+      renderL2(idx, author, models.filter(m => modelPassesAllFilters(m) || _injectedBaseIds.has(m.id)), inner);
     }
   }
 
@@ -1259,7 +1253,7 @@ function refreshAllExpanded() {
     if (tog) tog.classList.add("open");
     const allChildren = cacheGet(`children-${modelId}`) || [];
     const quants = allChildren.filter(c => c.author === groupAuthor && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
-    renderL4(l2Idx, modelIdx, gIdx, quants, inner);
+    renderL4(l2Idx, modelIdx, gIdx, modelId, groupAuthor, quants, inner);
   }
 }
 
@@ -1301,6 +1295,7 @@ function buildDateSlider() {
 function applyFilters() {
   if (!needsUpdate) return;
   needsUpdate = false;
+  expandedSections.clear();
   _fetchGeneration++;
   const gen = _fetchGeneration;
   const btn = document.getElementById("get-results-btn");
@@ -1346,7 +1341,6 @@ function applyFilters() {
       _authorData = computeAuthorData();
       renderMain(_authorData);
       updateArrows();
-      refreshAllExpanded();
     })();
   } else {
     document.getElementById("get-results-btn").textContent = "Refresh";
@@ -1354,7 +1348,6 @@ function applyFilters() {
     _authorData = computeAuthorData();
     renderMain(_authorData);
     updateArrows();
-    refreshAllExpanded();
   }
 }
 
@@ -1486,7 +1479,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
         inner.innerHTML = '<div class="detail-loading">Fetching base models…</div>';
         loadAuthorModels(idx, author, inner);
       } else {
-        renderL2(idx, baseModels.filter(m => modelPassesAllFilters(m) || _injectedBaseIds.has(m.id)), inner);
+        renderL2(idx, author, baseModels.filter(m => modelPassesAllFilters(m) || _injectedBaseIds.has(m.id)), inner);
       }
     } else {
       detailRow.style.display = "none";
@@ -1539,6 +1532,7 @@ async function injectBaseModels(all) {
   _injectedBaseIds.clear();
   const seen = new Set(all.map(m => m.id));
   const status = document.getElementById("status");
+  const injected = [];
   let total = 0;
 
   for (let i = 0; i < all.length; i++) {
@@ -1580,7 +1574,7 @@ async function injectBaseModels(all) {
         const full = await fetchJson(`https://huggingface.co/api/models/${baseId}?full=true`);
         full.paramB = getParamCount(full);
         full._injected = true;
-        all.push(full);
+        injected.push(full);
         seen.add(baseId);
         _injectedBaseIds.add(baseId);
       } catch (e) {
@@ -1589,6 +1583,7 @@ async function injectBaseModels(all) {
     }
   }
 
+  all.push(...injected);
   all.forEach(m => { if (m._injected) _injectedBaseIds.add(m.id); });
   status.textContent = "";
 }
