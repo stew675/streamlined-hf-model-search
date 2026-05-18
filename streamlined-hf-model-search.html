@@ -278,7 +278,25 @@ const DEFAULT_ACTIVE_TAGS = new Set([
   "video-to-video"
 ]);
 const activeSpecialFilters = new Set();
-const LIMIT = 500;
+const CONFIG = {
+  LIMIT: 500,
+  PARAM_SLIDER_MAX: 220,
+  RATE_LIMIT: 10,
+  RATE_WINDOW: 1000,
+  FETCH_TIMEOUT: 60000,
+  MAX_RETRIES: 3,
+  DATE_SLIDER_MAX: 80,
+  DAYS_PER_STEP: 14,
+  PARAM_BATCH_SIZE: 5,
+  PARAM_MIN_GAP: 5,
+  AUTHOR_LIMIT: 1000,
+  CHILD_LIMIT: 1000,
+  DEBOUNCE_MS: 200,
+  INIT_SLIDER_FROM: 68,
+  INIT_SLIDER_TO: 80,
+  INIT_PARAM_SLIDER_FROM: 30,
+  INIT_PARAM_SLIDER_TO: 220,
+};
 const fetchedTasks = new Set();
 let fetchedUntagged = false;
 const _injectedBaseIds = new Set();
@@ -286,11 +304,10 @@ let needsUpdate = false;
 let apiCalls = 0;
 function incApiCalls(n) { apiCalls += n; document.getElementById("api-counter").textContent = "API Calls: " + String(apiCalls); }
 function markDirty() { needsUpdate = true; document.getElementById("get-results-btn").classList.add("ready"); }
-let sliderFrom = 68;
-let sliderTo = 80;
-const PARAM_SLIDER_MAX = 220;
-let paramSliderFrom = 30;
-let paramSliderTo = 220;
+let sliderFrom = CONFIG.INIT_SLIDER_FROM;
+let sliderTo = CONFIG.INIT_SLIDER_TO;
+let paramSliderFrom = CONFIG.INIT_PARAM_SLIDER_FROM;
+let paramSliderTo = CONFIG.INIT_PARAM_SLIDER_TO;
 const Q_METHODS = ["awq", "gptq", "bitsandbytes", "eetq", "aqlm", "gguf", "exl2", "marlin", "mlx", "bnb", "fp4", "fp8", "nf4", "int8", "int4", "q8", "q4"];
 const FILTER_DISPLAY = ["awq", "fp4", "fp8", "finetune", "gguf", "mlx", "safetensors", "others"];
 const activeFilters = new Set(FILTER_DISPLAY);
@@ -312,22 +329,18 @@ function matchesTaskFilter(pipelineTag) {
 }
 
 const _apiTimestamps = [];
-const RATE_LIMIT = 10;
-const RATE_WINDOW = 1000;
-
-const FETCH_TIMEOUT = 60000;
 
 async function fetchJson(url) {
   let retries = 0;
-  const MAX_RETRIES = 3;
+  const MAX_RETRIES = CONFIG.MAX_RETRIES;
   while (true) {
     const now = Date.now();
-    const cutoff = now - RATE_WINDOW;
+    const cutoff = now - CONFIG.RATE_WINDOW;
     while (_apiTimestamps.length > 0 && _apiTimestamps[0] < cutoff) {
       _apiTimestamps.shift();
     }
-    if (_apiTimestamps.length >= RATE_LIMIT) {
-      const wait = _apiTimestamps[0] + RATE_WINDOW - now + 10;
+    if (_apiTimestamps.length >= CONFIG.RATE_LIMIT) {
+      const wait = _apiTimestamps[0] + CONFIG.RATE_WINDOW - now + 10;
       await new Promise(r => setTimeout(r, wait));
       continue;
     }
@@ -335,7 +348,7 @@ async function fetchJson(url) {
     let res;
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+      const timer = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT);
       try {
         res = await fetch(url, { signal: controller.signal });
       } finally {
@@ -368,15 +381,15 @@ async function fetchJson(url) {
 }
 
 async function fetchModels(task) {
-  return fetchJson(`https://huggingface.co/api/models?sort=downloads&direction=-1&limit=${LIMIT}&pipeline_tag=${task}&full=true&cardData=true`);
+  return fetchJson(`https://huggingface.co/api/models?sort=downloads&direction=-1&limit=${CONFIG.LIMIT}&pipeline_tag=${task}&full=true&cardData=true`);
 }
 
 async function fetchRecentModels(task) {
-  return fetchJson(`https://huggingface.co/api/models?sort=lastModified&direction=-1&limit=${LIMIT}&pipeline_tag=${task}&full=true&cardData=true`);
+  return fetchJson(`https://huggingface.co/api/models?sort=lastModified&direction=-1&limit=${CONFIG.LIMIT}&pipeline_tag=${task}&full=true&cardData=true`);
 }
 
 async function fetchUntaggedModels() {
-  return fetchJson(`https://huggingface.co/api/models?sort=downloads&direction=-1&limit=${LIMIT}&full=true&cardData=true`);
+  return fetchJson(`https://huggingface.co/api/models?sort=downloads&direction=-1&limit=${CONFIG.LIMIT}&full=true&cardData=true`);
 }
 
 function isBase(model) {
@@ -405,16 +418,16 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 
 function sliderValueToDate(val) {
   if (val === 0) return new Date("2020-01-01");
-  if (val === 80) return new Date();
+  if (val === CONFIG.DATE_SLIDER_MAX) return new Date();
   const d = new Date();
-  d.setDate(d.getDate() - (80 - val) * 14);
+  d.setDate(d.getDate() - (CONFIG.DATE_SLIDER_MAX - val) * CONFIG.DAYS_PER_STEP);
   return d;
 }
 function sliderValueToLabel(val) {
   if (val === 0) return "Anytime";
-  if (val === 80) return "Now";
+  if (val === CONFIG.DATE_SLIDER_MAX) return "Now";
   const d = new Date();
-  d.setDate(d.getDate() - (80 - val) * 14);
+  d.setDate(d.getDate() - (CONFIG.DATE_SLIDER_MAX - val) * CONFIG.DAYS_PER_STEP);
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
@@ -436,7 +449,7 @@ function getParamCount(m) {
 }
 function paramPosToValue(pos) {
   if (pos <= 0) return 0;
-  if (pos >= PARAM_SLIDER_MAX) return Infinity;
+  if (pos >= CONFIG.PARAM_SLIDER_MAX) return Infinity;
   if (pos <= 40) return pos * 0.025;
   if (pos <= 70) return 1 + (pos - 40) * 0.1;
   if (pos <= 100) return 4 + (pos - 70) * 0.2;
@@ -454,10 +467,10 @@ function valueToPos(val) {
   if (val <= 100) return 130 + (val - 40) / 2;
   if (val <= 400) return 160 + (val - 100) / 10;
   if (val <= 1000) return 190 + (val - 400) / 20;
-  return PARAM_SLIDER_MAX;
+  return CONFIG.PARAM_SLIDER_MAX;
 }
 function sliderCenterPct(input, pos, max) {
-  const thumbSize = 18, iw = input.clientWidth || 1, pct = pos / (max || PARAM_SLIDER_MAX);
+  const thumbSize = 18, iw = input.clientWidth || 1, pct = pos / (max || CONFIG.PARAM_SLIDER_MAX);
   return (thumbSize / 2 + pct * (iw - thumbSize)) / iw * 100;
 }
 function paramValueToLabel(val) {
@@ -760,7 +773,7 @@ function renderMain(authorData) {
 async function loadAuthorModels(idx, author, container) {
   try {
     const models = cache[author + "_models"] || await fetchJson(
-      `https://huggingface.co/api/models?author=${author}&sort=downloads&direction=-1&limit=1000&full=true&cardData=true`
+      `https://huggingface.co/api/models?author=${author}&sort=downloads&direction=-1&limit=${CONFIG.AUTHOR_LIMIT}&full=true&cardData=true`
     );
     if (!cache[author + "_models"]) cache[author + "_models"] = models;
 
@@ -805,8 +818,8 @@ async function loadAuthorModels(idx, author, container) {
     if (unknownModels.length > 0) {
       const statusEl = document.getElementById("status");
       statusEl.textContent = `Resolving parameters for ${author} (${unknownModels.length} models)…`;
-      for (let i = 0; i < unknownModels.length; i += 5) {
-        const batch = unknownModels.slice(i, i + 5);
+      for (let i = 0; i < unknownModels.length; i += CONFIG.PARAM_BATCH_SIZE) {
+        const batch = unknownModels.slice(i, i + CONFIG.PARAM_BATCH_SIZE);
         await Promise.all(batch.map(async (m) => {
           try {
             const full = await fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`);
@@ -934,8 +947,8 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
     const seen = new Set();
 
     const searches = [
-      `https://huggingface.co/api/models?search=${encodeURIComponent(parentId)}&sort=downloads&direction=-1&limit=1000&full=true&cardData=true`,
-      `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=1000&full=true&cardData=true`
+      `https://huggingface.co/api/models?search=${encodeURIComponent(parentId)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`,
+      `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`
     ];
 
     for (const url of searches) {
@@ -1132,11 +1145,11 @@ function refreshAllExpanded() {
 
   for (const id of expandedSections) {
     if (id.startsWith("d1-")) {
-      const idx = parseInt(id.slice(3));
       const detailRow = document.getElementById(id);
       if (!detailRow || detailRow.style.display === "none") continue;
       const tr = detailRow.previousElementSibling;
       if (!tr || !tr.classList.contains("l1-row")) continue;
+      const idx = parseInt(tr.dataset.l1Idx);
       const author = tr.dataset.author;
       const models = cache[author];
       if (models) {
@@ -1144,13 +1157,12 @@ function refreshAllExpanded() {
         renderL2(idx, models.filter(m => modelPassesAllFilters(m) || _injectedBaseIds.has(m.id)), inner);
       }
     } else if (id.startsWith("d2-")) {
-      const parts = id.split("-");
-      const l2Idx = parseInt(parts[1]);
-      const modelIdx = parseInt(parts[2]);
       const detailRow = document.getElementById(id);
       if (!detailRow || detailRow.style.display === "none") continue;
       const tr = detailRow.previousElementSibling;
       if (!tr || !tr.classList.contains("l2-row")) continue;
+      const l2Idx = parseInt(tr.dataset.l2Idx);
+      const modelIdx = parseInt(tr.dataset.modelIdx);
       const modelId = tr.dataset.model;
       const children = cache[`children-${modelId}`];
       if (children) {
@@ -1158,14 +1170,13 @@ function refreshAllExpanded() {
         renderL3(l2Idx, modelIdx, modelId, children, inner);
       }
     } else if (id.startsWith("d3-")) {
-      const parts = id.split("-");
-      const l2Idx = parseInt(parts[1]);
-      const modelIdx = parseInt(parts[2]);
-      const gIdx = parseInt(parts[3]);
       const detailRow = document.getElementById(id);
       if (!detailRow || detailRow.style.display === "none") continue;
       const tr = detailRow.previousElementSibling;
       if (!tr || !tr.classList.contains("l3-row")) continue;
+      const l2Idx = parseInt(tr.dataset.l3L2);
+      const modelIdx = parseInt(tr.dataset.l3ModelIdx);
+      const gIdx = parseInt(tr.dataset.l3Idx);
       const parentId = tr.dataset.l3Parent;
       const author = tr.dataset.l3Author;
       const allChildren = cache[`children-${parentId}`] || [];
@@ -1189,7 +1200,7 @@ function buildDateSlider() {
     let tv = parseInt(to.value);
     if (isFrom) {
       if (fv >= tv) {
-        to.value = String(Math.min(fv + 1, 80));
+        to.value = String(Math.min(fv + 1, CONFIG.DATE_SLIDER_MAX));
         tv = parseInt(to.value);
         from.value = String(tv - 1);
       }
@@ -1203,7 +1214,7 @@ function buildDateSlider() {
   };
   const read = () => { sliderFrom = parseInt(from.value); sliderTo = parseInt(to.value); };
 
-  const sliderMarkDirty = debounce(markDirty, 200);
+  const sliderMarkDirty = debounce(markDirty, CONFIG.DEBOUNCE_MS);
   from.addEventListener("input", () => { clamp(true); read(); updateDateUI(); });
   from.addEventListener("change", () => { clamp(true); read(); sliderMarkDirty(); });
   to.addEventListener("input", () => { clamp(false); read(); updateDateUI(); });
@@ -1268,8 +1279,8 @@ function updateDateUI() {
 
   const fromInput = document.getElementById("ds-from");
   const toInput = document.getElementById("ds-to");
-  const left = sliderCenterPct(fromInput, sliderFrom, 80);
-  const right = sliderCenterPct(toInput, sliderTo, 80);
+  const left = sliderCenterPct(fromInput, sliderFrom, CONFIG.DATE_SLIDER_MAX);
+  const right = sliderCenterPct(toInput, sliderTo, CONFIG.DATE_SLIDER_MAX);
   const fill = document.getElementById("ds-fill");
   fill.style.left = left + "%";
   fill.style.width = (right - left) + "%";
@@ -1300,24 +1311,23 @@ function buildParamSlider() {
   const clamp = (isFrom) => {
     let fv = parseInt(from.value);
     let tv = parseInt(to.value);
-    const minGap = 5;
     if (isFrom) {
-      if (fv >= tv - (minGap - 1)) {
-        to.value = String(Math.min(fv + minGap, parseInt(to.max)));
+      if (fv >= tv - (CONFIG.PARAM_MIN_GAP - 1)) {
+        to.value = String(Math.min(fv + CONFIG.PARAM_MIN_GAP, parseInt(to.max)));
         tv = parseInt(to.value);
-        from.value = String(tv - minGap);
+        from.value = String(tv - CONFIG.PARAM_MIN_GAP);
       }
     } else {
-      if (tv <= fv + (minGap - 1)) {
-        from.value = String(Math.max(tv - minGap, parseInt(from.min)));
+      if (tv <= fv + (CONFIG.PARAM_MIN_GAP - 1)) {
+        from.value = String(Math.max(tv - CONFIG.PARAM_MIN_GAP, parseInt(from.min)));
         fv = parseInt(from.value);
-        to.value = String(fv + minGap);
+        to.value = String(fv + CONFIG.PARAM_MIN_GAP);
       }
     }
   };
   const read = () => { paramSliderFrom = parseInt(from.value); paramSliderTo = parseInt(to.value); };
 
-  const sliderMarkDirty = debounce(markDirty, 200);
+  const sliderMarkDirty = debounce(markDirty, CONFIG.DEBOUNCE_MS);
   from.addEventListener("input", () => { clamp(true); read(); updateParamUI(); });
   from.addEventListener("change", () => { clamp(true); read(); sliderMarkDirty(); });
   to.addEventListener("input", () => { clamp(false); read(); updateParamUI(); });
@@ -1484,6 +1494,10 @@ async function injectBaseModels(all) {
 }
 (() => {
   const status = document.getElementById("status");
+  document.getElementById("ds-from").max = CONFIG.DATE_SLIDER_MAX;
+  document.getElementById("ds-to").max = CONFIG.DATE_SLIDER_MAX;
+  document.getElementById("ps-from").max = CONFIG.PARAM_SLIDER_MAX;
+  document.getElementById("ps-to").max = CONFIG.PARAM_SLIDER_MAX;
   sortKey = "totalDownloads";
   sortAsc = false;
   updateArrows();
