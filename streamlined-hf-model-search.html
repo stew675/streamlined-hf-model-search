@@ -499,7 +499,7 @@ function isInParamRange(paramB) {
   return paramB >= fromVal && (toVal === Infinity || paramB <= toVal);
 }
 function modelPassesAllFilters(m) {
-  if (!m._injected && !isInDateRange(m.lastModified)) return false;
+  if (!_injectedBaseIds.has(m.id) && !isInDateRange(m.lastModified)) return false;
   const tag = m.pipeline_tag;
   if (!tag && !activeSpecialFilters.has("include untagged")) return false;
   if (!isInParamRange(m.paramB)) return false;
@@ -835,7 +835,7 @@ async function loadAuthorModels(idx, author, container) {
 
     cacheSet(author, baseModels);
 
-    const filterApplied = () => baseModels.filter(m => modelPassesAllFilters(m) || _injectedBaseIds.has(m.id));
+    const filterApplied = () => baseModels.filter(m => modelPassesAllFilters(m));
 
     const dated = filterApplied();
 
@@ -1210,7 +1210,7 @@ function refreshAllExpanded() {
     if (tog) tog.classList.add("open");
     const models = cacheGet(author);
     if (models) {
-      renderL2(idx, author, models.filter(m => modelPassesAllFilters(m) || _injectedBaseIds.has(m.id)), inner);
+      renderL2(idx, author, models.filter(m => modelPassesAllFilters(m)), inner);
     }
   }
 
@@ -1494,7 +1494,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
         inner.innerHTML = '<div class="detail-loading">Fetching base models…</div>';
         loadAuthorModels(idx, author, inner);
       } else {
-        renderL2(idx, author, baseModels.filter(m => modelPassesAllFilters(m) || _injectedBaseIds.has(m.id)), inner);
+        renderL2(idx, author, baseModels.filter(m => modelPassesAllFilters(m)), inner);
       }
     } else {
       detailRow.style.display = "none";
