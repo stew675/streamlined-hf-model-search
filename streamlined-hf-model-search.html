@@ -1523,7 +1523,14 @@ function applyFilters() {
           console.warn("Base model injection error:", e);
         }
         if (gen !== _fetchGeneration) return;
-        if (all.length > CONFIG.ALL_FETCHED_MAX) console.warn(`Cache size ${all.length} exceeds limit ${CONFIG.ALL_FETCHED_MAX}`);
+        if (all.length > CONFIG.ALL_FETCHED_MAX) {
+          all.sort((a, b) => {
+            const da = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+            const db = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+            return db - da;
+          });
+          all.length = CONFIG.ALL_FETCHED_MAX;
+        }
         status.textContent = "";
         _authorData = computeAuthorData();
         renderMain(_authorData);
