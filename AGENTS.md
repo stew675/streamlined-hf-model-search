@@ -84,7 +84,8 @@ IMPROVEMENTS.md          — Code review tracking
   - `RATE_LIMIT: 10` / `RATE_WINDOW: 1000` — API rate limiting
   - `FETCH_TIMEOUT: 60000` / `MAX_RETRIES: 3` — Fetch resilience
   - `DATE_SLIDER_MAX: 80` / `DAYS_PER_STEP: 14` — Date slider
-  - `PARAM_BATCH_SIZE: 5` / `PARAM_MIN_GAP: 5` — Deepening batches
+  - `PARAM_BATCH_SIZE: 5` / `INJECTION_BATCH_SIZE: 10` — Deepening batches (5) vs injection batches (10, matches rate limit)
+  - `PARAM_MIN_GAP: 5` — slider knob gap
   - `AUTHOR_LIMIT: 1000` / `CHILD_LIMIT: 1000` — Max results per endpoint
   - `DEBOUNCE_MS: 200` — Slider debounce
   - `CACHE_MAX: 50` — Max LRU cache entries

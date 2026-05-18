@@ -309,6 +309,7 @@ const CONFIG = {
   DATE_SLIDER_MAX: 80,
   DAYS_PER_STEP: 14,
   PARAM_BATCH_SIZE: 5,
+  INJECTION_BATCH_SIZE: 10,
   PARAM_MIN_GAP: 5,
   AUTHOR_LIMIT: 1000,
   CHILD_LIMIT: 1000,
@@ -1773,6 +1774,7 @@ async function injectBaseModels(all, onBatch) {
   if (gen !== _fetchGeneration) return;
   _injectedBaseIds.clear();
   const seen = new Set(all.map(m => m.id));
+  const seenAuthors = new Set(all.map(m => m.id.split("/")[0]));
   const status = document.getElementById("status");
   const injected = [];
   const fetchQueue = new Map();
@@ -1811,17 +1813,20 @@ async function injectBaseModels(all, onBatch) {
         if (gen === _fetchGeneration) _injectedBaseIds.add(baseId);
       }
     } else if (bm && !isBase(m)) {
-      if (!fetchQueue.has(baseId)) {
-        fetchQueue.set(baseId, true);
+      const baseAuthor = baseId.split("/")[0];
+      if (!seenAuthors.has(baseAuthor)) {
+        if (!fetchQueue.has(baseId)) {
+          fetchQueue.set(baseId, true);
+        }
       }
     }
   }
 
   const baseIds = [...fetchQueue.keys()];
   let total = 0;
-  for (let i = 0; i < baseIds.length; i += CONFIG.PARAM_BATCH_SIZE) {
+  for (let i = 0; i < baseIds.length; i += CONFIG.INJECTION_BATCH_SIZE) {
     if (gen !== _fetchGeneration) return;
-    const batch = baseIds.slice(i, i + CONFIG.PARAM_BATCH_SIZE);
+    const batch = baseIds.slice(i, i + CONFIG.INJECTION_BATCH_SIZE);
     total += batch.length;
     status.textContent = `Resolving base models… (${total})`;
     const results = await Promise.allSettled(batch.map(async (baseId) => {
