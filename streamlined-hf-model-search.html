@@ -546,6 +546,28 @@ function cacheGet(key) {
 }
 const expandedSections = new Set();
 
+function pruneExpiredExpansions() {
+  for (const key of [...expandedSections]) {
+    if (!key.startsWith("a|")) continue;
+    const author = key.slice(2);
+    const row = document.querySelector(`tr.l1-row[data-author="${author}"]`);
+    if (!row) {
+      expandedSections.delete(key);
+      for (const child of [...expandedSections]) {
+        if (child.startsWith("m|" + author + "/") || child.startsWith("g|" + author + "/")) {
+          expandedSections.delete(child);
+        }
+      }
+    }
+  }
+}
+
+function saveRestoreExpansions(saved) {
+  for (const key of saved) {
+    if (!expandedSections.has(key)) expandedSections.add(key);
+  }
+}
+
 function matchesFilter(qMethod) {
   if (!qMethod) return true;
   const methods = qMethod.toLowerCase().split(",").map(s => s.trim());
@@ -1301,7 +1323,7 @@ function buildDateSlider() {
 function applyFilters() {
   if (!needsUpdate) return;
   needsUpdate = false;
-  expandedSections.clear();
+  const savedExpansions = new Set(expandedSections);
   _fetchGeneration++;
   const gen = _fetchGeneration;
   const btn = document.getElementById("get-results-btn");
@@ -1337,13 +1359,20 @@ function applyFilters() {
       _authorData = computeAuthorData();
       renderMain(_authorData);
       updateArrows();
+      pruneExpiredExpansions();
+      saveRestoreExpansions(savedExpansions);
+      refreshAllExpanded();
       status.textContent = `Rendered ${_authorData.length} authors, resolving base models…`;
       try {
         await injectBaseModels(all, () => {
           if (gen !== _fetchGeneration) return;
+          const saved = new Set(expandedSections);
           _authorData = computeAuthorData();
           renderMain(_authorData);
           updateArrows();
+          pruneExpiredExpansions();
+          saveRestoreExpansions(saved);
+          refreshAllExpanded();
         });
       } catch (e) {
         console.warn("Base model injection error:", e);
@@ -1356,6 +1385,9 @@ function applyFilters() {
       _authorData = computeAuthorData();
       renderMain(_authorData);
       updateArrows();
+      pruneExpiredExpansions();
+      saveRestoreExpansions(savedExpansions);
+      refreshAllExpanded();
     })();
   } else {
     document.getElementById("get-results-btn").textContent = "Refresh";
@@ -1363,6 +1395,9 @@ function applyFilters() {
     _authorData = computeAuthorData();
     renderMain(_authorData);
     updateArrows();
+    pruneExpiredExpansions();
+    saveRestoreExpansions(savedExpansions);
+    refreshAllExpanded();
   }
 }
 
@@ -1473,8 +1508,11 @@ document.querySelector("#main-table").addEventListener("click", e => {
     const key = th.dataset.key;
     if (sortKey === key) sortAsc = !sortAsc;
     else { sortKey = key; sortAsc = false; }
+    const savedSort = new Set(expandedSections);
     renderMain(_authorData);
     updateArrows();
+    saveRestoreExpansions(savedSort);
+    refreshAllExpanded();
     return;
   }
   const tr = e.target.closest("tr.l1-row");
