@@ -11,7 +11,7 @@
   h1 { font-size: 1.4rem; margin-bottom: 4px; color: #e6edf3; text-align: center; }
   #status { font-size: 0.85rem; color: #8b949e; margin-bottom: 12px; min-height: 1.2em; }
   #main-table, .detail-inner table { width: 100%; border-collapse: collapse; font-size: 0.85rem; table-layout: fixed; }
-  th.right, td.right { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  th.right, td.right { white-space: nowrap; }
   .updated-cell { padding-left: 10px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .updated-header { text-align: center !important; }
   th.params-cell, td.params-cell { padding-right: 20px; text-align: center;  }
@@ -35,7 +35,9 @@
   a { color: #58a6ff; text-decoration: none; transition: color 0.15s; }
   a:hover { text-decoration: underline; color: #79c0ff; }
   .right { text-align: right; }
+  th.right { text-align: right; }
   th.center, td.center { text-align: center; }
+  .arrow-left { margin-right: 4px; font-size: 0.7rem; color: #58a6ff; }
   .task { text-align: left; white-space: nowrap; }
   #count { font-size: 0.85rem; color: #8b949e; margin-top: 8px; }
 
@@ -203,10 +205,10 @@
 <table id="main-table">
   <thead>
     <tr>
-      <th data-key="author">Model Author <span class="arrow"></span></th>
-      <th data-key="count" class="right">Base Models <span class="arrow"></span></th>
-      <th data-key="totalDownloads" class="right">Total Downloads <span class="arrow"></span></th>
-      <th data-key="totalLikes" class="right">Total Likes <span class="arrow"></span></th>
+      <th data-key="author">Model Author<span class="arrow"></span></th>
+      <th data-key="count" class="right"><span class="sort-arrow"></span>Base Models</th>
+      <th data-key="totalDownloads" class="right"><span class="sort-arrow"></span>Total Downloads</th>
+      <th data-key="totalLikes" class="right"><span class="sort-arrow"></span>Total Likes</th>
     </tr>
   </thead>
   <tbody id="body"></tbody>
@@ -1039,6 +1041,20 @@ async function loadAuthorModels(idx, author, container) {
 }
 
 // ── Level 2: Base Models ──
+function thHtml(c, state, level) {
+  const isSorted = state.key === c.key;
+  const allCls = (c.headerCls || "") + " " + (c.cls || "");
+  const cls = allCls.trim() + (isSorted ? " sorted" : "");
+  const ariaSort = isSorted ? ` aria-sort="${state.asc ? "ascending" : "descending"}"` : "";
+  if (allCls.includes("right")) {
+    return `<th data-key="${c.key}" data-level="${level}" class="${cls}"${ariaSort}><span class="arrow-left">${isSorted ? (state.asc ? "▲" : "▼") : ""}</span>${c.label}</th>`;
+  } else if (allCls.includes("center") || allCls.includes("params-cell") || allCls.includes("updated-header")) {
+    return `<th data-key="${c.key}" data-level="${level}" class="${cls}"${ariaSort}><span class="arrow-left">${isSorted ? (state.asc ? "▲" : "▼") : ""}</span>${c.label}</th>`;
+  } else {
+    return `<th data-key="${c.key}" data-level="${level}" class="${cls}"${ariaSort}>${c.label}<span class="arrow">${isSorted ? (state.asc ? "▲" : "▼") : ""}</span></th>`;
+  }
+}
+
 function renderL2(idx, author, models, container, totalBeforeFilter) {
   const state = detailSort[`l2-${author}`] || { key: "downloads", asc: false };
   const sorted = sortRows(models, state.key, state.asc, state.key === "id" ? undefined : "id");
@@ -1052,10 +1068,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
   ];
 
   let html = `<table><colgroup><col><col width="80"><col width="140"><col width="110"><col width="80"></colgroup><thead><tr>`;
-  cols.forEach(c => {
-    const isSorted = state.key === c.key;
-    html += `<th data-key="${c.key}" data-level="2" class="${(c.headerCls || c.cls) || ''}${isSorted ? ' sorted' : ''}"${isSorted ? ` aria-sort="${state.asc ? 'ascending' : 'descending'}"` : ''}>${c.label} <span class="arrow">${isSorted ? (state.asc ? "▲" : "▼") : ""}</span></th>`;
-  });
+  cols.forEach(c => { html += thHtml(c, state, "2"); });
   html += `</tr></thead><tbody>`;
 
   sorted.forEach((m, mIdx) => {
@@ -1208,10 +1221,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   ];
 
   let html = `<table><colgroup><col><col width="75"><col width="120"></colgroup><thead><tr>`;
-  cols.forEach(c => {
-    const isSorted = state.key === c.key;
-    html += `<th data-key="${c.key}" data-level="3" class="${c.cls || ''}${isSorted ? ' sorted' : ''}"${isSorted ? ` aria-sort="${state.asc ? 'ascending' : 'descending'}"` : ''}>${c.label} <span class="arrow">${isSorted ? (state.asc ? "▲" : "▼") : ""}</span></th>`;
-  });
+  cols.forEach(c => { html += thHtml(c, state, "3"); });
   html += `</tr></thead><tbody>`;
 
   sorted.forEach((g, gIdx) => {
@@ -1282,23 +1292,20 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 
   const cols = [
     { key: "id", label: "Model ID" },
-    { key: "q_method", label: "Quant", headerCls: "updated-header" },
+    { key: "q_method", label: "Quant", headerCls: "updated-header", cls: "center" },
     { key: "downloads", label: "Downloads", cls: "right" },
     { key: "likes", label: "Likes", cls: "right" },
     { key: "lastModified", label: "Updated", cls: "right" }
   ];
 
   let html = `<table><colgroup><col><col width="160"><col width="110"><col width="100"><col width="140"></colgroup><thead><tr>`;
-  cols.forEach(c => {
-    const isSorted = st.key === c.key;
-    html += `<th data-key="${c.key}" data-level="4" class="${(c.headerCls || c.cls) || ''}${isSorted ? ' sorted' : ''}"${isSorted ? ` aria-sort="${st.asc ? 'ascending' : 'descending'}"` : ''}>${c.label} <span class="arrow">${isSorted ? (st.asc ? "▲" : "▼") : ""}</span></th>`;
-  });
+  cols.forEach(c => { html += thHtml(c, st, "4"); });
   html += `</tr></thead><tbody>`;
 
   sorted.forEach(q => {
     html += `<tr class="l4-row">
       <td><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.id.split("/").slice(1).join("/"))}">${escapeHtml(truncate(q.id.split("/").slice(1).join("/"), 64))}</a></td>
-      <td><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
+      <td class="center"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
       <td class="right">${fmt(q.downloads)}</td>
       <td class="right"><span class="likes-icon">♥</span>${fmt(q.likes)}</td>
       <td class="right">${fmtDate(q.lastModified)}</td>
@@ -1606,9 +1613,11 @@ function updateParamUI() {
 // ── Main Table Sort ──
 function updateArrows() {
   document.querySelectorAll("#main-table thead th").forEach(th => {
-    const arrow = th.querySelector(".arrow");
+    const arrow = th.querySelector(".arrow, .sort-arrow, .arrow-left");
+    if (!arrow) return;
     const active = th.dataset.key === sortKey;
     arrow.textContent = active ? (sortAsc ? "▲" : "▼") : "";
+    arrow.className = th.classList.contains("right") ? "arrow-left" : "arrow";
     th.classList.toggle("sorted", active);
     if (active) th.setAttribute("aria-sort", sortAsc ? "ascending" : "descending");
     else th.removeAttribute("aria-sort");
