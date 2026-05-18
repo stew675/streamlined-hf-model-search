@@ -861,9 +861,10 @@ async function loadAuthorModels(idx, author, container) {
     const unknownModels = dated.filter(m => m.paramB === null);
     if (unknownModels.length > 0) {
       const statusEl = document.getElementById("status");
-      statusEl.textContent = `Resolving parameters for ${author} (${unknownModels.length} models)…`;
-      for (let i = 0; i < unknownModels.length; i += CONFIG.PARAM_BATCH_SIZE) {
+      const totalUnk = unknownModels.length;
+      for (let i = 0; i < totalUnk; i += CONFIG.PARAM_BATCH_SIZE) {
         const batch = unknownModels.slice(i, i + CONFIG.PARAM_BATCH_SIZE);
+        statusEl.textContent = `Resolving parameters for ${author}… (${Math.min(i + CONFIG.PARAM_BATCH_SIZE, totalUnk)}/${totalUnk})`;
         await Promise.all(batch.map(async (m) => {
           try {
             const full = await fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`);
@@ -873,6 +874,11 @@ async function loadAuthorModels(idx, author, container) {
             console.warn("Failed to fetch param for", m.id, e);
           }
         }));
+        const pruned = filterApplied();
+        const detailRow = document.getElementById(`d1-${idx}`);
+        if (detailRow && detailRow.style.display !== "none") {
+          renderL2(idx, author, pruned, container);
+        }
       }
       for (const m of unknownModels) {
         if (m.paramB != null) continue;
