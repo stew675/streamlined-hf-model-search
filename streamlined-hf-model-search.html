@@ -1286,7 +1286,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
     { key: "lastModified", label: "Updated", cls: "right" }
   ];
 
-  let html = `<table><colgroup><col><col width="160"><col width="140"><col width="80"><col width="160"></colgroup><thead><tr>`;
+  let html = `<table><colgroup><col><col width="160"><col width="110"><col width="100"><col width="140"></colgroup><thead><tr>`;
   cols.forEach(c => {
     const isSorted = st.key === c.key;
     html += `<th data-key="${c.key}" data-level="4" class="${(c.headerCls || c.cls) || ''}${isSorted ? ' sorted' : ''}"${isSorted ? ` aria-sort="${st.asc ? 'ascending' : 'descending'}"` : ''}>${c.label} <span class="arrow">${isSorted ? (st.asc ? "▲" : "▼") : ""}</span></th>`;
