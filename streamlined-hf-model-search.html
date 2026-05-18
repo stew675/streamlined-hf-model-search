@@ -86,6 +86,7 @@
     margin-left: auto; }
   #get-results-btn.ready { background: #238636; color: #fff; border-color: #2ea043; cursor: pointer; box-shadow: 0 0 8px #23863666; }
   #get-results-btn.ready:hover { background: #2ea043; box-shadow: 0 0 12px #2ea04388; }
+  #get-results-btn.disabled { pointer-events: none; opacity: 0.5; }
 
   /* Range sliders */
   #date-slider, #param-slider { margin: 8px 0 6px; padding: 8px 14px 10px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; }
@@ -128,7 +129,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status">Fetching models…</div>
+<div id="status" aria-live="polite">Fetching models…</div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -198,6 +199,8 @@
 <div id="count"></div>
 
 <script>
+(function() {
+let _allFetched, _authorData;
 const TO_TAGS = [
   // Audio
   { tag: "automatic-speech-recognition", from: ["audio"], to: "text", desc: "Transcribe speech to text" },
@@ -296,6 +299,8 @@ const CONFIG = {
   INIT_SLIDER_TO: 80,
   INIT_PARAM_SLIDER_FROM: 30,
   INIT_PARAM_SLIDER_TO: 220,
+  CACHE_MAX: 50,
+  ALL_FETCHED_MAX: 2000,
 };
 const fetchedTasks = new Set();
 let fetchedUntagged = false;
@@ -498,7 +503,7 @@ function modelPassesAllFilters(m) {
 }
 
 function computeAuthorData() {
-  const all = window._allFetched || [];
+  const all = _allFetched || [];
   const map = {};
   all.forEach(m => {
     if (!m._injected && !isInDateRange(m.lastModified)) return;
@@ -522,6 +527,13 @@ let sortKey = "totalDownloads";
 let sortAsc = false;
 const detailSort = {};
 const cache = {};
+function cacheSet(key, value) {
+  const keys = Object.keys(cache);
+  if (keys.length >= CONFIG.CACHE_MAX && !(key in cache)) {
+    delete cache[keys[0]];
+  }
+  cache[key] = value;
+}
 const expandedSections = new Set();
 
 function matchesFilter(qMethod) {
@@ -775,7 +787,7 @@ async function loadAuthorModels(idx, author, container) {
     const models = cache[author + "_models"] || await fetchJson(
       `https://huggingface.co/api/models?author=${author}&sort=downloads&direction=-1&limit=${CONFIG.AUTHOR_LIMIT}&full=true&cardData=true`
     );
-    if (!cache[author + "_models"]) cache[author + "_models"] = models;
+    if (!cache[author + "_models"]) cacheSet(author + "_models", models);
 
     const baseModels = models.filter(m => isBase(m)).map(m => ({
       id: m.id,
@@ -789,13 +801,13 @@ async function loadAuthorModels(idx, author, container) {
       pipeline_tag: m.pipeline_tag || ""
     }));
 
-    cache[author] = baseModels;
+    cacheSet(author, baseModels);
 
     const filterApplied = () => baseModels.filter(m => modelPassesAllFilters(m) || _injectedBaseIds.has(m.id));
 
     const dated = filterApplied();
 
-    const ad = window._authorData;
+    const ad = _authorData;
     for (const a of ad) {
       if (a.author === author) {
         a.count = dated.length;
@@ -840,7 +852,7 @@ async function loadAuthorModels(idx, author, container) {
           name = name.substring(0, dash);
           const candId = bits[0] + '/' + name;
           const parent = baseModels.find(b => b.id === candId && b.paramB != null) ||
-            (window._allFetched || []).find(f => f.id === candId && f.paramB != null);
+            (_allFetched || []).find(f => f.id === candId && f.paramB != null);
           if (parent) { m.paramB = parent.paramB; break; }
         }
       }
@@ -988,7 +1000,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       }
     }
 
-    cache[`children-${parentId}`] = results;
+    cacheSet(`children-${parentId}`, results);
     renderL3(l2Idx, modelIdx, parentId, results, container);
   } catch (err) {
     container.innerHTML = `<div class="detail-error">Error: ${err.message}</div>`;
@@ -1226,7 +1238,9 @@ function buildDateSlider() {
 function applyFilters() {
   if (!needsUpdate) return;
   needsUpdate = false;
-  document.getElementById("get-results-btn").classList.remove("ready");
+  const btn = document.getElementById("get-results-btn");
+  btn.classList.remove("ready");
+  btn.classList.add("disabled");
   const tasks = resolveTasks().filter(t => activeTaskFilters.has(t));
   const newTasks = tasks.filter(t => !fetchedTasks.has(t));
   const needUntagged = activeSpecialFilters.has("include untagged") && !fetchedUntagged;
@@ -1243,31 +1257,38 @@ function applyFilters() {
         fresh = fresh.concat(raw.filter(m => !m.pipeline_tag));
         fetchedUntagged = true;
       }
-      const seen = new Set((window._allFetched || []).map(m => m.id));
-      const all = [...(window._allFetched || [])];
+      const seen = new Set((_allFetched || []).map(m => m.id));
+      const all = [...(_allFetched || [])];
       for (const m of fresh) {
         if (!seen.has(m.id)) {
           seen.add(m.id);
           all.push(m);
         }
       }
-      window._allFetched = all;
+      _allFetched = all;
       try {
         await injectBaseModels(all);
       } catch (e) {
         console.warn("Base model injection error:", e);
       }
+      if (all.length > CONFIG.ALL_FETCHED_MAX) {
+        const n = document.getElementById("api-counter");
+        n.textContent = "Cache: " + (all.length - CONFIG.ALL_FETCHED_MAX) + " trimmed";
+        all.splice(0, all.length - CONFIG.ALL_FETCHED_MAX);
+      }
       status.textContent = "";
       document.getElementById("get-results-btn").textContent = "Refresh";
-      window._authorData = computeAuthorData();
-      renderMain(window._authorData);
+      document.getElementById("get-results-btn").classList.remove("disabled");
+      _authorData = computeAuthorData();
+      renderMain(_authorData);
       updateArrows();
       refreshAllExpanded();
     })();
   } else {
     document.getElementById("get-results-btn").textContent = "Refresh";
-    window._authorData = computeAuthorData();
-    renderMain(window._authorData);
+    document.getElementById("get-results-btn").classList.remove("disabled");
+    _authorData = computeAuthorData();
+    renderMain(_authorData);
     updateArrows();
     refreshAllExpanded();
   }
@@ -1375,7 +1396,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
     const key = th.dataset.key;
     if (sortKey === key) sortAsc = !sortAsc;
     else { sortKey = key; sortAsc = false; }
-    renderMain(window._authorData);
+    renderMain(_authorData);
     updateArrows();
     return;
   }
@@ -1513,6 +1534,7 @@ async function injectBaseModels(all) {
   document.getElementById("api-counter").textContent = "API Calls: 0";
   status.textContent = "Select your filters, then click Get Results.";
   renderMain([]);
+})();
 })();
 </script>
 </body>
