@@ -201,7 +201,7 @@
 
 <script>
 (function() {
-let _allFetched, _authorData;
+let _allFetched, _authorData, _canonicalAuthor;
 const TO_TAGS = [
   // Audio
   { tag: "automatic-speech-recognition", from: ["audio"], to: "text", desc: "Transcribe speech to text" },
@@ -441,6 +441,30 @@ function getOrphanQuantMethod(modelId) {
   return Q_METHODS.filter(t => idLower.includes(t));
 }
 
+function buildCanonicalAuthors() {
+  _canonicalAuthor = {};
+  const byName = {};
+  (_allFetched || []).forEach(m => {
+    const name = m.id.split("/").slice(1).join("/");
+    if (!byName[name]) byName[name] = [];
+    byName[name].push({ author: m.id.split("/")[0], downloads: m.downloads || 0 });
+  });
+  Object.entries(byName).forEach(([name, entries]) => {
+    const authors = [...new Set(entries.map(e => e.author))];
+    if (authors.length <= 1) return;
+    let best = null;
+    entries.forEach(e => {
+      if (!best || e.downloads > best.downloads) best = e;
+    });
+    _canonicalAuthor[name] = best.author;
+  });
+}
+
+function isCanonicalCopy(m) {
+  const name = m.id.split("/").slice(1).join("/");
+  return _canonicalAuthor && _canonicalAuthor[name] !== undefined && _canonicalAuthor[name] !== m.id.split("/")[0];
+}
+
 function fmt(n) { return n.toLocaleString(); }
 function fmtDate(d) { return d ? new Date(d).toISOString().slice(0, 10) : "—"; }
 function fmtAge(d) {
@@ -536,6 +560,7 @@ function modelPassesAllFilters(m) {
 }
 
 function computeAuthorData() {
+  buildCanonicalAuthors();
   const all = _allFetched || [];
   const knownIds = new Set(all.map(x => x.id));
   const map = {};
@@ -543,6 +568,7 @@ function computeAuthorData() {
     if (!modelPassesAllFilters(m)) return;
     if (!isBase(m)) return;
     if (isOrphanQuant(m, knownIds)) return;
+    if (isCanonicalCopy(m)) return;
     const author = m.id.split("/")[0];
     if (!map[author]) map[author] = { author, count: 0, totalDownloads: 0, totalLikes: 0 };
     map[author].count++;
