@@ -467,7 +467,12 @@ function isNestedQuant(m, knownIds) {
   return knownIds.has(bm);
 }
 
+let _canonicalCache = null;
 function buildCanonicalAuthors() {
+  if (_canonicalCache && _canonicalCache.ref === _allFetched) {
+    _canonicalAuthor = _canonicalCache.result;
+    return;
+  }
   _canonicalAuthor = {};
   const byName = {};
   (_allFetched || []).forEach(m => {
@@ -484,6 +489,7 @@ function buildCanonicalAuthors() {
     });
     _canonicalAuthor[name] = best.author;
   });
+  _canonicalCache = { result: _canonicalAuthor, ref: _allFetched };
 }
 
 function isCanonicalCopy(m) {
@@ -501,7 +507,8 @@ function fmtAge(d) {
   return `${(days / 365).toFixed(1)}y`;
 }
 function truncate(s, max) { return s.length > max ? s.slice(0, max) + "…" : s; }
-function escapeHtml(str) { return String(str).replace(/[&<>"']/g, function(m) { if (m === '&') return '&amp;'; if (m === '<') return '&lt;'; if (m === '>') return '&gt;'; if (m === '"') return '&quot;'; return '&#39;'; }); }
+const _htmlEsc = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function escapeHtml(str) { return String(str).replace(/[&<>"']/g, c => _htmlEsc[c]); }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 function sliderValueToDate(val) {
@@ -619,7 +626,7 @@ function cacheSet(key, value) {
   if (ck.length >= CONFIG.CACHE_MAX) delete cache[ck[0]];
   cache[key] = value;
 }
-function cacheGet(key) {
+function cacheAccess(key) {
   if (!(key in cache)) return undefined;
   const v = cache[key];
   delete cache[key];
@@ -885,32 +892,22 @@ function applyBarLogic(option, options, activeSet) {
   }
 }
 
+function sortCoerce(v, k) {
+  if (["downloads", "likes", "totalDownloads", "totalLikes", "count", "paramB"].includes(k)) return Number(v);
+  if (["created_at", "updated_at", "lastModified"].includes(k)) return new Date(v || 0).getTime();
+  return String(v || "").toLowerCase();
+}
 function sortRows(rows, key, asc, subKey) {
-  const coerce = v => {
-    let va = v;
-    if (["downloads", "likes", "totalDownloads", "totalLikes", "count", "paramB"].includes(key)) { va = Number(va); }
-    else if (["created_at", "updated_at", "lastModified"].includes(key)) { va = new Date(va || 0).getTime(); }
-    else { va = String(va || "").toLowerCase(); }
-    return va;
-  };
-  const subCoerce = v => {
-    if (!subKey) return null;
-    let sv = v;
-    if (["downloads", "likes", "totalDownloads", "totalLikes", "count", "paramB"].includes(subKey)) { sv = Number(sv); }
-    else if (["created_at", "updated_at", "lastModified"].includes(subKey)) { sv = new Date(sv || 0).getTime(); }
-    else { sv = String(sv || "").toLowerCase(); }
-    return sv;
-  };
   return rows.slice().sort((a, b) => {
     let cmp = 0;
     if (subKey && a[key] != null && b[key] != null && a[key] === b[key]) {
-      const sa = subCoerce(a[subKey]);
-      const sb = subCoerce(b[subKey]);
+      const sa = sortCoerce(a[subKey], subKey);
+      const sb = sortCoerce(b[subKey], subKey);
       if (sa < sb) return -1;
       if (sa > sb) return 1;
       cmp = 0;
     } else {
-      let va = coerce(a[key]), vb = coerce(b[key]);
+      let va = sortCoerce(a[key], key), vb = sortCoerce(b[key], key);
       if (va < vb) cmp = -1;
       else if (va > vb) cmp = 1;
       else cmp = 0;
@@ -944,10 +941,10 @@ function renderMain(authorData) {
 async function loadAuthorModels(idx, author, container) {
   const gen = _fetchGeneration;
   try {
-    const models = cacheGet(author + "_models") || await fetchJson(
+    const models = cacheAccess(author + "_models") || await fetchJson(
       `https://huggingface.co/api/models?author=${author}&sort=downloads&direction=-1&limit=${CONFIG.AUTHOR_LIMIT}&full=true&cardData=true`
     );
-    if (!cacheGet(author + "_models")) cacheSet(author + "_models", models);
+    if (!cacheAccess(author + "_models")) cacheSet(author + "_models", models);
 
     const authorKnownIds = new Set(models.map(x => x.id));
     const baseModels = models.filter(m => isBase(m)).map(m => ({
@@ -1052,14 +1049,12 @@ function thHtml(c, state, level) {
   const isSorted = state.key === c.key;
   const allCls = (c.headerCls || "") + " " + (c.cls || "");
   const cls = allCls.trim() + (isSorted ? " sorted" : "");
+  const arrow = isSorted ? (state.asc ? "▲" : "▼") : "";
   const ariaSort = isSorted ? ` aria-sort="${state.asc ? "ascending" : "descending"}"` : "";
-  if (allCls.includes("right")) {
-    return `<th data-key="${c.key}" data-level="${level}" class="${cls}"${ariaSort}><span class="arrow-left">${isSorted ? (state.asc ? "▲" : "▼") : ""}</span>${c.label}</th>`;
-  } else if (allCls.includes("center") || allCls.includes("params-cell") || allCls.includes("updated-header")) {
-    return `<th data-key="${c.key}" data-level="${level}" class="${cls}"${ariaSort}><span class="arrow-left">${isSorted ? (state.asc ? "▲" : "▼") : ""}</span>${c.label}</th>`;
-  } else {
-    return `<th data-key="${c.key}" data-level="${level}" class="${cls}"${ariaSort}>${c.label}<span class="arrow">${isSorted ? (state.asc ? "▲" : "▼") : ""}</span></th>`;
+  if (allCls.includes("right") || allCls.includes("center") || allCls.includes("params-cell") || allCls.includes("updated-header")) {
+    return `<th data-key="${c.key}" data-level="${level}" class="${cls}"${ariaSort}><span class="arrow-left">${arrow}</span>${c.label}</th>`;
   }
+  return `<th data-key="${c.key}" data-level="${level}" class="${cls}"${ariaSort}>${c.label}<span class="arrow">${arrow}</span></th>`;
 }
 
 function renderL2(idx, author, models, container, totalBeforeFilter) {
@@ -1068,19 +1063,19 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
 
   const cols = [
     { key: "id", label: "Model ID" },
-    { key: "paramB", label: "Params", cls: "params-cell" },
-    { key: "downloads", label: "Downloads", cls: "right" },
-    { key: "likes", label: "Likes", cls: "center" },
-    { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header" }
+    { key: "paramB", label: "Params", cls: "params-cell", width: 160 },
+    { key: "downloads", label: "Downloads", cls: "right", width: 110 },
+    { key: "likes", label: "Likes", cls: "center", width: 80 },
+    { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header", width: 135 }
   ];
 
-  let html = `<table><colgroup><col><col width="160"><col width="110"><col width="80"><col width="135"></colgroup><thead><tr>`;
+  let html = `<table><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
   cols.forEach(c => { html += thHtml(c, state, "2"); });
   html += `</tr></thead><tbody>`;
 
   sorted.forEach((m, mIdx) => {
     const qMethods = getOrphanQuantMethod(m.id);
-    const orphanBadge = qMethods.length ? `<span class="badge orphan">${escapeHtml(qMethods[0].toUpperCase())}</span>&nbsp;` : '';
+    const orphanBadge = qMethods.length ? qMethods.map(m => `<span class="badge orphan">${escapeHtml(m.toUpperCase())}</span>`).join(' ') + ' ' : '';
     html += `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}">
       <td><span class="toggle" id="t2-${idx}-${mIdx}">▶</span>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(truncate(m.id.split("/").slice(1).join("/"), 40))}</a></td>
       <td class="params-cell" style="font-size:0.78rem">${m.paramB != null ? paramValueToLabel(m.paramB) : "—"}</td>
@@ -1096,8 +1091,8 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
   container.innerHTML = html;
   container._l2State = { idx, author, models, totalBeforeFilter };
 
-  if (!container._l2Delegated) {
-    container._l2Delegated = true;
+  if (!container._delegatedL2) {
+    container._delegatedL2 = true;
     container.addEventListener("click", function(e) {
       const inner = e.target.closest(".detail-inner");
       if (inner && inner !== this) return;
@@ -1127,7 +1122,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
           tog.classList.add("open");
           expandedSections.add(modelKey);
           const key = `children-${modelId}`;
-          const cached = cacheGet(key);
+          const cached = cacheAccess(key);
           if (cached) {
             renderL3(l2Idx, modelIdx, modelId, cached, inner);
           } else {
@@ -1153,7 +1148,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
   // Deduplicate concurrent fetches for the same parent
   if (_inflightChildren.has(cacheKey)) {
     await _inflightChildren.get(cacheKey);
-    const cached = cacheGet(cacheKey);
+    const cached = cacheAccess(cacheKey);
     if (cached) renderL3(l2Idx, modelIdx, parentId, cached, container);
     return;
   }
@@ -1239,11 +1234,11 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
 
   const cols = [
     { key: "author", label: "Quant Author" },
-    { key: "count", label: "Models", cls: "right" },
-    { key: "totalDownloads", label: "Downloads", cls: "right" }
+    { key: "count", label: "Models", cls: "right", width: 75 },
+    { key: "totalDownloads", label: "Downloads", cls: "right", width: 120 }
   ];
 
-  let html = `<table><colgroup><col><col width="75"><col width="120"></colgroup><thead><tr>`;
+  let html = `<table><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
   cols.forEach(c => { html += thHtml(c, state, "3"); });
   html += `</tr></thead><tbody>`;
 
@@ -1260,8 +1255,8 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   container.innerHTML = html;
   container._l3State = { l2Idx, modelIdx, parentId, children };
 
-  if (!container._l3Delegated) {
-    container._l3Delegated = true;
+  if (!container._delegatedL3) {
+    container._delegatedL3 = true;
     container.addEventListener("click", function(e) {
       const inner = e.target.closest(".detail-inner");
       if (inner && inner !== this) return;
@@ -1293,7 +1288,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
           detailRow.style.display = "";
           tog.classList.add("open");
           expandedSections.add(groupKey);
-          const allChildren = cacheGet(`children-${parentId}`) || [];
+          const allChildren = cacheAccess(`children-${parentId}`) || [];
           const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
           renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, inner);
         } else {
@@ -1315,13 +1310,13 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 
   const cols = [
     { key: "id", label: "Model ID" },
-    { key: "q_method", label: "Quant", headerCls: "updated-header", cls: "center" },
-    { key: "downloads", label: "Downloads", cls: "right" },
-    { key: "likes", label: "Likes", cls: "right" },
-    { key: "lastModified", label: "Updated", cls: "right" }
+    { key: "q_method", label: "Quant", headerCls: "updated-header", cls: "center", width: 160 },
+    { key: "downloads", label: "Downloads", cls: "right", width: 110 },
+    { key: "likes", label: "Likes", cls: "right", width: 80 },
+    { key: "lastModified", label: "Updated", cls: "right", width: 110 }
   ];
 
-  let html = `<table><colgroup><col><col width="160"><col width="110"><col width="80"><col width="110"></colgroup><thead><tr>`;
+  let html = `<table><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
   cols.forEach(c => { html += thHtml(c, st, "4"); });
   html += `</tr></thead><tbody>`;
 
@@ -1339,8 +1334,8 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
   container.innerHTML = html;
   container._l4State = { l2Idx, modelIdx, gIdx, parentId, author, quants };
 
-  if (!container._l4Delegated) {
-    container._l4Delegated = true;
+  if (!container._delegatedL4) {
+    container._delegatedL4 = true;
     container.addEventListener("click", function(e) {
       const th = e.target.closest("thead th");
       if (!th || th.dataset.level !== "4") return;
@@ -1372,7 +1367,7 @@ function refreshAllExpanded() {
     if (!detailRow || detailRow.style.display !== "none") continue;
     detailRow.style.display = "";
     if (tog) tog.classList.add("open");
-    const models = cacheGet(author);
+    const models = cacheAccess(author);
     if (models) {
      const nonQuantBase = models.filter(m => !m._orphanQuant && !m._nestedQuant);
       const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
@@ -1396,7 +1391,7 @@ function refreshAllExpanded() {
     if (!detailRow || detailRow.style.display !== "none") continue;
     detailRow.style.display = "";
     if (tog) tog.classList.add("open");
-    const children = cacheGet(`children-${modelId}`);
+    const children = cacheAccess(`children-${modelId}`);
     if (children) {
       renderL3(l2Idx, modelIdx, modelId, children, inner);
     }
@@ -1423,7 +1418,7 @@ function refreshAllExpanded() {
     if (!detailRow || detailRow.style.display !== "none") continue;
     detailRow.style.display = "";
     if (tog) tog.classList.add("open");
-    const allChildren = cacheGet(`children-${modelId}`) || [];
+    const allChildren = cacheAccess(`children-${modelId}`) || [];
     const quants = allChildren.filter(c => c.author === groupAuthor && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
     renderL4(l2Idx, modelIdx, gIdx, modelId, groupAuthor, quants, inner);
   }
@@ -1686,7 +1681,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
       detailRow.style.display = "";
       tog.classList.add("open");
       expandedSections.add(authorKey);
-      const baseModels = cacheGet(author);
+      const baseModels = cacheAccess(author);
       if (!baseModels) {
         inner.innerHTML = '<div class="detail-loading">Fetching base models…</div>';
         loadAuthorModels(idx, author, inner);

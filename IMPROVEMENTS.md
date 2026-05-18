@@ -21,6 +21,22 @@ for the active filters.
 
 ---
 
+## Fixed (Items 9–17)
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 9 | `cacheGet` mutates the cache (side effect in a getter) | Renamed to `cacheAccess` to signal the mutation intent |
+| 10 | Duplicate sort coercion logic | Extracted `sortCoerce(v, k)` helper; `coerce`/`subCoerce` closures removed |
+| 11 | `thHtml` three identical branches | Collapsed to single `arrowOnLeft` boolean check; removed duplicate branch |
+| 12 | Hardcoded colgroup widths | Added `width` to column config objects; colgroup generated dynamically via `cols.map()` |
+| 13 | `isInDateRange(null) === true` | **No code change** — intentional, covers legacy models without dates |
+| 14 | `_l2Delegated` / `_l3Delegated` / `_l4Delegated` | Renamed to `_delegatedL2` / `_delegatedL3` / `_delegatedL4` |
+| 15 | Badge shows only first quant method | Changed to `qMethods.map()` — all matching methods displayed |
+| 16 | `escapeHtml` regex with inline if-chain | Simplified to single-pass `replace()` with a `_htmlEsc` Map lookup |
+| 17 | `buildCanonicalAuthors` recalculated on every call | Added `_canonicalCache` — result reused when `_allFetched` reference unchanged |
+
+---
+
 ## Intentional
 
 ### 6. `reseedActiveTaskFilters` silently resets user's tag selections
@@ -123,60 +139,6 @@ to near-zero *without* re-introducing the old problem of "non-compliant" authors
 polluting L1. The current heuristic errs on the side of inclusion (better to show
 a few false children than miss real ones), so tightening must be validated
 against real-world data.
-
----
-
-## Low
-
-### 9. `cacheGet` mutates the cache (side effect in a "getter")
-
-Lines 622–628: `cacheGet` deletes and re-inserts the key to implement LRU
-promotion. This side effect in a getter is unexpected. Minor, but worth
-documenting or renaming to `cacheAccess`.
-
-### 10. Duplicate sort coercion logic
-
-`sortRows` + `coerce`/`subCoerce` contains the same switch-like logic repeated
-three times within the function for primary key, sub-key, and the primary-key
-equality path. Could be extracted to a helper.
-
-### 11. `thHtml` arrow-placement is unnecessarily complex
-
-Lines 1050–1056: three ternary branches determine arrow position (left vs right)
-based on CSS classes. A lookup table from column config would be clearer.
-
-### 12. Hardcoded column widths
-
-`renderL2`/`renderL3`/`renderL4` embed magic-number `colgroup` widths in HTML
-strings. Changing one requires updating all three levels. These should be
-derived from a shared column config.
-
-### 13. `isInDateRange(null) === true`
-
-Line 525: models without dates always pass the date filter. Intentional (covers
-legacy models) but undocumented.
-
-### 14. `_l2Delegated` / `_l3Delegated` / `_l4Delegated` use a hard-coded property name
-
-Fragile if a container element is reused for a different level. Consider
-namespacing with a prefix.
-
-### 15. `getOrphanQuantMethod` returns all matching quant methods but L2 badge uses only `[0]`
-
-Lines 1076–1077: only the first matching quant method is displayed via badge.
-If a model ID contains multiple quant keywords (unusual but possible), secondary
-methods are invisible.
-
-### 16. `escapeHtml` doesn't handle all edge cases
-
-Line 504: the regex-based replacement could be simpler with a `replaceAll` chain
-or a Map lookup. Functionally correct for the HTML contexts used.
-
-### 17. `buildCanonicalAuthors` recalculates on every `computeAuthorData` call
-
-Called from `computeAuthorData`, which is called every time filters change. For
-50+ authors × ~16k models this is fast, but the result is never cached across
-calls even though `_allFetched` rarely changes between filter-only updates.
 
 ---
 
