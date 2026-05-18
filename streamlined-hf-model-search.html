@@ -135,8 +135,8 @@
   <div class="ds-track-wrap">
     <div class="ds-track-bg"></div>
     <div class="ds-track-fill" id="ds-fill"></div>
-    <input type="range" id="ds-from" min="0" max="80" value="68" step="1">
-    <input type="range" id="ds-to" min="0" max="80" value="80" step="1">
+    <input type="range" id="ds-from" min="0" max="80" value="68" step="1" role="slider" aria-label="Date range start" aria-valuemin="0" aria-valuemax="80" aria-valuenow="68">
+    <input type="range" id="ds-to" min="0" max="80" value="80" step="1" role="slider" aria-label="Date range end" aria-valuemin="0" aria-valuemax="80" aria-valuenow="80">
     <div class="ps-tooltip align-right" id="ds-tooltip-from"></div>
     <div class="ps-tooltip align-left" id="ds-tooltip-to">Now</div>
   </div>
@@ -150,8 +150,8 @@
   <div class="ds-track-wrap">
     <div class="ds-track-bg"></div>
     <div class="ds-track-fill" id="ps-fill"></div>
-    <input type="range" id="ps-from" min="0" max="220" value="30" step="1">
-    <input type="range" id="ps-to" min="0" max="220" value="220" step="1">
+    <input type="range" id="ps-from" min="0" max="220" value="30" step="1" role="slider" aria-label="Parameter size start" aria-valuemin="0" aria-valuemax="220" aria-valuenow="30">
+    <input type="range" id="ps-to" min="0" max="220" value="220" step="1" role="slider" aria-label="Parameter size end" aria-valuemin="0" aria-valuemax="220" aria-valuenow="220">
     <div class="ps-tooltip" id="ps-tooltip-from" style="left:0%">750M</div>
     <div class="ps-tooltip" id="ps-tooltip-to" style="left:100%">&gt;1T</div>
   </div>
@@ -300,10 +300,11 @@ const CONFIG = {
   INIT_PARAM_SLIDER_FROM: 30,
   INIT_PARAM_SLIDER_TO: 220,
   CACHE_MAX: 50,
-  ALL_FETCHED_MAX: 2000,
+  ALL_FETCHED_MAX: 16384,
 };
 const fetchedTasks = new Set();
 let fetchedUntagged = false;
+let _fetchGeneration = 0;
 const _injectedBaseIds = new Set();
 let needsUpdate = false;
 let apiCalls = 0;
@@ -375,8 +376,13 @@ async function fetchJson(url) {
     }
     if ((res.status === 429 || res.status >= 500) && retries < MAX_RETRIES) {
       retries++;
-      const delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
-      console.warn(`fetchJson: HTTP ${res.status} for ${url}, retry ${retries}/${MAX_RETRIES} in ${delay}ms`);
+      let delay;
+      if (res.status === 429) {
+        const ra = res.headers.get('Retry-After');
+        delay = ra ? parseInt(ra, 10) * 1000 : Math.min(1000 * Math.pow(2, retries - 1), 30000);
+      } else {
+        delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
+      }
       await new Promise(r => setTimeout(r, delay));
       continue;
     }
@@ -527,12 +533,21 @@ let sortKey = "totalDownloads";
 let sortAsc = false;
 const detailSort = {};
 const cache = {};
+function cacheKeys() {
+  return Object.keys(cache).filter(k => k !== "___access");
+}
 function cacheSet(key, value) {
-  const keys = Object.keys(cache);
-  if (keys.length >= CONFIG.CACHE_MAX && !(key in cache)) {
-    delete cache[keys[0]];
-  }
+  if (key in cache) delete cache[key];
+  const ck = cacheKeys();
+  if (ck.length >= CONFIG.CACHE_MAX) delete cache[ck[0]];
   cache[key] = value;
+}
+function cacheGet(key) {
+  if (!(key in cache)) return undefined;
+  const v = cache[key];
+  delete cache[key];
+  cache[key] = v;
+  return v;
 }
 const expandedSections = new Set();
 
@@ -553,23 +568,31 @@ function qMethodToCategory(method) {
 function syncFilterChips() {
   document.querySelectorAll("#filter-bar .filter-chip").forEach(chip => {
     const m = chip.dataset.method;
-    chip.classList.toggle("active", activeFilters.has(m));
-    chip.classList.toggle("inactive", !activeFilters.has(m));
+    const on = activeFilters.has(m);
+    chip.classList.toggle("active", on);
+    chip.classList.toggle("inactive", !on);
+    chip.setAttribute("aria-pressed", String(on));
   });
   document.querySelectorAll("#from-bar .filter-chip").forEach(chip => {
     const f = chip.dataset.option;
-    chip.classList.toggle("active", activeFromFilters.has(f));
-    chip.classList.toggle("inactive", !activeFromFilters.has(f));
+    const on = activeFromFilters.has(f);
+    chip.classList.toggle("active", on);
+    chip.classList.toggle("inactive", !on);
+    chip.setAttribute("aria-pressed", String(on));
   });
   document.querySelectorAll("#to-bar .filter-chip").forEach(chip => {
     const t = chip.dataset.option;
-    chip.classList.toggle("active", activeToFilters.has(t));
-    chip.classList.toggle("inactive", !activeToFilters.has(t));
+    const on = activeToFilters.has(t);
+    chip.classList.toggle("active", on);
+    chip.classList.toggle("inactive", !on);
+    chip.setAttribute("aria-pressed", String(on));
   });
   document.querySelectorAll("#special-bar .filter-chip").forEach(chip => {
     const s = chip.dataset.special;
-    chip.classList.toggle("active", activeSpecialFilters.has(s));
-    chip.classList.toggle("inactive", !activeSpecialFilters.has(s));
+    const on = activeSpecialFilters.has(s);
+    chip.classList.toggle("active", on);
+    chip.classList.toggle("inactive", !on);
+    chip.setAttribute("aria-pressed", String(on));
   });
   const tasks = resolveTasks().sort();
   const activeContainer = document.getElementById("activated-types");
@@ -662,10 +685,16 @@ function buildFilterBar() {
     chip.className = "filter-chip active";
     chip.dataset.method = method;
     chip.textContent = method.toUpperCase();
+    chip.tabIndex = 0;
+    chip.role = "button";
+    chip.setAttribute("aria-pressed", "true");
     chip.addEventListener("click", () => {
       applyFilterLogic(method);
       syncFilterChips();
       markDirty();
+    });
+    chip.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); chip.click(); }
     });
     bar.appendChild(chip);
   });
@@ -681,14 +710,17 @@ function buildSpecialBar() {
     chip.className = "filter-chip inactive";
     chip.dataset.special = opt;
     chip.textContent = opt.replace(/ /g, "\u00A0");
+    chip.tabIndex = 0;
+    chip.role = "button";
+    chip.setAttribute("aria-pressed", "false");
     chip.addEventListener("click", () => {
-      if (activeSpecialFilters.has(opt)) {
-        activeSpecialFilters.delete(opt);
-      } else {
-        activeSpecialFilters.add(opt);
-      }
+      if (activeSpecialFilters.has(opt)) activeSpecialFilters.delete(opt);
+      else activeSpecialFilters.add(opt);
       syncFilterChips();
       markDirty();
+    });
+    chip.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); chip.click(); }
     });
     bar.appendChild(chip);
   });
@@ -700,10 +732,16 @@ function buildBar(barId, options, activeSet, clickHandler) {
     chip.className = "filter-chip " + (activeSet.has(opt) ? "active" : "inactive");
     chip.dataset.option = opt;
     chip.textContent = opt.charAt(0).toUpperCase() + opt.slice(1);
+    chip.tabIndex = 0;
+    chip.role = "button";
+    chip.setAttribute("aria-pressed", String(activeSet.has(opt)));
     chip.addEventListener("click", () => {
       clickHandler(opt);
       syncFilterChips();
       markDirty();
+    });
+    chip.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); chip.click(); }
     });
     bar.appendChild(chip);
   });
@@ -761,7 +799,6 @@ function sortRows(rows, key, asc) {
 
 // ── Level 1: Authors ──
 function renderMain(authorData) {
-  expandedSections.clear();
   const tbody = document.getElementById("body");
   const sorted = sortRows(authorData, sortKey, sortAsc);
 
@@ -784,10 +821,10 @@ function renderMain(authorData) {
 
 async function loadAuthorModels(idx, author, container) {
   try {
-    const models = cache[author + "_models"] || await fetchJson(
+    const models = cacheGet(author + "_models") || await fetchJson(
       `https://huggingface.co/api/models?author=${author}&sort=downloads&direction=-1&limit=${CONFIG.AUTHOR_LIMIT}&full=true&cardData=true`
     );
-    if (!cache[author + "_models"]) cacheSet(author + "_models", models);
+    if (!cacheGet(author + "_models")) cacheSet(author + "_models", models);
 
     const baseModels = models.filter(m => isBase(m)).map(m => ({
       id: m.id,
@@ -883,7 +920,8 @@ function renderL2(idx, models, container) {
 
   let html = `<table><thead><tr>`;
   cols.forEach(c => {
-    html += `<th data-key="${c.key}" data-level="2" class="${c.cls || ''}${state.key === c.key ? ' sorted' : ''}">${c.label} <span class="arrow">${state.key === c.key ? (state.asc ? "▲" : "▼") : ""}</span></th>`;
+    const isSorted = state.key === c.key;
+    html += `<th data-key="${c.key}" data-level="2" class="${c.cls || ''}${isSorted ? ' sorted' : ''}"${isSorted ? ` aria-sort="${state.asc ? 'ascending' : 'descending'}"` : ''}>${c.label} <span class="arrow">${isSorted ? (state.asc ? "▲" : "▼") : ""}</span></th>`;
   });
   html += `</tr></thead><tbody>`;
 
@@ -927,13 +965,15 @@ function renderL2(idx, models, container) {
         const detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
         const inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
         const tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
+        const modelKey = `m|${modelId}`;
         if (detailRow.style.display === "none") {
           detailRow.style.display = "";
           tog.classList.add("open");
-          expandedSections.add(detailRow.id);
+          expandedSections.add(modelKey);
           const key = `children-${modelId}`;
-          if (cache[key]) {
-            renderL3(l2Idx, modelIdx, modelId, cache[key], inner);
+          const cached = cacheGet(key);
+          if (cached) {
+            renderL3(l2Idx, modelIdx, modelId, cached, inner);
           } else {
             inner.innerHTML = '<div class="detail-loading">Fetching children/quantizations…</div>';
             loadChildren(l2Idx, modelIdx, modelId, inner);
@@ -941,11 +981,10 @@ function renderL2(idx, models, container) {
         } else {
           detailRow.style.display = "none";
           tog.classList.remove("open");
-          expandedSections.delete(detailRow.id);
-          ["d3","d4"].forEach(p => {
-            const children = [...expandedSections].filter(id => id.startsWith(`${p}-${l2Idx}-${modelIdx}-`));
-            children.forEach(id => expandedSections.delete(id));
-          });
+          expandedSections.delete(modelKey);
+          for (const k of [...expandedSections]) {
+            if (k.startsWith(`g|${modelId}|`)) expandedSections.delete(k);
+          }
         }
       }
     });
@@ -1034,7 +1073,8 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
 
   let html = `<table><thead><tr>`;
   cols.forEach(c => {
-    html += `<th data-key="${c.key}" data-level="3" class="${c.cls || ''}${state.key === c.key ? ' sorted' : ''}">${c.label} <span class="arrow">${state.key === c.key ? (state.asc ? "▲" : "▼") : ""}</span></th>`;
+    const isSorted = state.key === c.key;
+    html += `<th data-key="${c.key}" data-level="3" class="${c.cls || ''}${isSorted ? ' sorted' : ''}"${isSorted ? ` aria-sort="${state.asc ? 'ascending' : 'descending'}"` : ''}>${c.label} <span class="arrow">${isSorted ? (state.asc ? "▲" : "▼") : ""}</span></th>`;
   });
   html += `</tr></thead><tbody>`;
 
@@ -1080,19 +1120,18 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
         const detailRow = document.getElementById(`d3-${l2Idx}-${modelIdx}-${gIdx}`);
         const inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
         const tog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
+        const groupKey = `g|${parentId}|${author}`;
         if (detailRow.style.display === "none") {
           detailRow.style.display = "";
           tog.classList.add("open");
-          expandedSections.add(detailRow.id);
-          const allChildren = cache[`children-${parentId}`] || [];
+          expandedSections.add(groupKey);
+          const allChildren = cacheGet(`children-${parentId}`) || [];
           const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
           renderL4(l2Idx, modelIdx, gIdx, quants, inner);
         } else {
           detailRow.style.display = "none";
           tog.classList.remove("open");
-          expandedSections.delete(detailRow.id);
-          const children = [...expandedSections].filter(id => id.startsWith(`d4-${l2Idx}-${modelIdx}-${gIdx}-`));
-          children.forEach(id => expandedSections.delete(id));
+          expandedSections.delete(groupKey);
         }
       }
     });
@@ -1117,7 +1156,8 @@ function renderL4(l2Idx, modelIdx, gIdx, quants, container) {
 
   let html = `<table><thead><tr>`;
   cols.forEach(c => {
-    html += `<th data-key="${c.key}" data-level="4" class="${c.cls || ''}${st.key === c.key ? ' sorted' : ''}">${c.label} <span class="arrow">${st.key === c.key ? (st.asc ? "▲" : "▼") : ""}</span></th>`;
+    const isSorted = st.key === c.key;
+    html += `<th data-key="${c.key}" data-level="4" class="${c.cls || ''}${isSorted ? ' sorted' : ''}"${isSorted ? ` aria-sort="${st.asc ? 'ascending' : 'descending'}"` : ''}>${c.label} <span class="arrow">${isSorted ? (st.asc ? "▲" : "▼") : ""}</span></th>`;
   });
   html += `</tr></thead><tbody>`;
 
@@ -1151,51 +1191,75 @@ function renderL4(l2Idx, modelIdx, gIdx, quants, container) {
   }
 }
 
-// ── Refresh all expanded sections when filter changes ──
 function refreshAllExpanded() {
-  if (expandedSections.size === 0) return;
-
-  for (const id of expandedSections) {
-    if (id.startsWith("d1-")) {
-      const detailRow = document.getElementById(id);
-      if (!detailRow || detailRow.style.display === "none") continue;
-      const tr = detailRow.previousElementSibling;
-      if (!tr || !tr.classList.contains("l1-row")) continue;
-      const idx = parseInt(tr.dataset.l1Idx);
-      const author = tr.dataset.author;
-      const models = cache[author];
-      if (models) {
-        const inner = document.getElementById(`i1-${idx}`);
-        renderL2(idx, models.filter(m => modelPassesAllFilters(m) || _injectedBaseIds.has(m.id)), inner);
-      }
-    } else if (id.startsWith("d2-")) {
-      const detailRow = document.getElementById(id);
-      if (!detailRow || detailRow.style.display === "none") continue;
-      const tr = detailRow.previousElementSibling;
-      if (!tr || !tr.classList.contains("l2-row")) continue;
-      const l2Idx = parseInt(tr.dataset.l2Idx);
-      const modelIdx = parseInt(tr.dataset.modelIdx);
-      const modelId = tr.dataset.model;
-      const children = cache[`children-${modelId}`];
-      if (children) {
-        const inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
-        renderL3(l2Idx, modelIdx, modelId, children, inner);
-      }
-    } else if (id.startsWith("d3-")) {
-      const detailRow = document.getElementById(id);
-      if (!detailRow || detailRow.style.display === "none") continue;
-      const tr = detailRow.previousElementSibling;
-      if (!tr || !tr.classList.contains("l3-row")) continue;
-      const l2Idx = parseInt(tr.dataset.l3L2);
-      const modelIdx = parseInt(tr.dataset.l3ModelIdx);
-      const gIdx = parseInt(tr.dataset.l3Idx);
-      const parentId = tr.dataset.l3Parent;
-      const author = tr.dataset.l3Author;
-      const allChildren = cache[`children-${parentId}`] || [];
-      const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
-      const inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
-      renderL4(l2Idx, modelIdx, gIdx, quants, inner);
+  // Phase 1: re-expand L1 author rows
+  for (const key of expandedSections) {
+    if (!key.startsWith("a|")) continue;
+    const author = key.slice(2);
+    const trs = document.querySelectorAll("tr.l1-row");
+    let row, idx;
+    for (const r of trs) {
+      if (r.dataset.author === author) { row = r; idx = parseInt(r.dataset.l1Idx); break; }
     }
+    if (!row) continue;
+    const detailRow = document.getElementById(`d1-${idx}`);
+    const inner = document.getElementById(`i1-${idx}`);
+    const tog = document.getElementById(`t1-${idx}`);
+    if (!detailRow || detailRow.style.display !== "none") continue;
+    detailRow.style.display = "";
+    if (tog) tog.classList.add("open");
+    const models = cacheGet(author);
+    if (models) {
+      renderL2(idx, models.filter(m => modelPassesAllFilters(m) || _injectedBaseIds.has(m.id)), inner);
+    }
+  }
+
+  // Phase 2: re-expand L2 model rows
+  for (const key of expandedSections) {
+    if (!key.startsWith("m|")) continue;
+    const modelId = key.slice(2);
+    const trs = document.querySelectorAll("tr.l2-row");
+    let row, l2Idx, modelIdx;
+    for (const r of trs) {
+      if (r.dataset.model === modelId) { row = r; l2Idx = parseInt(r.dataset.l2Idx); modelIdx = parseInt(r.dataset.modelIdx); break; }
+    }
+    if (!row || !row.closest(".detail-inner")) continue;
+    const detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
+    const inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
+    const tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
+    if (!detailRow || detailRow.style.display !== "none") continue;
+    detailRow.style.display = "";
+    if (tog) tog.classList.add("open");
+    const children = cacheGet(`children-${modelId}`);
+    if (children) {
+      renderL3(l2Idx, modelIdx, modelId, children, inner);
+    }
+  }
+
+  // Phase 3: re-expand L3 quant author group rows
+  for (const key of expandedSections) {
+    if (!key.startsWith("g|")) continue;
+    const parts = key.split("|");
+    const modelId = parts[1];
+    const groupAuthor = parts.slice(2).join("|");
+    const trs = document.querySelectorAll("tr.l3-row");
+    let row, l2Idx, modelIdx, gIdx;
+    for (const r of trs) {
+      if (r.dataset.l3Parent === modelId && r.dataset.l3Author === groupAuthor) {
+        row = r; l2Idx = parseInt(r.dataset.l3L2); modelIdx = parseInt(r.dataset.l3ModelIdx); gIdx = parseInt(r.dataset.l3Idx);
+        break;
+      }
+    }
+    if (!row || !row.closest(".detail-inner")) continue;
+    const detailRow = document.getElementById(`d3-${l2Idx}-${modelIdx}-${gIdx}`);
+    const inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
+    const tog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
+    if (!detailRow || detailRow.style.display !== "none") continue;
+    detailRow.style.display = "";
+    if (tog) tog.classList.add("open");
+    const allChildren = cacheGet(`children-${modelId}`) || [];
+    const quants = allChildren.filter(c => c.author === groupAuthor && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
+    renderL4(l2Idx, modelIdx, gIdx, quants, inner);
   }
 }
 
@@ -1207,30 +1271,29 @@ function buildDateSlider() {
   from.value = sliderFrom;
   to.value = sliderTo;
 
-  const clamp = (isFrom) => {
-    let fv = parseInt(from.value);
-    let tv = parseInt(to.value);
-    if (isFrom) {
-      if (fv >= tv) {
-        to.value = String(Math.min(fv + 1, CONFIG.DATE_SLIDER_MAX));
-        tv = parseInt(to.value);
-        from.value = String(tv - 1);
-      }
-    } else {
-      if (tv <= fv) {
-        from.value = String(Math.max(tv - 1, 0));
-        fv = parseInt(from.value);
-        to.value = String(fv + 1);
-      }
-    }
-  };
   const read = () => { sliderFrom = parseInt(from.value); sliderTo = parseInt(to.value); };
 
   const sliderMarkDirty = debounce(markDirty, CONFIG.DEBOUNCE_MS);
-  from.addEventListener("input", () => { clamp(true); read(); updateDateUI(); });
-  from.addEventListener("change", () => { clamp(true); read(); sliderMarkDirty(); });
-  to.addEventListener("input", () => { clamp(false); read(); updateDateUI(); });
-  to.addEventListener("change", () => { clamp(false); read(); sliderMarkDirty(); });
+  from.addEventListener("input", () => {
+    let tv = parseInt(to.value);
+    if (parseInt(from.value) >= tv) from.value = String(tv - 1);
+    read(); updateDateUI();
+  });
+  from.addEventListener("change", () => {
+    let fv = parseInt(from.value), tv = parseInt(to.value);
+    if (fv >= tv) { to.value = String(Math.min(fv + 1, CONFIG.DATE_SLIDER_MAX)); tv = parseInt(to.value); from.value = String(tv - 1); }
+    read(); sliderMarkDirty();
+  });
+  to.addEventListener("input", () => {
+    let fv = parseInt(from.value);
+    if (parseInt(to.value) <= fv) to.value = String(fv + 1);
+    read(); updateDateUI();
+  });
+  to.addEventListener("change", () => {
+    let fv = parseInt(from.value), tv = parseInt(to.value);
+    if (tv <= fv) { from.value = String(Math.max(tv - 1, 0)); fv = parseInt(from.value); to.value = String(fv + 1); }
+    read(); sliderMarkDirty();
+  });
 
   updateDateUI();
 }
@@ -1238,6 +1301,8 @@ function buildDateSlider() {
 function applyFilters() {
   if (!needsUpdate) return;
   needsUpdate = false;
+  _fetchGeneration++;
+  const gen = _fetchGeneration;
   const btn = document.getElementById("get-results-btn");
   btn.classList.remove("ready");
   btn.classList.add("disabled");
@@ -1252,11 +1317,13 @@ function applyFilters() {
       if (newTasks.length > 0) {
         fresh = await fetchTasks(newTasks);
       }
+      if (gen !== _fetchGeneration) return;
       if (needUntagged) {
         const raw = await fetchUntaggedModels();
         fresh = fresh.concat(raw.filter(m => !m.pipeline_tag));
         fetchedUntagged = true;
       }
+      if (gen !== _fetchGeneration) return;
       const seen = new Set((_allFetched || []).map(m => m.id));
       const all = [...(_allFetched || [])];
       for (const m of fresh) {
@@ -1271,11 +1338,8 @@ function applyFilters() {
       } catch (e) {
         console.warn("Base model injection error:", e);
       }
-      if (all.length > CONFIG.ALL_FETCHED_MAX) {
-        const n = document.getElementById("api-counter");
-        n.textContent = "Cache: " + (all.length - CONFIG.ALL_FETCHED_MAX) + " trimmed";
-        all.splice(0, all.length - CONFIG.ALL_FETCHED_MAX);
-      }
+      if (gen !== _fetchGeneration) return;
+      if (all.length > CONFIG.ALL_FETCHED_MAX) console.warn(`Cache size ${all.length} exceeds limit ${CONFIG.ALL_FETCHED_MAX}`);
       status.textContent = "";
       document.getElementById("get-results-btn").textContent = "Refresh";
       document.getElementById("get-results-btn").classList.remove("disabled");
@@ -1300,6 +1364,8 @@ function updateDateUI() {
 
   const fromInput = document.getElementById("ds-from");
   const toInput = document.getElementById("ds-to");
+  fromInput.setAttribute("aria-valuenow", String(sliderFrom));
+  toInput.setAttribute("aria-valuenow", String(sliderTo));
   const left = sliderCenterPct(fromInput, sliderFrom, CONFIG.DATE_SLIDER_MAX);
   const right = sliderCenterPct(toInput, sliderTo, CONFIG.DATE_SLIDER_MAX);
   const fill = document.getElementById("ds-fill");
@@ -1329,30 +1395,29 @@ function buildParamSlider() {
   from.value = paramSliderFrom;
   to.value = paramSliderTo;
 
-  const clamp = (isFrom) => {
-    let fv = parseInt(from.value);
-    let tv = parseInt(to.value);
-    if (isFrom) {
-      if (fv >= tv - (CONFIG.PARAM_MIN_GAP - 1)) {
-        to.value = String(Math.min(fv + CONFIG.PARAM_MIN_GAP, parseInt(to.max)));
-        tv = parseInt(to.value);
-        from.value = String(tv - CONFIG.PARAM_MIN_GAP);
-      }
-    } else {
-      if (tv <= fv + (CONFIG.PARAM_MIN_GAP - 1)) {
-        from.value = String(Math.max(tv - CONFIG.PARAM_MIN_GAP, parseInt(from.min)));
-        fv = parseInt(from.value);
-        to.value = String(fv + CONFIG.PARAM_MIN_GAP);
-      }
-    }
-  };
   const read = () => { paramSliderFrom = parseInt(from.value); paramSliderTo = parseInt(to.value); };
 
   const sliderMarkDirty = debounce(markDirty, CONFIG.DEBOUNCE_MS);
-  from.addEventListener("input", () => { clamp(true); read(); updateParamUI(); });
-  from.addEventListener("change", () => { clamp(true); read(); sliderMarkDirty(); });
-  to.addEventListener("input", () => { clamp(false); read(); updateParamUI(); });
-  to.addEventListener("change", () => { clamp(false); read(); sliderMarkDirty(); });
+  from.addEventListener("input", () => {
+    let tv = parseInt(to.value);
+    if (parseInt(from.value) >= tv - (CONFIG.PARAM_MIN_GAP - 1)) from.value = String(Math.max(tv - CONFIG.PARAM_MIN_GAP, 0));
+    read(); updateParamUI();
+  });
+  from.addEventListener("change", () => {
+    let fv = parseInt(from.value), tv = parseInt(to.value);
+    if (fv >= tv - (CONFIG.PARAM_MIN_GAP - 1)) { to.value = String(Math.min(fv + CONFIG.PARAM_MIN_GAP, parseInt(to.max))); tv = parseInt(to.value); from.value = String(tv - CONFIG.PARAM_MIN_GAP); }
+    read(); sliderMarkDirty();
+  });
+  to.addEventListener("input", () => {
+    let fv = parseInt(from.value);
+    if (parseInt(to.value) <= fv + (CONFIG.PARAM_MIN_GAP - 1)) to.value = String(fv + CONFIG.PARAM_MIN_GAP);
+    read(); updateParamUI();
+  });
+  to.addEventListener("change", () => {
+    let fv = parseInt(from.value), tv = parseInt(to.value);
+    if (tv <= fv + (CONFIG.PARAM_MIN_GAP - 1)) { from.value = String(Math.max(tv - CONFIG.PARAM_MIN_GAP, 0)); fv = parseInt(from.value); to.value = String(fv + CONFIG.PARAM_MIN_GAP); }
+    read(); sliderMarkDirty();
+  });
 
   updateParamUI();
 }
@@ -1363,6 +1428,8 @@ function updateParamUI() {
 
   const fromInput = document.getElementById("ps-from");
   const toInput = document.getElementById("ps-to");
+  fromInput.setAttribute("aria-valuenow", String(paramSliderFrom));
+  toInput.setAttribute("aria-valuenow", String(paramSliderTo));
   const left = sliderCenterPct(fromInput, paramSliderFrom);
   const right = sliderCenterPct(toInput, paramSliderTo);
 
@@ -1386,6 +1453,8 @@ function updateArrows() {
     const active = th.dataset.key === sortKey;
     arrow.textContent = active ? (sortAsc ? "▲" : "▼") : "";
     th.classList.toggle("sorted", active);
+    if (active) th.setAttribute("aria-sort", sortAsc ? "ascending" : "descending");
+    else th.removeAttribute("aria-sort");
   });
 }
 
@@ -1407,24 +1476,27 @@ document.querySelector("#main-table").addEventListener("click", e => {
     const detailRow = document.getElementById(`d1-${idx}`);
     const inner = document.getElementById(`i1-${idx}`);
     const tog = document.getElementById(`t1-${idx}`);
+    const authorKey = `a|${author}`;
     if (detailRow.style.display === "none") {
       detailRow.style.display = "";
       tog.classList.add("open");
-      expandedSections.add(detailRow.id);
-      if (!cache[author]) {
+      expandedSections.add(authorKey);
+      const baseModels = cacheGet(author);
+      if (!baseModels) {
         inner.innerHTML = '<div class="detail-loading">Fetching base models…</div>';
         loadAuthorModels(idx, author, inner);
       } else {
-        renderL2(idx, cache[author].filter(m => modelPassesAllFilters(m) || _injectedBaseIds.has(m.id)), inner);
+        renderL2(idx, baseModels.filter(m => modelPassesAllFilters(m) || _injectedBaseIds.has(m.id)), inner);
       }
     } else {
       detailRow.style.display = "none";
       tog.classList.remove("open");
-      expandedSections.delete(detailRow.id);
-      ["d2","d3","d4"].forEach(p => {
-        const children = [...expandedSections].filter(id => id.startsWith(`${p}-${idx}-`));
-        children.forEach(id => expandedSections.delete(id));
-      });
+      expandedSections.delete(authorKey);
+      for (const key of [...expandedSections]) {
+        if (key.startsWith(`m|${author}/`) || key.startsWith(`g|${author}/`)) {
+          expandedSections.delete(key);
+        }
+      }
     }
   }
 });
@@ -1435,22 +1507,29 @@ async function fetchTasks(tasks) {
   const status = document.getElementById("status");
   const seen = new Set();
   const allFetched = [];
-  for (let i = 0; i < tasks.length; i++) {
-    status.textContent = `Fetching ${tasks[i]}… (${i + 1}/${tasks.length})`;
-    try {
-      const downloadsModels = await fetchModels(tasks[i]);
-      const recentModels = await fetchRecentModels(tasks[i]);
-      const combined = [...downloadsModels, ...recentModels];
+  const CONCURRENCY = 5;
+  for (let start = 0; start < tasks.length; start += CONCURRENCY) {
+    const batch = tasks.slice(start, start + CONCURRENCY);
+    status.textContent = `Fetching ${batch.join(", ")}… (${Math.min(start + CONCURRENCY, tasks.length)}/${tasks.length})`;
+    const results = await Promise.allSettled(batch.map(async tag => {
+      const downloadsModels = await fetchModels(tag);
+      const recentModels = await fetchRecentModels(tag);
+      return { tag, combined: [...downloadsModels, ...recentModels] };
+    }));
+    for (const r of results) {
+      if (r.status === "rejected") {
+        console.warn("fetchTasks: task failed", r.reason);
+        continue;
+      }
+      const { tag, combined } = r.value;
       for (const m of combined) {
         if (seen.has(m.id)) continue;
         seen.add(m.id);
         m.paramB = getParamCount(m);
-        if (!m.pipeline_tag) m.pipeline_tag = tasks[i];
+        if (!m.pipeline_tag) m.pipeline_tag = tag;
         allFetched.push(m);
       }
-      fetchedTasks.add(tasks[i]);
-    } catch (e) {
-      status.textContent = `Error fetching ${tasks[i]}: ${e.message}`;
+      fetchedTasks.add(tag);
     }
   }
   return allFetched;
