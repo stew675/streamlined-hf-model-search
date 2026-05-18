@@ -158,12 +158,17 @@ elements with `aria-expanded` toggling between `true`/`false`.
 
 ---
 
-## Optimization Ideas
+## Fixed (Optimization)
+
+### 20. Deduplicate `fetchJson` calls
+
+Added `_inflightFetches` Map (`IMPROVEMENTS.md:167`). The `fetchJson` function now checks for an existing inflight promise for the given URL before starting a new request. If found, it returns the existing promise — exactly the same pattern as `_inflightChildren` for L3/L4. The entry is cleaned up via `promise.finally()` once settled (resolve or reject).
+
+This is a safety net: L3/L4 fetches already deduplicate via `_inflightChildren`, and L2 author fetches are cached, but any concurrent call to `fetchJson` with the same URL (e.g., individual model deepening at line 1006) will now share one HTTP request.
+
+## Remaining Optimization Ideas
 
 | Area | Suggestion |
 |------|-----------|
 | UI | **Author search/filter** for L1 table (50+ authors, no way to filter) |
 | L1 table | **Virtual scrolling** for >50 authors |
-| API | **Deduplicate `fetchJson` calls** — if two callers request the same URL concurrently, merge into one inflight promise |
-| Cache | Prune `cache` entries by LRU when total exceeds a threshold (e.g. 50MB estimated) |
-| Hardcoded limit | Show a "Limited to top 500" note for popular tasks that miss tail models |

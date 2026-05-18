@@ -353,60 +353,72 @@ function matchesTaskFilter(pipelineTag) {
 }
 
 const _apiTimestamps = [];
+const _inflightFetches = new Map();
 
 async function fetchJson(url) {
-  let retries = 0;
-  const MAX_RETRIES = CONFIG.MAX_RETRIES;
-  while (true) {
-    const now = Date.now();
-    const cutoff = now - CONFIG.RATE_WINDOW;
-    while (_apiTimestamps.length > 0 && _apiTimestamps[0] < cutoff) {
-      _apiTimestamps.shift();
-    }
-    if (_apiTimestamps.length >= CONFIG.RATE_LIMIT) {
-      const wait = _apiTimestamps[0] + CONFIG.RATE_WINDOW - now + 10;
-      await new Promise(r => setTimeout(r, wait));
-      continue;
-    }
-    _apiTimestamps.push(now);
-    let res;
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT);
-      try {
-        res = await fetch(url, { signal: controller.signal });
-      } finally {
-        clearTimeout(timer);
+  const existing = _inflightFetches.get(url);
+  if (existing) return existing;
+
+  const promise = (async () => {
+    let retries = 0;
+    const MAX_RETRIES = CONFIG.MAX_RETRIES;
+    while (true) {
+      const now = Date.now();
+      const cutoff = now - CONFIG.RATE_WINDOW;
+      while (_apiTimestamps.length > 0 && _apiTimestamps[0] < cutoff) {
+        _apiTimestamps.shift();
       }
-    } catch (err) {
-      if (retries < MAX_RETRIES) {
+      if (_apiTimestamps.length >= CONFIG.RATE_LIMIT) {
+        const wait = _apiTimestamps[0] + CONFIG.RATE_WINDOW - now + 10;
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+      _apiTimestamps.push(now);
+      let res;
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT);
+        try {
+          res = await fetch(url, { signal: controller.signal });
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch (err) {
+        if (retries < MAX_RETRIES) {
+          retries++;
+          const delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
+          console.warn(`fetchJson: network error for ${url}, retry ${retries}/${MAX_RETRIES} in ${delay}ms`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+        throw err;
+      }
+      if (res.ok) {
+        incApiCalls(1);
+        return res.json();
+      }
+      if ((res.status === 429 || res.status >= 500) && retries < MAX_RETRIES) {
         retries++;
-        const delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
-        console.warn(`fetchJson: network error for ${url}, retry ${retries}/${MAX_RETRIES} in ${delay}ms`);
+        let delay;
+        if (res.status === 429) {
+          const ra = res.headers.get('Retry-After');
+          delay = ra ? parseInt(ra, 10) * 1000 : Math.min(1000 * Math.pow(2, retries - 1), 30000);
+        } else {
+          delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
+        }
         await new Promise(r => setTimeout(r, delay));
         continue;
       }
-      throw err;
-    }
-    if (res.ok) {
       incApiCalls(1);
-      return res.json();
+      throw new Error(`HTTP ${res.status}`);
     }
-    if ((res.status === 429 || res.status >= 500) && retries < MAX_RETRIES) {
-      retries++;
-      let delay;
-      if (res.status === 429) {
-        const ra = res.headers.get('Retry-After');
-        delay = ra ? parseInt(ra, 10) * 1000 : Math.min(1000 * Math.pow(2, retries - 1), 30000);
-      } else {
-        delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
-      }
-      await new Promise(r => setTimeout(r, delay));
-      continue;
-    }
-    incApiCalls(1);
-    throw new Error(`HTTP ${res.status}`);
-  }
+  })();
+
+  _inflightFetches.set(url, promise);
+  promise.finally(() => {
+    if (_inflightFetches.get(url) === promise) _inflightFetches.delete(url);
+  });
+  return promise;
 }
 
 async function fetchModels(task) {
