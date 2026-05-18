@@ -52,93 +52,58 @@ the new modality combination.
 
 ---
 
-## Medium
+## Fixed (Items 5 & 8) — branch `fix/child-detection-false-positives`
 
-### 5. Search API can produce false-positive children
+Implemented the four-point plan from the original Medium section. All changes in
+`loadChildren` (`streamlined-hf-model-search.html:1157`).
 
-Lines 1165–1174: the `nameMatches && isQuant` heuristic flags any model whose
-ID contains the parent's name AND a quant keyword. For example, if parent is
-`Qwen/Qwen2.5-7B`, a model `Qwen/Qwen2.5-7B-Coder-FP8` (not a fine-tune of the
-7B) is included because it has "fp8" in the name and "qwen2.5-7b" in the parent
-name. The `hasBaseModel` check in the OR condition means either match suffices.
+### 5. Search API false-positive children
 
-### 8. Search API false positive: `same-author fine-tune` guard may miss some
+**Root cause**: `nameMatches = idLower.includes(modelName.toLowerCase())` matched
+prefix collisions (e.g. `Qwen2.5-7B-Coder-FP8` contains `Qwen2.5-7B`).
 
-Lines 1173–1174 in `loadChildren` skip same-author fine-tunes at L3 but the
-condition `!hasBaseModel && !isQuant && childAuthor === parentAuthor` may be
-overly broad — a same-author fine-tune that happens to have a quant keyword in
-its name would pass through as a false positive.
+**Fix**: Replaced `includes()` with `strictNameMatch` — iteratively strips known
+trailing quant suffixes (`-gguf`, `-awq`, `-fp8`, ...) from the candidate's name
+portion, then checks equality against `modelName`. Cross-author orphan quants
+(e.g. `SomeAuthor/Qwen2.5-7B-GGUF`) still match because only the name part is
+compared. Prefix collisions with extra segments (e.g. `Qwen2.5-7B-Coder-FP8`)
+correctly fail.
 
-### Plan for items 5 and 8
+Also added two extra guards for inferred children (`!hasBaseModel`):
+- **Pipeline-tag filter** (plan item 4): skip if `m.pipeline_tag` exists and is
+  not in `activeTaskFilters`.
+- **`_allFetched` de-dup** (plan item 2): skip if model is already known as a
+  base model in `_allFetched`.
 
-Both items stem from the same root tension:
+### 8. Same-author guard loophole
 
-> We want to catch models that *are* children of a base model (fine-tunes and
-> quants) even when the author failed to correctly set `cardData.base_model`.
-> But we must **not** reintroduce the old problem where non-compliant authors
-> flood L1 with false-positive base models.
+**Root cause**: `if (!isQuant && childAuthor === parentAuthor) continue` let
+same-author fine-tunes with quant keywords in the name pass through.
 
-Current heuristic in `loadChildren` (item 5):
-```js
-if (hasBaseModel || (nameMatches && isQuant)) { ... }
+**Fix**: Replaced the two conditional same-author guard lines with a single
+unconditional `if (childAuthor === parentAuthor) continue;` before the entry
+`if (hasBaseModel || ...)`. Same-author models are always visible at L2, so
+they never belong at L3 regardless of quant keywords.
+
+### Code diff summary
+
 ```
-The `nameMatches && isQuant` branch is the risky one. It catches legitimate
-orphan quants (e.g. `Qwen/Qwen2.5-7B-GGUF` has no `base_model` but name
-contains "Qwen2.5-7B" and "gguf") but also catches unrelated models that
-happen to share a name prefix and a quant keyword.
+- const nameMatches = idLower.includes(modelName.toLowerCase());
+- if (hasBaseModel || (nameMatches && isQuant)) {
+-     ...
+-     if (hasBaseModel && childAuthor === parentAuthor && !isQuant) continue;
+-     if (!hasBaseModel && !isQuant && childAuthor === parentAuthor) continue;
 
-Item 8 is a related edge: same-author fine-tunes at L3 that happen to have a
-quant keyword in the name pass through because `isQuant` is true, so the
-`childAuthor === parentAuthor` skip doesn't fire.
-
-**Proposed approach (documentation only — not yet implemented):**
-
-1. **Tighten `nameMatches`**: instead of `idLower.includes(modelName.toLowerCase())`,
-   require an exact match on the suffix after stripping quant keywords. For each
-   candidate, strip known quant suffixes (`-GGUF`, `-AWQ`, `-FP8`, etc.), then check
-   if the stripped ID equals `parentId`. This prevents prefix-collision false
-   positives (`Qwen2.5-7B-Coder-FP8` stripped → `Qwen/Qwen2.5-7B-Coder`, which
-   does **not** equal `Qwen/Qwen2.5-7B`).
-
-2. **Validate inferred children against `_allFetched`**: before labelling a model
-   as a child at L3, check whether the model's own `cardData.base_model` matches
-   the parent. If it does, it's a confirmed child. If not, check whether the model
-   is already present as a base model in `_allFetched` (meaning it has already
-   surfaced at L1/L2). If it's already a known base model, it should **not** appear
-   as a child at L3. This prevents cross-author false positives where Author B's
-   fine-tune of Author A's model would incorrectly show up under Author A at L3.
-
-3. **Fix item 8 by flipping the guard order**: in the L3 filter, first check
-   `childAuthor === parentAuthor` unconditionally. If true, the model is already
-   visible at L2 (same-author fine-tunes are treated as base models) so skip it
-   regardless of quant keywords. Then apply the quant/finetune label logic only
-   for cross-author models. This eliminates the `!isQuant` loophole.
-
-   Current (buggy):
-   ```js
-   if (hasBaseModel && childAuthor === parentAuthor && !isQuant) continue;
-   if (!hasBaseModel && !isQuant && childAuthor === parentAuthor) continue;
-   ```
-   Proposed:
-   ```js
-   if (childAuthor === parentAuthor) continue;  // already at L2, always skip
-   ```
-
-4. **Add a `_isFalseChild` flag on models in `_allFetched`**: when a model appears
-   as a search result in `loadChildren`, also check if its `pipeline_tag` is in the
-   active set. If not, it was picked up by the search but isn't relevant to the
-   current filter context — skip it.
-
-**Risk**: Approach 1 (suffix stripping) could miss legitimate children whose
-name includes a quant keyword in the middle rather than as a suffix (rare but
-possible). Approach 2 depends on `_allFetched` being sufficiently complete
-(which the 16k cap at item 7 helps limit).
-
-**Decision gate**: only implement if testing confirms that false positives drop
-to near-zero *without* re-introducing the old problem of "non-compliant" authors
-polluting L1. The current heuristic errs on the side of inclusion (better to show
-a few false children than miss real ones), so tightening must be validated
-against real-world data.
++ const childAuthor = m.id.split("/")[0];
++ const parentAuthor = parentId.split("/")[0];
++ if (childAuthor === parentAuthor) continue;
++
++ if (hasBaseModel || (strictNameMatch(m.id) && isQuant)) {
++     if (!hasBaseModel) {
++       if (m.pipeline_tag && !activeTaskFilters.has(m.pipeline_tag)) continue;
++       if (_allFetched && _allFetched.some(f => f.id === m.id)) continue;
++     }
+```
 
 ---
 

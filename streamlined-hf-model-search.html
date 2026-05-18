@@ -1171,6 +1171,23 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       const results = [];
       const seen = new Set();
 
+      const strictNameMatch = (candidateId) => {
+        let name = candidateId.split("/").slice(1).join("/");
+        let changed;
+        do {
+          changed = false;
+          for (const q of Q_METHODS) {
+            const suffix = '-' + q;
+            if (name.toLowerCase().endsWith(suffix)) {
+              name = name.slice(0, -suffix.length);
+              changed = true;
+              break;
+            }
+          }
+        } while (changed);
+        return name.toLowerCase() === modelName.toLowerCase();
+      };
+
       const searches = [
         `https://huggingface.co/api/models?search=${encodeURIComponent(parentId)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`,
         `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`
@@ -1189,13 +1206,15 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
           const isQuant = Q_METHODS.some(t => idLower.includes(t) || tagsStr.includes(t));
           const hasBaseModel = baseModel === parentId ||
                                Array.isArray(baseModel) && baseModel.some(b => b === parentId);
-          const nameMatches = idLower.includes(modelName.toLowerCase());
+          const childAuthor = m.id.split("/")[0];
+          const parentAuthor = parentId.split("/")[0];
+          if (childAuthor === parentAuthor) continue;
 
-          if (hasBaseModel || (nameMatches && isQuant)) {
-              const childAuthor = m.id.split("/")[0];
-              const parentAuthor = parentId.split("/")[0];
-              if (hasBaseModel && childAuthor === parentAuthor && !isQuant) continue;
-              if (!hasBaseModel && !isQuant && childAuthor === parentAuthor) continue;
+          if (hasBaseModel || (strictNameMatch(m.id) && isQuant)) {
+              if (!hasBaseModel) {
+                if (m.pipeline_tag && !activeTaskFilters.has(m.pipeline_tag)) continue;
+                if (_allFetched && _allFetched.some(f => f.id === m.id)) continue;
+              }
               const qMethods = Q_METHODS.filter(t => idLower.includes(t) || tagsStr.includes(t));
               let qMethod = qMethods.length ? qMethods.join(", ") : (hasBaseModel ? "finetune" : (tagsStr.includes("safetensors") ? "safetensors" : "derivative"));
               results.push({
