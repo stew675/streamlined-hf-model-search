@@ -1328,8 +1328,17 @@ function applyFilters() {
         }
       }
       _allFetched = all;
+      _authorData = computeAuthorData();
+      renderMain(_authorData);
+      updateArrows();
+      status.textContent = `Rendered ${_authorData.length} authors, resolving base models…`;
       try {
-        await injectBaseModels(all);
+        await injectBaseModels(all, () => {
+          if (gen !== _fetchGeneration) return;
+          _authorData = computeAuthorData();
+          renderMain(_authorData);
+          updateArrows();
+        });
       } catch (e) {
         console.warn("Base model injection error:", e);
       }
@@ -1528,12 +1537,12 @@ async function fetchTasks(tasks) {
   return allFetched;
 }
 
-async function injectBaseModels(all) {
+async function injectBaseModels(all, onBatch) {
   _injectedBaseIds.clear();
   const seen = new Set(all.map(m => m.id));
   const status = document.getElementById("status");
   const injected = [];
-  let total = 0;
+  const fetchQueue = new Map();
 
   for (let i = 0; i < all.length; i++) {
     const m = all[i];
@@ -1567,20 +1576,36 @@ async function injectBaseModels(all) {
         parent._injected = true;
         _injectedBaseIds.add(baseId);
       }
-    } else if (!bm || !isBase(m)) {
-      try {
-        total++;
-        status.textContent = `Resolving base models… (${total})`;
-        const full = await fetchJson(`https://huggingface.co/api/models/${baseId}?full=true`);
-        full.paramB = getParamCount(full);
-        full._injected = true;
-        injected.push(full);
-        seen.add(baseId);
-        _injectedBaseIds.add(baseId);
-      } catch (e) {
-        console.warn("Failed to fetch base model", baseId, e);
+    } else if (bm && !isBase(m)) {
+      if (!fetchQueue.has(baseId)) {
+        fetchQueue.set(baseId, true);
       }
     }
+  }
+
+  const baseIds = [...fetchQueue.keys()];
+  let total = 0;
+  for (let i = 0; i < baseIds.length; i += CONFIG.PARAM_BATCH_SIZE) {
+    const batch = baseIds.slice(i, i + CONFIG.PARAM_BATCH_SIZE);
+    total += batch.length;
+    status.textContent = `Resolving base models… (${total})`;
+    const results = await Promise.allSettled(batch.map(async (baseId) => {
+      const full = await fetchJson(`https://huggingface.co/api/models/${baseId}?full=true`);
+      full.paramB = getParamCount(full);
+      full._injected = true;
+      return full;
+    }));
+    for (const r of results) {
+      if (r.status === "fulfilled") {
+        const full = r.value;
+        injected.push(full);
+        seen.add(full.id);
+        _injectedBaseIds.add(full.id);
+      } else {
+        console.warn("Failed to fetch base model", r.reason);
+      }
+    }
+    if (onBatch) onBatch();
   }
 
   all.push(...injected);
