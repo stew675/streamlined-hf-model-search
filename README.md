@@ -88,6 +88,16 @@ The other text filters control which models and derivative authors will be displ
 - **API call counter** - displays total requests made in the session
 - **Quant badges** - color-coded by method (FP4, FP8, AWQ, GGUF, MLX, etc.); all detected methods shown
 
+## Caveats
+
+By necessity of being kind to the Hugging Face API end-point, not all author and model results are exhaustively complete.
+
+Unfortunately many authors don't tag their model metadata properly.
+In order to expose such authors would require hammering the HuggingFace API quite heavily which is bad practise.
+
+As a result, if you know the name of a specific author/model that you're looking for, then just use the regular Hugging Face Search Page and look them up there.
+
+While the utility has extremely generous limits for the number of authors it will pull, for very obscure authors with no real visibility or active use, then these may be left out of the search results.  Again, if you're looking for something extremely obscure or specific, use the main HuggingFace Search Page.
 
 ## Browser Requirements
 
