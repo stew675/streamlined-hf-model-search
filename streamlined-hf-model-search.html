@@ -9,7 +9,9 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #c9d1d9; padding: 24px; }
   h1 { font-size: 1.4rem; margin-bottom: 4px; color: #e6edf3; text-align: center; }
-  #status { font-size: 0.85rem; color: #8b949e; margin-bottom: 12px; min-height: 1.2em; display: flex; }
+  #status { font-size: 0.85rem; color: #8b949e; min-height: 1.2em; }
+  #status-bar { display: flex; margin-bottom: 12px; }
+  #version { color: #8b949e; font-size: 0.85rem; margin-left: auto; }
   #main-table, .detail-inner table { width: 100%; border-collapse: collapse; font-size: 0.85rem; table-layout: fixed; }
   th.right, td.right { white-space: nowrap; }
   .updated-cell { padding-left: 10px; text-align: left; white-space: nowrap; }
@@ -164,7 +166,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status" aria-live="polite">Fetching models… <span id="version" style="margin-left:auto">Version: 39e6d5f</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 39e6d5f</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
