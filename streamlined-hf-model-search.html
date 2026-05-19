@@ -9,7 +9,7 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #c9d1d9; padding: 24px; }
   h1 { font-size: 1.4rem; margin-bottom: 4px; color: #e6edf3; text-align: center; }
-  #status { font-size: 0.85rem; color: #8b949e; margin-bottom: 12px; min-height: 1.2em; }
+  #status { font-size: 0.85rem; color: #8b949e; margin-bottom: 12px; min-height: 1.2em; display: flex; }
   #main-table, .detail-inner table { width: 100%; border-collapse: collapse; font-size: 0.85rem; table-layout: fixed; }
   th.right, td.right { white-space: nowrap; }
   .updated-cell { padding-left: 10px; text-align: left; white-space: nowrap; }
@@ -40,7 +40,6 @@
   .arrow-left { margin-right: 4px; font-size: 0.7rem; color: #58a6ff; }
   .task { text-align: left; white-space: nowrap; }
   #count { font-size: 0.85rem; color: #8b949e; margin-top: 8px; }
-  #version { font-size: 0.65rem; color: #30363d; margin-top: 4px; }
 
   .toggle { display: inline-block; width: 16px; text-align: center; color: #8b949e; margin-right: 4px; font-size: 0.7rem; transition: transform 0.15s, color 0.15s; flex-shrink: 0; }
   .toggle.open { transform: rotate(90deg); color: #58a6ff; }
@@ -165,7 +164,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status" aria-live="polite">Fetching models…</div>
+<div id="status" aria-live="polite">Fetching models… <span id="version" style="margin-left:auto">Version: 39e6d5f</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -243,7 +242,6 @@
   <tbody id="body"></tbody>
 </table>
 <div id="count"></div>
-<div id="version">39e6d5f</div>
 
 <script>
 (function() {
