@@ -1003,17 +1003,17 @@ function renderMain(authorData) {
     });
   }
 
-  let html = "";
-  sorted.forEach((a, idx) => {
+  // Optimized: Use map + join to create the HTML string in one pass
+  const html = sorted.map((a, idx) => {
     const zebra = idx % 2 === 0 ? "row-even" : "row-odd";
-    html += `<tr class="l1-row ${zebra}" data-l1-idx="${idx}" data-author="${escapeHtml(a.author)}">
+    return `<tr class="l1-row ${zebra}" data-l1-idx="${idx}" data-author="${escapeHtml(a.author)}">
       <td><span class="toggle" id="t1-${idx}">▶</span><a href="https://huggingface.co/${escapeHtml(a.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(a.author)}</a></td>
       <td class="right">${a.count}</td>
       <td class="right">${fmt(a.totalDownloads)}</td>
       <td class="right">${fmt(a.totalLikes)}</td>
     </tr>
     <tr class="detail-row" id="d1-${idx}" style="display:none"><td colspan="4"><div class="detail-inner" id="i1-${idx}"></div></td></tr>`;
-  });
+  }).join('');
 
   tbody.innerHTML = html;
   document.getElementById("count").textContent =
