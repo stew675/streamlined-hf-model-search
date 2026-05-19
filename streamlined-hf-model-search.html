@@ -105,6 +105,7 @@
     margin-left: auto; }
   #get-results-btn.ready { background: #238636; color: #fff; border-color: #2ea043; cursor: pointer; box-shadow: 0 0 8px #23863666; }
   #get-results-btn.ready:hover { background: #2ea043; box-shadow: 0 0 12px #2ea04388; }
+  #get-results-btn:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
   #get-results-btn.disabled { pointer-events: none; opacity: 0.5; }
 
   #text-filter-row { display: flex; gap: 10px; margin: 0 0 10px; align-items: center; flex-wrap: wrap; }
@@ -170,8 +171,8 @@
     <div class="ds-track-fill" id="ds-fill"></div>
     <input type="range" id="ds-from" min="0" max="80" value="68" step="1" role="slider" aria-label="Date range start" aria-valuemin="0" aria-valuemax="80" aria-valuenow="68">
     <input type="range" id="ds-to" min="0" max="80" value="80" step="1" role="slider" aria-label="Date range end" aria-valuemin="0" aria-valuemax="80" aria-valuenow="80">
-    <div class="ps-tooltip align-right" id="ds-tooltip-from"></div>
-    <div class="ps-tooltip align-left" id="ds-tooltip-to">Now</div>
+    <div class="ps-tooltip align-right" id="ds-tooltip-from" aria-hidden="true"></div>
+    <div class="ps-tooltip align-left" id="ds-tooltip-to" aria-hidden="true">Now</div>
   </div>
   <div class="ds-labels">
     <span><span class="ds-l">From:</span> <span class="ds-v" id="ds-from-label"></span></span>
@@ -185,8 +186,8 @@
     <div class="ds-track-fill" id="ps-fill"></div>
     <input type="range" id="ps-from" min="0" max="220" value="30" step="1" role="slider" aria-label="Parameter size start" aria-valuemin="0" aria-valuemax="220" aria-valuenow="30">
     <input type="range" id="ps-to" min="0" max="220" value="220" step="1" role="slider" aria-label="Parameter size end" aria-valuemin="0" aria-valuemax="220" aria-valuenow="220">
-    <div class="ps-tooltip" id="ps-tooltip-from" style="left:0%">750M</div>
-    <div class="ps-tooltip" id="ps-tooltip-to" style="left:100%">&gt;1T</div>
+    <div class="ps-tooltip" id="ps-tooltip-from" style="left:0%" aria-hidden="true">750M</div>
+    <div class="ps-tooltip" id="ps-tooltip-to" style="left:100%" aria-hidden="true">&gt;1T</div>
   </div>
   <div class="ds-labels">
     <span><span class="ds-l">From:</span> <span class="ds-v" id="ps-from-label">750M</span></span>
@@ -231,10 +232,10 @@
 <table id="main-table">
   <thead>
     <tr>
-      <th data-key="author">Model Author<span class="arrow"></span></th>
-      <th data-key="count" class="right"><span class="sort-arrow"></span>Base Models</th>
-      <th data-key="totalDownloads" class="right"><span class="sort-arrow"></span>Total Downloads</th>
-      <th data-key="totalLikes" class="right"><span class="sort-arrow"></span>Total Likes</th>
+      <th data-key="author" scope="col">Model Author<span class="arrow"></span></th>
+      <th data-key="count" class="right" scope="col"><span class="sort-arrow"></span>Base Models</th>
+      <th data-key="totalDownloads" class="right" scope="col"><span class="sort-arrow"></span>Total Downloads</th>
+      <th data-key="totalLikes" class="right" scope="col"><span class="sort-arrow"></span>Total Likes</th>
     </tr>
   </thead>
   <tbody id="body"></tbody>
@@ -328,14 +329,14 @@ const activeSpecialFilters = new Set();
 const CONFIG = {
   LIMIT: 500,
   PARAM_SLIDER_MAX: 220,
-  RATE_LIMIT: 10,
-  RATE_WINDOW: 1000,
+  RATE_LIMIT: 8,
+  RATE_WINDOW: 2000,
   FETCH_TIMEOUT: 60000,
   MAX_RETRIES: 3,
   DATE_SLIDER_MAX: 80,
   DAYS_PER_STEP: 14,
-  PARAM_BATCH_SIZE: 5,
-  INJECTION_BATCH_SIZE: 10,
+  PARAM_BATCH_SIZE: 4,
+  INJECTION_BATCH_SIZE: 8,
   PARAM_MIN_GAP: 5,
   AUTHOR_LIMIT: 1000,
   CHILD_LIMIT: 1000,
@@ -349,6 +350,10 @@ const CONFIG = {
 };
 const fetchedTasks = new Set();
 let fetchedUntagged = false;
+// Generation counter: monotonic tick on every "Get Results" click.
+// All async functions capture gen at entry and bail if stale before touching shared state.
+// Chosen over AbortController because it guards post-fetch side effects (render, cache write)
+// not just the fetch itself. AbortController would need a parallel mechanism anyway.
 let _fetchGeneration = 0;
 const _injectedBaseIds = new Set();
 let needsUpdate = false;
@@ -382,6 +387,9 @@ function matchesTaskFilter(pipelineTag) {
 const _apiTimestamps = [];
 const _inflightFetches = new Map();
 
+// Fetches with URL-level dedup, rate limiting (sliding window), and exponential backoff.
+// URL dedup via _inflightFetches is checked before rate limiting so concurrent requests
+// for the same URL share a single inflight promise instead of each consuming a rate-limit slot.
 async function fetchJson(url) {
   const existing = _inflightFetches.get(url);
   if (existing) return existing;
@@ -448,6 +456,11 @@ async function fetchJson(url) {
   return promise;
 }
 
+// Full=true&cardData=true on every fetch: the HF search API never returns safetensors/gguf
+// metadata or cardData without full=true. This is the only way to get base_model info for
+// hierarchy resolution. The payload is ~5-10KB/model, stored in _allFetched (capped at 16k).
+// This is a memory-vs-API-calls tradeoff: fetching light payloads initially and lazy-loading
+// details would multiply API calls by ~5-10x.
 async function fetchModels(task) {
   return fetchJson(`https://huggingface.co/api/models?sort=downloads&direction=-1&limit=${CONFIG.LIMIT}&pipeline_tag=${task}&full=true&cardData=true`);
 }
@@ -460,6 +473,9 @@ async function fetchUntaggedModels() {
   return fetchJson(`https://huggingface.co/api/models?sort=downloads&direction=-1&limit=${CONFIG.LIMIT}&full=true&cardData=true`);
 }
 
+// A model is "base" if it has no cardData.base_model, or its base_model points to the same author.
+// Same-author fine-tunes appear at L2 alongside true base models, since users
+// browsing an author page already see them as part of that author's lineage.
 function isBase(model) {
   const cd = model.cardData;
   if (!cd) return true;
@@ -471,6 +487,8 @@ function isBase(model) {
   return false;
 }
 
+// Iteratively strip trailing -segments from a model ID until a known parent is found.
+// Handles patterns like Qwen2.5-7B-AWQ → Qwen2.5-7B, or Qwen3-Coder-Next-GGUF → Qwen3-Coder-Next.
 function inferParent(modelId, knownIds) {
   const bits = modelId.split('/');
   let name = bits[1];
@@ -484,6 +502,9 @@ function inferParent(modelId, knownIds) {
   return null;
 }
 
+// Quant model without explicit base_model metadata, but whose parent is in knownIds.
+// Shown at L2 with an orphan badge. knownIds comes from _allFetched (full set, not date-filtered)
+// so a parent outside the date range still suppresses the quant from appearing standalone at L1.
 function isOrphanQuant(model, knownIds) {
   const cd = model.cardData;
   if (cd && cd.base_model) return false;
@@ -545,6 +566,7 @@ function fmtAge(d) {
   if (days < 365) return `${Math.floor(days / 30)}mo`;
   return `${(days / 365).toFixed(1)}y`;
 }
+// Object-lookup escape: single-pass replacement, faster than chained .replaceAll calls.
 const _htmlEsc = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(str) { return String(str).replace(/[&<>"']/g, c => _htmlEsc[c]); }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
@@ -580,6 +602,9 @@ function getParamCount(m) {
   if (mMatch) return parseFloat(mMatch[1]) / 1000;
   return null;
 }
+// Piecewise-linear mapping: 7 segments covering 0..1000B params on a 220-position slider.
+// Dense at low end (0.025B/step up to 1B), coarser above. Chosen over continuous
+// log scale because users care about discrete breakpoints (1B, 7B, 13B, 70B, etc.).
 function paramPosToValue(pos) {
   if (pos <= 0) return 0;
   if (pos >= CONFIG.PARAM_SLIDER_MAX) return Infinity;
@@ -620,6 +645,9 @@ function isInParamRange(paramB) {
   const toVal = paramPosToValue(paramSliderTo);
   return paramB >= fromVal && (toVal === Infinity || paramB <= toVal);
 }
+// Combined filter gate: date range, param range, pipeline tag, task filter, text filter.
+// Injected base models bypass the date check so quants of recently-updated models
+// stay reachable even when the parent falls outside the slider window.
 function modelPassesAllFilters(m) {
   if (_l2ModelFilter && !m.id.split("/").slice(1).join("/").toLowerCase().includes(_l2ModelFilter.toLowerCase())) return false;
   if (!_injectedBaseIds.has(m.id) && !isInDateRange(m.lastModified)) return false;
@@ -631,6 +659,9 @@ function modelPassesAllFilters(m) {
   return true;
 }
 
+// Filter pipeline: compute L1 authors from _allFetched. knownIds is the full set (not date-filtered)
+// so isOrphanQuant and isNestedQuant can correctly suppress quants whose parent is in our dataset
+// even if the parent is hidden by the date/param sliders.
 function computeAuthorData() {
   buildCanonicalAuthors();
   const all = _allFetched || [];
@@ -655,6 +686,8 @@ function computeAuthorData() {
 let sortKey = "totalDownloads";
 let sortAsc = false;
 const detailSort = {};
+// Hand-rolled LRU cache (object + delete/reinsert). Map would be simpler but we want
+// O(1) eviction of the oldest entry. 50 entries is small enough that this never matters.
 const cache = {};
 function cacheKeys() {
   return Object.keys(cache).filter(k => k !== "___access");
@@ -1101,9 +1134,9 @@ function thHtml(c, state, level) {
   const arrow = isSorted ? (state.asc ? "▲" : "▼") : "";
   const ariaSort = isSorted ? ` aria-sort="${state.asc ? "ascending" : "descending"}"` : "";
   if (allCls.includes("right") || allCls.includes("center") || allCls.includes("updated-header")) {
-    return `<th data-key="${c.key}" data-level="${level}" class="${cls}"${ariaSort}><span class="arrow-left">${arrow}</span>${c.label}</th>`;
+    return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}><span class="arrow-left">${arrow}</span>${c.label}</th>`;
   }
-  return `<th data-key="${c.key}" data-level="${level}" class="${cls}"${ariaSort}>${c.label}<span class="arrow">${arrow}</span></th>`;
+  return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}>${c.label}<span class="arrow">${arrow}</span></th>`;
 }
 
 function renderL2(idx, author, models, container, totalBeforeFilter) {
@@ -1124,7 +1157,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
 
   sorted.forEach((m, mIdx) => {
     const qMethods = getOrphanQuantMethod(m.id);
-    const orphanBadge = qMethods.length ? qMethods.map(m => `<span class="badge orphan">${escapeHtml(m.toUpperCase())}</span>`).join(' ') + ' ' : '';
+    const orphanBadge = qMethods.length ? qMethods.map(m => `<span class="badge orphan" title="Parent base model filtered out">${escapeHtml(m.toUpperCase())}</span>`).join(' ') + ' ' : '';
     html += `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}">
       <td class="model-id-cell"><span class="toggle" id="t2-${idx}-${mIdx}">▶</span>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
       <td class="center" style="font-size:0.78rem">${m.paramB != null ? paramValueToLabel(m.paramB) : "—"}</td>
@@ -1137,10 +1170,15 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
 
   const hidden = (totalBeforeFilter != null && totalBeforeFilter > models.length) ? totalBeforeFilter - models.length : 0;
   html += `</tbody></table><div class="detail-count">${models.length} model(s)` + (hidden > 0 ? `, <span style="color:#484f58;font-size:0.75rem">+${hidden} hidden by search settings</span>` : '') + `</div>`;
+  // innerHTML: deliberate choice. Containers are small (10-200 rows at most) and
+  // all event listeners use delegation (_delegatedL2/3/4 flags). createElement would
+  // add ~3x code with zero measurable perf difference at this scale.
   container.innerHTML = html;
   container._l2State = { idx, author, models, totalBeforeFilter };
 
   if (!container._delegatedL2) {
+    // Event delegation: one listener per container survives innerHTML re-renders.
+    // Flag ensures we only attach once even if renderL2 is called multiple times.
     container._delegatedL2 = true;
     container.addEventListener("click", function(e) {
       const inner = e.target.closest(".detail-inner");
@@ -1191,6 +1229,13 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
   }
 }
 
+// Two-phase search: first try model name alone (covers quant suffixes), fall back to
+// full parent ID. strictNameMatch strips known quant suffixes from candidate IDs
+// before comparing, so Qwen2.5-7B-GGUF matches a search for "Qwen2.5-7B".
+// Same-author fine-tunes are skipped (already shown at L2).
+// Cross-author fine-tunes without explicit base_model are only included if they pass the
+// active task filter and aren't already in _allFetched (avoids duplicating base models
+// that happen to be surfaced by the search endpoint).
 async function loadChildren(l2Idx, modelIdx, parentId, container) {
   const cacheKey = `children-${parentId}`;
 
@@ -1329,6 +1374,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   container._l3State = { l2Idx, modelIdx, parentId, children };
 
   if (!container._delegatedL3) {
+    // Event delegation: same rationale as L2 — survives innerHTML re-renders.
     container._delegatedL3 = true;
     container.addEventListener("click", function(e) {
       const inner = e.target.closest(".detail-inner");
@@ -1407,6 +1453,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
   container._l4State = { l2Idx, modelIdx, gIdx, parentId, author, quants };
 
   if (!container._delegatedL4) {
+    // Event delegation: same rationale as L2/L3.
     container._delegatedL4 = true;
     container.addEventListener("click", function(e) {
       const th = e.target.closest("thead th");
@@ -1422,6 +1469,10 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
   }
 }
 
+// Re-renders all currently-open sections after filter/slider changes.
+// Three phases because L1 must exist before L2 can be found inside it, etc.
+// expandedSections keys use stable identifiers (a|author, m|modelId, g|parentId|author)
+// so restoration is robust even if DOM indices shift after re-render.
 function refreshAllExpanded() {
   // Phase 1: re-expand L1 author rows
   for (const key of expandedSections) {
@@ -1512,6 +1563,8 @@ function applyTextFilters() {
 const debouncedTextFilter = debounce(applyTextFilters, CONFIG.DEBOUNCE_MS);
 
 // ── Date slider ──
+// Date and param sliders share ~80% of their logic. Abstracting into a factory would save
+// ~40 lines but add indirection. Keeping them separate keeps each path trivially traceable.
 function buildDateSlider() {
   const from = document.getElementById("ds-from");
   const to = document.getElementById("ds-to");
@@ -1546,6 +1599,11 @@ function buildDateSlider() {
   updateDateUI();
 }
 
+// Main action: (1) increment generation to abort stale work, (2) fetch new pipeline tasks
+// and untagged models, (3) inject cross-author base models, (4) trim _allFetched to 16k,
+// (5) compute author data and render. If all tasks are already fetched, skips to (5).
+// The "Refresh" button on subsequent clicks re-checks — filters alone (no new task data)
+// just recompute from _allFetched via computeAuthorData.
 function applyFilters() {
   if (!needsUpdate) return;
   needsUpdate = false;
@@ -1606,6 +1664,9 @@ function applyFilters() {
         }
         if (gen !== _fetchGeneration) return;
         if (all.length > CONFIG.ALL_FETCHED_MAX) {
+          // Keep the most recently-modified models, drop the rest. This caps memory at
+          // ~80-160MB (5-10KB/model × 16k) rather than unbounded growth from repeated
+          // fetches. Oldest-by-date is safe because users filter by date range anyway.
           all.sort((a, b) => {
             const da = a.lastModified ? new Date(a.lastModified).getTime() : 0;
             const db = b.lastModified ? new Date(b.lastModified).getTime() : 0;
@@ -1792,11 +1853,13 @@ document.querySelector("#main-table").addEventListener("click", e => {
 document.getElementById("get-results-btn").addEventListener("click", applyFilters);
 
 // ── Init ──
+// Fetch top models per pipeline tag (by downloads + by lastModified, merged + deduped).
+// Concurrency capped at 5 to avoid saturating the browser's connection pool.
 async function fetchTasks(tasks) {
   const status = document.getElementById("status");
   const seen = new Set();
   const allFetched = [];
-  const CONCURRENCY = 5;
+  const CONCURRENCY = 5; // stays under browser per-domain connection limit (typically 6-8)
   for (let start = 0; start < tasks.length; start += CONCURRENCY) {
     const batch = tasks.slice(start, start + CONCURRENCY);
     status.textContent = `Fetching ${batch.join(", ")}… (${Math.min(start + CONCURRENCY, tasks.length)}/${tasks.length})`;
@@ -1824,6 +1887,14 @@ async function fetchTasks(tasks) {
   return allFetched;
 }
 
+// Two-pass base model injection.
+// Pass 1: scan all date-range models, identify parent IDs that aren't yet in _allFetched.
+//   Marks existing parents as _injected so they bypass the date filter (a parent outside
+//   the date range still needs to remain visible so its child quant models are reachable).
+// Pass 2: fetch unknown parents in batches (INJECTION_BATCH_SIZE), call onBatch() after
+//   each batch for incremental re-render. all.push(...injected) only after all batches
+//   complete — the initial for-loop iterates all.length which is never mutated during
+//   the scan, so there is no infinite loop risk.
 async function injectBaseModels(all, onBatch) {
   const gen = _fetchGeneration;
   if (gen !== _fetchGeneration) return;
