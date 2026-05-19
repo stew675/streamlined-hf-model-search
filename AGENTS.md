@@ -18,7 +18,7 @@ IMPROVEMENTS.md          — Code review tracking
 ### Data Flow
 1. **Init**: Wait for user to click "Get Results". Compute active pipeline tags from From/To filter bars → fetch top 500 models per pipeline task (both `sort=downloads` and `sort=lastModified`, merged) → deduplicate → inject cross-author base models referenced by `cardData.base_model` → store all in `_allFetched` (trimmed to `ALL_FETCHED_MAX`=16,384 entries by `lastModified` descending).
 2. **Render**: `computeAuthorData()` applies date + param slider ranges and From/To/Special/Quant filters to `_allFetched` → groups by author → renders L1.
-3. **L1 expand**: Fetch full author model list (1000) → filter base models (including same-author fine-tunes) → cache full list → apply date + param slider filters → render L2 → deepen unknown `paramB` in batches of 5 via individual model API (only for models that pass the date/param filters). After deepening, a second pass strips quant suffixes from still-unknown model IDs and inherits `paramB` from the parent (looked up in the locally-resolved `baseModels` or `_allFetched`).
+3. **L1 expand**: Fetch full author model list (1000) → filter base models (including same-author fine-tunes) → cache full list → apply date + param slider filters → render L2 → deepen unknown `paramB` in batches of 4 via individual model API (only for models that pass the date/param filters). After deepening, a second pass strips quant suffixes from still-unknown model IDs and inherits `paramB` from the parent (looked up in the locally-resolved `baseModels` or `_allFetched`).
 4. **L2 expand**: Search HF API for children by parent ID and model name → match on `cardData.base_model` or quant tags. Same-author fine-tunes are excluded (already shown at L2). Cross-author fine-tunes are labeled "finetune".
 5. **L3/L4**: Group children by quant author, apply active quant filters, render sortable table.
 
@@ -28,9 +28,9 @@ IMPROVEMENTS.md          — Code review tracking
 - `_canonicalAuthor` — Map of model name → canonical author; computed lazily and cached via `_canonicalCache`
 - `_fetchGeneration` — Monotonically increasing counter; all async operations capture it at entry and bail early if stale
 - `_injectedBaseIds` — Set of model IDs marked as injected (bypass date filter to keep recently-updated quants reachable via their parent)
-- `_inflightChildren` — Map `{parentId → Promise}` to deduplicate concurrent L3/L4 fetches
-- `_apiTimestamps` — Sliding window for API rate limiting (max 10 req/s)
-- `cache` — Global in-memory LRU cache (max `CACHE_MAX`=50 entries) keyed by:
+- `_inflightChildren` — Map `{parentId → { promise, results }}` to deduplicate concurrent L3/L4 fetches (results stored directly in entry to survive cache eviction)
+- `_apiTimestamps` — Sliding window for API rate limiting (max 4 req/s, 8 per 2s window)
+- `cache` — Global in-memory LRU cache (max `CACHE_MAX`=200 entries) keyed by:
   - `"{author}"` → L2 base models array
   - `"{author}_models"` → raw API response for author
   - `"children-{parentId}"` → L3/L4 children array
@@ -52,7 +52,7 @@ IMPROVEMENTS.md          — Code review tracking
 | `renderL2(idx, models, container)` | Renders L2 base models |
 | `renderL3(l2Idx, modelIdx, parentId, children, container)` | Renders L3 quant author groups |
 | `renderL4(l2Idx, modelIdx, gIdx, quants, container)` | Renders L4 individual quants |
-| `loadAuthorModels(idx, author, container)` | Async fetch for L2, deepens unknown `paramB` in batches of 5; post-deepening parent lookup for quant models without B/M suffix |
+| `loadAuthorModels(idx, author, container)` | Async fetch for L2, deepens unknown `paramB` in batches of 4; post-deepening parent lookup for quant models without B/M suffix |
 | `loadChildren(l2Idx, modelIdx, parentId, container)` | Async fetch for L3/L4 (two search queries, deduplicated via `_inflightChildren`) |
 | `refreshAllExpanded()` | Re-renders all open sections (filter/slider changes) |
 | `matchesFilter(qMethod)` | Checks if a quant method passes active filters |
@@ -68,7 +68,7 @@ IMPROVEMENTS.md          — Code review tracking
 | `sortRows(rows, key, asc, subKey?)` | Generic sort for any level; uses `sortCoerce` for consistent coercion |
 | `updateArrows()` | Updates sort arrow indicators on L1 table header |
 | `resolveTasks()` | Computes active pipeline tags from From/To filter bars |
-| `fetchJson(url)` | Rate-limited fetch wrapper (≤10 req/s), retries up to 3× with exponential backoff for 429/5xx/network errors |
+| `fetchJson(url)` | Rate-limited fetch wrapper (≤4 req/s, 8 per 2s window), retries up to 3× with exponential backoff for 429/5xx/network errors |
 | `cacheSet(key, value)` | Stores entry in global LRU cache |
 | `cacheAccess(key)` | Retrieves entry and promotes it to most-recently-used |
 | `escapeHtml(str)` | Single-pass HTML entity encoding via `_htmlEsc` lookup map |
@@ -81,14 +81,14 @@ IMPROVEMENTS.md          — Code review tracking
 - `CONFIG` — Object with all tunable parameters:
   - `LIMIT: 500` — Models fetched per task (both `sort=downloads` and `sort=lastModified`)
   - `PARAM_SLIDER_MAX: 220` — Maximum param slider position
-  - `RATE_LIMIT: 10` / `RATE_WINDOW: 1000` — API rate limiting
+  - `RATE_LIMIT: 8` / `RATE_WINDOW: 2000` — API rate limiting (8 calls per 2s window = 4 req/s)
   - `FETCH_TIMEOUT: 60000` / `MAX_RETRIES: 3` — Fetch resilience
   - `DATE_SLIDER_MAX: 80` / `DAYS_PER_STEP: 14` — Date slider
-  - `PARAM_BATCH_SIZE: 5` / `INJECTION_BATCH_SIZE: 10` — Deepening batches (5) vs injection batches (10, matches rate limit)
+  - `PARAM_BATCH_SIZE: 4` / `INJECTION_BATCH_SIZE: 8` — Deepening batches (4) vs injection batches (8, stays under rate limit)
   - `PARAM_MIN_GAP: 5` — slider knob gap
   - `AUTHOR_LIMIT: 1000` / `CHILD_LIMIT: 1000` — Max results per endpoint
   - `DEBOUNCE_MS: 200` — Slider debounce
-  - `CACHE_MAX: 50` — Max LRU cache entries
+  - `CACHE_MAX: 200` — Max LRU cache entries
   - `ALL_FETCHED_MAX: 16384` — Max `_allFetched` entries (oldest dropped by date)
 - `Q_METHODS` — All quantization keywords for detection (awq, gptq, bitsandbytes, eetq, aqlm, gguf, exl2, marlin, mlx, bnb, fp4, fp8, nf4, int8, int4, q8, q4)
 - `FILTER_DISPLAY` — Subset shown in filter bar (awq, fp4, fp8, finetune, gguf, mlx, safetensors, others)
@@ -118,8 +118,8 @@ Open `streamlined-hf-model-search.html` in a browser. Validate:
 8. Links open model pages in new tabs
 9. Date slider changes re-render L1 and all open L2 sections
 10. Param slider changes re-render L1 and all open L2 sections
-11. L2 shows "Params" column; unknown params fetch in batches of 5 with loading indicator
-12. API call counter updates and rate limiting stays ≤10 req/s
+11. L2 shows "Params" column; unknown params fetch in batches of 4 with loading indicator
+12. API call counter updates and rate limiting stays ≤4 req/s (8 calls per 2s window)
 13. L4 sort by Model ID doesn't collapse L4 content
 14. GGUF models without B/M suffix in name (e.g. `Qwen/Qwen3-Coder-Next-GGUF`) show inherited param count from their parent after deepening
 15. Rapid double-clicking "Get Results" or rapidly expanding/collapsing L2 rows does not produce stale renders or duplicate API calls (generation guard and inflight dedup)
@@ -130,14 +130,14 @@ Open `streamlined-hf-model-search.html` in a browser. Validate:
 - **Data attribute names**: `data-l3-model-idx` ≠ `data-l3-model`. Always verify matching.
 - **ID collisions**: L3/L4 IDs include all parent indices (`d3-{l2}-{model}-{g}`).
 - **Filter refresh**: `refreshAllExpanded` queries DOM for visible detail rows via `expandedSections` Set — must cascade-delete descendant IDs on parent collapse to avoid re-rendering orphaned sections.
-- **Cache keys**: `children-{parentId}` uses the full model ID (e.g., `Qwen/Qwen2.5-7B`). Cache is LRU with 50-entry max.
+- **Cache keys**: `children-{parentId}` uses the full model ID (e.g., `Qwen/Qwen2.5-7B`). Cache is LRU with 200-entry max.
 - **Author name stripping**: L2 displays `m.id.split("/").slice(1).join("/")` to avoid repeating the author.
 - **L1 sort selector**: Uses `#main-table > thead > tr > th` to avoid L2/L3 nested `<th>` triggering. Do NOT delegate to `#main-table thead`.
-- **Param deepening**: Only fires for the single author the user expands, in batches of 5, and only for models that pass the current date/param filters — prevents spamming the API for invisible models.
+- **Param deepening**: Only fires for the single author the user expands, in batches of 4, and only for models that pass the current date/param filters — prevents spamming the API for invisible models.
 - **Search endpoint limitations**: The search API (`/api/models?search=...`) never returns `safetensors` or `config` data even with `full=true`. The individual model API (`/api/models/{id}?full=true`) does, which is why deepening is needed for models without B/M in their name.
-- **Rate limiting**: `fetchJson` uses a sliding-window rate limiter (10 calls/sec). Failed retries do not count toward the API call counter; only successes and permanent failures increment.
+- **Rate limiting**: `fetchJson` uses a sliding-window rate limiter (4 calls/sec, 8 per 2s window). Failed retries do not count toward the API call counter; only successes and permanent failures increment.
 - **Generation guard**: Async functions check `_fetchGeneration` before side-effects. If the generation counter advances (user clicks "Get Results" again), stale async work skips all mutations. Always capture `const gen = _fetchGeneration` at the very start of any async function that touches shared state.
 - **Detached event target**: Sort handlers capture `const inner = e.target.closest(".detail-inner")` in a variable before any `innerHTML` replacement (which detaches the event target, making `closest()` return null). Combined with `data-level` attribute on `<th>`, both toggle and sort paths are correctly guarded even after DOM detachment.
 - **Same-author fine-tunes**: `isBase()` treats same-author fine-tunes as base models (e.g., `Qwen/Qwen3.5-9B` is a fine-tune of `Qwen/Qwen3.5-9B-Base` but both author = "Qwen", so both appear at L2). `loadChildren()` skips same-author fine-tunes at L3 (already at L2) and labels cross-author fine-tunes as "finetune".
 - **Parent param inheritance**: GGUF/AWQ/GPTQ quant models without B/M in their name (e.g. `Qwen/Qwen3-Coder-Next-GGUF`) get `paramB` from their parent via the post-deepening pass. The parent must be in the same `baseModels` array (same author) or `_allFetched`. Stripping is iterative — removes trailing `-segment` one at a time until a known parent is found.
-- **Inflight dedup**: `_inflightChildren` map (`children-{parentId}` → Promise) prevents duplicate L3/L4 fetches. The promise is set synchronously before the first `await`, so concurrent calls always reuse the same inflight request.
+- **Inflight dedup**: `_inflightChildren` map stores `{ promise, results }` entries keyed by `children-{parentId}` to prevent duplicate L3/L4 fetches. The entry is set synchronously before the first `await`; concurrent callers await the same promise and read results directly from the entry (bypassing the evictable LRU cache).

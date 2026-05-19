@@ -166,7 +166,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 541a9cd</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 131380b</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -348,7 +348,7 @@ const CONFIG = {
   INIT_SLIDER_TO: 80,
   INIT_PARAM_SLIDER_FROM: 100,
   INIT_PARAM_SLIDER_TO: 130,
-  CACHE_MAX: 50,
+  CACHE_MAX: 200,
   ALL_FETCHED_MAX: 16384,
 };
 const fetchedTasks = new Set();
@@ -1234,14 +1234,15 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
   const cacheKey = `children-${parentId}`;
 
   // Deduplicate concurrent fetches for the same parent
-  if (_inflightChildren.has(cacheKey)) {
-    await _inflightChildren.get(cacheKey);
-    const cached = cacheAccess(cacheKey);
-    if (cached) renderL3(l2Idx, modelIdx, parentId, cached, container);
+  const entry = _inflightChildren.get(cacheKey);
+  if (entry) {
+    await entry.promise;
+    if (entry.results) renderL3(l2Idx, modelIdx, parentId, entry.results, container);
     return;
   }
 
-  const promise = (async () => {
+  const newEntry = { promise: null, results: null };
+  newEntry.promise = (async () => {
     try {
       const modelName = parentId.split("/").slice(1).join("/");
       const results = [];
@@ -1313,6 +1314,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
         processChildren(await fetchJson(fullUrl));
       }
 
+      newEntry.results = results;
       cacheSet(cacheKey, results);
       renderL3(l2Idx, modelIdx, parentId, results, container);
     } catch (err) {
@@ -1320,9 +1322,9 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
     }
   })();
 
-  _inflightChildren.set(cacheKey, promise);
-  await promise;
-  _inflightChildren.delete(cacheKey);
+  _inflightChildren.set(cacheKey, newEntry);
+  await newEntry.promise;
+  if (_inflightChildren.get(cacheKey) === newEntry) _inflightChildren.delete(cacheKey);
 }
 
 // ── Level 3: Quant Author Groups ──
@@ -1643,8 +1645,10 @@ function applyFilters() {
         saveRestoreExpansions(savedExpansions);
         refreshAllExpanded();
         status.textContent = `Rendered ${_authorData.length} authors, resolving base models…`;
+        let injectionBatches = 0;
         try {
           await injectBaseModels(all, () => {
+            injectionBatches++;
             if (gen !== _fetchGeneration) return;
             const saved = new Set(expandedSections);
             _authorData = computeAuthorData();
@@ -1657,8 +1661,8 @@ function applyFilters() {
         } catch (e) {
           console.warn("Base model injection error:", e);
         }
-        if (gen !== _fetchGeneration) return;
         if (all.length > CONFIG.ALL_FETCHED_MAX) {
+          if (gen !== _fetchGeneration) return;
           // Keep the most recently-modified models, drop the rest. This caps memory at
           // ~80-160MB (5-10KB/model × 16k) rather than unbounded growth from repeated
           // fetches. Oldest-by-date is safe because users filter by date range anyway.
@@ -1669,13 +1673,17 @@ function applyFilters() {
           });
           all.length = CONFIG.ALL_FETCHED_MAX;
         }
-        status.textContent = "";
+        // Re-render unconditionally — injectBaseModels may have marked existing models
+        // as _injected (bypassing the date filter via _injectedBaseIds), which changes
+        // the output of computeAuthorData() even when no new models were fetched.
+        if (gen !== _fetchGeneration) return;
         _authorData = computeAuthorData();
         renderMain(_authorData);
         updateArrows();
         pruneExpiredExpansions();
         saveRestoreExpansions(savedExpansions);
         refreshAllExpanded();
+        status.textContent = "";
       } catch (e) {
         console.warn("applyFilters error:", e);
         document.getElementById("status").textContent = "Error: " + e.message;
