@@ -1357,14 +1357,15 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   cols.forEach(c => { html += thHtml(c, state, "3"); });
   html += `</tr></thead><tbody>`;
 
-  sorted.forEach((g, gIdx) => {
-    html += `<tr class="l3-row" data-l3-l2="${l2Idx}" data-l3-model-idx="${modelIdx}" data-l3-parent="${escapeHtml(parentId)}" data-l3-idx="${gIdx}" data-l3-author="${escapeHtml(g.author)}">
+  // Optimized: Use map + join for table rows instead of forEach + +=
+  html += sorted.map((g, gIdx) => {
+    return `<tr class="l3-row" data-l3-l2="${l2Idx}" data-l3-model-idx="${modelIdx}" data-l3-parent="${escapeHtml(parentId)}" data-l3-idx="${gIdx}" data-l3-author="${escapeHtml(g.author)}">
       <td><span class="toggle" id="t3-${l2Idx}-${modelIdx}-${gIdx}">▶</span><a href="https://huggingface.co/${escapeHtml(g.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(g.author)}</a></td>
       <td class="models-cell">${g.count}</td>
       <td class="right">${fmt(g.totalDownloads)}</td>
     </tr>
     <tr class="detail-row" id="d3-${l2Idx}-${modelIdx}-${gIdx}" style="display:none"><td colspan="3"><div class="detail-inner" id="i3-${l2Idx}-${modelIdx}-${gIdx}"></div></td></tr>`;
-  });
+  }).join('');
   html += `</tbody></table>`;
   html += `<div class="detail-count">${filtered.length} child model(s) from ${groupEntries.length} author(s)${filtered.length !== children.length ? ` (filtered from ${children.length})` : ''}</div>`;
   container.innerHTML = html;
