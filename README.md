@@ -2,6 +2,8 @@
 
 A browser-based, 4-level hierarchical explorer for HuggingFace base models and their quantizations — no server, no install, just open the HTML file.
 
+![Hugging Face Search](./search.png "Example Search")
+
 ## Quick Start
 
 Open `streamlined-hf-model-search.html` in any modern browser. Select your From/To filters and click **Get Results**.
