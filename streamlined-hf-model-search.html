@@ -1,0 +1,1950 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HuggingFace Base Models</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='80'>🔍</text></svg>">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #c9d1d9; padding: 24px; }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; color: #e6edf3; text-align: center; }
+  #status { font-size: 0.85rem; color: #8b949e; margin-bottom: 12px; min-height: 1.2em; }
+  #main-table, .detail-inner table { width: 100%; border-collapse: collapse; font-size: 0.85rem; table-layout: fixed; }
+  th.right, td.right { white-space: nowrap; }
+  .updated-cell { padding-left: 10px; text-align: left; white-space: nowrap; }
+  .updated-header { text-align: center !important; }
+  td.models-cell { padding-right: 20px; text-align: right; }
+  /* L1 column widths */
+  #main-table > thead > tr > th:nth-child(2),
+  #main-table > tbody > tr > td:nth-child(2) { width: 130px; }
+  #main-table > thead > tr > th:nth-child(3),
+  #main-table > tbody > tr > td:nth-child(3) { width: 160px; }
+  #main-table > thead > tr > th:nth-child(4),
+  #main-table > tbody > tr > td:nth-child(4) { width: 120px; }
+  th { background: #161b22; padding: 8px 10px; text-align: left; cursor: pointer;
+        user-select: none; border-bottom: 2px solid #30363d; position: sticky; top: 0; transition: background 0.15s, border-color 0.15s; }
+   tr > th:not(:last-child), tr > td:not(:last-child) { border-right: 1px solid #21262d; }
+  th:hover { background: #1c2129; }
+  th.sorted { background: #1c2129; border-bottom-color: #58a6ff; }
+  th .arrow { margin-left: 4px; font-size: 0.7rem; color: #58a6ff; }
+  td { padding: 6px 10px; border-bottom: 1px solid #21262d; transition: background 0.1s; }
+  tr.l1-row.row-even td { background: #0d1117; }
+  tr.l1-row.row-odd td { background: #0f1318; }
+  a { color: #58a6ff; text-decoration: none; transition: color 0.15s; }
+  a:hover { text-decoration: underline; color: #79c0ff; }
+  .right { text-align: right; }
+  th.right { text-align: right; }
+  th.center, td.center { text-align: center; }
+  .detail-inner td.center { text-align: center !important; padding-left: 8px !important; padding-right: 8px !important; }
+  .arrow-left { margin-right: 4px; font-size: 0.7rem; color: #58a6ff; }
+  .task { text-align: left; white-space: nowrap; }
+  #count { font-size: 0.85rem; color: #8b949e; margin-top: 8px; }
+
+  .toggle { display: inline-block; width: 16px; text-align: center; color: #8b949e; margin-right: 4px; font-size: 0.7rem; transition: transform 0.15s, color 0.15s; flex-shrink: 0; }
+  .toggle.open { transform: rotate(90deg); color: #58a6ff; }
+
+  tr.l1-row td { cursor: pointer; font-weight: 600; }
+  tr.l1-row:hover td { background: #1a2030; }
+
+  tr.detail-row td { padding: 0; background: #010409; }
+  .detail-inner { padding: 8px 12px 12px 16px; }
+  .detail-inner table { font-size: 0.8rem; }
+  .detail-inner th { font-size: 0.75rem; padding: 5px 8px; background: #161b22; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+  .detail-inner th:hover { background: #1a2030; }
+  .detail-inner th.sorted { background: #1a2030; border-bottom-color: #58a6ff; }
+  .detail-inner td { padding: 4px 8px; font-size: 0.8rem; }
+  .detail-loading { color: #8b949e; font-style: italic; padding: 8px 0; }
+  .detail-error { color: #f85149; padding: 8px 0; }
+  .detail-count { font-size: 0.75rem; color: #8b949e; margin-top: 4px; }
+
+  tr.l2-row td { cursor: pointer; padding-left: 32px !important; }
+  tr.l2-row:hover td { background: #1a2030; }
+  tr.l2-row td:first-child { padding-left: 32px !important; }
+
+  tr.l3-row td { cursor: pointer; padding-left: 48px !important; font-weight: 500; }
+  tr.l3-row:hover td { background: #1a2030; }
+  tr.l3-row td:first-child { padding-left: 48px !important; }
+
+  tr.l4-row td { padding-left: 32px !important; }
+  tr.l4-row td:first-child { padding-left: 64px !important; }
+  tr.l4-row:nth-child(even) td { background: #080b10; }
+
+  .badge { display: inline-block; font-size: 0.7rem; padding: 1px 6px; border-radius: 12px;
+           background: #1f6feb33; color: #58a6ff; border: 1px solid #1f6feb55; margin: 1px 2px; box-shadow: 0 0 4px #1f6feb22; }
+  .badge.deriv { background: #23863633; color: #3fb950; border-color: #23863655; box-shadow: 0 0 4px #23863622; }
+  .badge.orphan { background: #d2992233; color: #e3b341; border-color: #d2992255; box-shadow: 0 0 4px #d2992222; }
+  .likes-icon { color: #f85149; margin-left: 2px; }
+  .cell-flex { display: flex; align-items: center; }
+
+ /* Filter bar */
+  #task-bars { display: flex; flex-wrap: wrap; gap: 20px; margin: 8px 0 12px; align-items: center; }
+  #from-bar, #to-bar { flex: 0 0 auto; }
+  #filter-bar, #from-bar, #to-bar, #special-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  #main-table .model-id-cell { max-width: 0; width: 100%; }
+  #main-table .model-id-cell a { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+  #filter-row { display: flex; flex-wrap: nowrap; align-items: center; }
+  #filter-bar { flex: 1 1 auto; min-width: 0; }
+  #filter-bar .filter-chip, #from-bar .filter-chip, #to-bar .filter-chip, #special-bar .filter-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem;
+                        padding: 3px 10px; border-radius: 14px; cursor: pointer; user-select: none;
+                        background: #161b22; border: 1px solid #30363d; transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; }
+  #filter-bar .filter-chip:hover, #from-bar .filter-chip:hover, #to-bar .filter-chip:hover, #special-bar .filter-chip:hover { background: #1c2129; color: #c9d1d9; }
+  #filter-bar .filter-chip.active, #from-bar .filter-chip.active, #to-bar .filter-chip.active, #special-bar .filter-chip.active { color: #58a6ff; border-color: #58a6ff; box-shadow: 0 0 6px #1f6feb33; }
+  #filter-bar .filter-chip.inactive, #from-bar .filter-chip.inactive, #to-bar .filter-chip.inactive, #special-bar .filter-chip.inactive { color: #8b949e; border-color: #21262d; }
+  #filter-bar .filter-label, #from-bar .filter-label, #to-bar .filter-label, #special-bar .filter-label { color: #8b949e; font-size: 0.78rem; margin-right: 4px; }
+  .task-bar-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; align-items: center; }
+   .task-bar-row .filter-label { color: #8b949e; font-size: 0.78rem; margin-right: 4px; }
+   .task-bar-row .act-tag { display: inline-block; font-size: 0.72rem; padding: 2px 8px; border-radius: 10px;
+      cursor: pointer; user-select: none; background: #161b22; border: 1px solid #30363d;
+      transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; color: #8b949e; }
+   .task-bar-row .act-tag:hover { background: #1c2129; color: #c9d1d9; }
+   .task-bar-row .act-tag.active { color: #58a6ff; border-color: #58a6ff; background: #1f6feb22; box-shadow: 0 0 6px #1f6feb33; }
+  #get-results-btn { display: inline-flex; align-items: center; justify-content: center; padding: 6px 20px;
+    font-size: 0.82rem; font-weight: 600; border-radius: 14px; cursor: pointer; user-select: none;
+    background: #21262d; color: #484f58; border: 1px solid #30363d; transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
+    margin-left: auto; }
+  #get-results-btn.ready { background: #238636; color: #fff; border-color: #2ea043; cursor: pointer; box-shadow: 0 0 8px #23863666; }
+  #get-results-btn.ready:hover { background: #2ea043; box-shadow: 0 0 12px #2ea04388; }
+  #get-results-btn.disabled { pointer-events: none; opacity: 0.5; }
+
+  #text-filter-row { display: flex; gap: 10px; margin: 0 0 10px; align-items: center; flex-wrap: wrap; }
+  #text-filter-row input { background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+    padding: 4px 10px; font-size: 0.8rem; color: #c9d1d9; width: 180px; outline: none;
+    transition: border-color 0.15s; font-family: inherit; }
+  #text-filter-row input:focus { border-color: #58a6ff; }
+  #text-filter-row input::placeholder { color: #484f58; }
+  #text-filter-row label { color: #8b949e; font-size: 0.78rem; }
+  #text-filter-row .fiw { position: relative; display: inline-flex; align-items: center; }
+  #text-filter-row .fiw input { padding-right: 20px; }
+  #text-filter-row .fic { position: absolute; right: 5px; cursor: pointer; color: #8b949e; font-size: 13px; line-height: 1;
+    user-select: none; display: none; }
+  #text-filter-row .fic:hover { color: #f85149; }
+  #text-filter-row .fiw input:not(:placeholder-shown) + .fic { display: block; }
+
+  /* Range sliders */
+  #date-slider, #param-slider { margin: 8px 0 6px; padding: 8px 14px 10px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; }
+  #date-slider .ds-title, #param-slider .ds-title { font-size: 0.78rem; color: #8b949e; margin-bottom: 4px; font-weight: 600; }
+  .ds-track-wrap { position: relative; height: 28px; }
+  .ds-track-bg, .ds-track-fill { position: absolute; top: 11px; height: 6px; border-radius: 3px; pointer-events: none; }
+  .ds-track-bg { left: 0; right: 0; background: #30363d; }
+  .ds-track-fill { background: #58a6ff; z-index: 1; }
+  .ds-track-wrap input[type=range] { position: absolute; width: 100%; top: 2px; height: 24px; margin: 0;
+    -webkit-appearance: none; appearance: none; background: transparent; pointer-events: none; }
+  #ds-from, #ps-from { z-index: 3; }
+  #ds-to, #ps-to { z-index: 2; }
+  .ds-track-wrap input[type=range]::-webkit-slider-runnable-track { height: 6px; background: transparent; border-radius: 3px; pointer-events: none; }
+  .ds-track-wrap input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 18px; width: 18px; border-radius: 50%;
+    cursor: pointer; pointer-events: auto; border: 2px solid #0d1117; margin-top: -6px; }
+  #ds-from::-moz-range-thumb, #ds-from::-webkit-slider-thumb,
+  #ps-from::-moz-range-thumb, #ps-from::-webkit-slider-thumb { background: #da3633; }
+  #ds-to::-moz-range-thumb, #ds-to::-webkit-slider-thumb,
+  #ps-to::-moz-range-thumb, #ps-to::-webkit-slider-thumb { background: #3fb950; }
+  .ds-track-wrap input[type=range]::-moz-range-track { height: 6px; background: transparent; border-radius: 3px; pointer-events: none; }
+  .ds-track-wrap input[type=range]::-moz-range-thumb { height: 18px; width: 18px; border-radius: 50%;
+    cursor: pointer; pointer-events: auto; border: 2px solid #0d1117; }
+  .ds-labels { display: flex; justify-content: space-between; font-size: 0.72rem; margin-top: 2px; }
+  .ds-labels .ds-l { color: #8b949e; }
+  .ds-labels .ds-v { color: #58a6ff; font-weight: 500; }
+  .ps-tooltip { position: absolute; top: -18px; transform: translateX(-50%); background: #1c2129;
+    color: #58a6ff; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;
+    border: 1px solid #30363d; white-space: nowrap; pointer-events: none; z-index: 5; }
+  .ps-tooltip::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -4px;
+    border: 4px solid transparent; border-top-color: #30363d; }
+  .ps-tooltip.align-right { transform: translateX(-100%); }
+  .ps-tooltip.align-left { transform: translateX(-9px); }
+  .ps-tooltip.align-right::after { left: auto; right: 4px; margin-left: 0; }
+  .ps-tooltip.align-left::after { left: 9px; margin-left: 0; }
+  .ps-legend { position: relative; height: 18px; }
+  .ps-legend-tick { position: absolute; top: 0; transform: translateX(-50%); width: 1px; height: 5px; background: #484f58; }
+  .ps-legend-label { position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+    font-size: 0.62rem; color: #6e7681; white-space: nowrap; }
+</style>
+</head>
+<body>
+<h1>🔍 A Streamlined Hugging Face Model Search</h1>
+<div id="status" aria-live="polite">Fetching models…</div>
+<div id="date-slider">
+  <div class="ds-title">Date Range</div>
+  <div class="ds-track-wrap">
+    <div class="ds-track-bg"></div>
+    <div class="ds-track-fill" id="ds-fill"></div>
+    <input type="range" id="ds-from" min="0" max="80" value="68" step="1" role="slider" aria-label="Date range start" aria-valuemin="0" aria-valuemax="80" aria-valuenow="68">
+    <input type="range" id="ds-to" min="0" max="80" value="80" step="1" role="slider" aria-label="Date range end" aria-valuemin="0" aria-valuemax="80" aria-valuenow="80">
+    <div class="ps-tooltip align-right" id="ds-tooltip-from"></div>
+    <div class="ps-tooltip align-left" id="ds-tooltip-to">Now</div>
+  </div>
+  <div class="ds-labels">
+    <span><span class="ds-l">From:</span> <span class="ds-v" id="ds-from-label"></span></span>
+    <span><span class="ds-l">To:</span> <span class="ds-v" id="ds-to-label">Now</span></span>
+  </div>
+</div>
+<div id="param-slider">
+  <div class="ds-title">Parameter Size</div>
+  <div class="ds-track-wrap">
+    <div class="ds-track-bg"></div>
+    <div class="ds-track-fill" id="ps-fill"></div>
+    <input type="range" id="ps-from" min="0" max="220" value="30" step="1" role="slider" aria-label="Parameter size start" aria-valuemin="0" aria-valuemax="220" aria-valuenow="30">
+    <input type="range" id="ps-to" min="0" max="220" value="220" step="1" role="slider" aria-label="Parameter size end" aria-valuemin="0" aria-valuemax="220" aria-valuenow="220">
+    <div class="ps-tooltip" id="ps-tooltip-from" style="left:0%">750M</div>
+    <div class="ps-tooltip" id="ps-tooltip-to" style="left:100%">&gt;1T</div>
+  </div>
+  <div class="ds-labels">
+    <span><span class="ds-l">From:</span> <span class="ds-v" id="ps-from-label">750M</span></span>
+    <span><span class="ds-l">To:</span> <span class="ds-v" id="ps-to-label">&gt;1T</span></span>
+  </div>
+  <div class="ps-legend" id="ps-legend"></div>
+</div>
+<div id="task-bars">
+<div id="from-bar">
+  <span class="filter-label">From:</span>
+</div>
+<div id="to-bar">
+  <span class="filter-label">To:</span>
+</div>
+<div id="special-bar">
+  <span class="filter-label">Special:</span>
+</div>
+</div>
+<div id="activated-types" class="task-bar-row">
+  <span class="filter-label">Activated Types:</span>
+</div>
+<div id="available-types" class="task-bar-row">
+  <span class="filter-label">Available Types:</span>
+</div>
+<div id="filter-row">
+<div id="filter-bar">
+  <span class="filter-label">Quant types:</span>
+</div>
+<span id="api-counter" class="filter-label" style="margin-left:auto; font-variant-numeric: tabular-nums; min-width: 100px; text-align: right;">API Calls: 0</span>
+</div>
+<div id="get-results-btn" style="display:flex;justify-content:center;margin:8px 0 12px;">Get Results</div>
+<div id="text-filter-row">
+  <label>L1 Author:</label>
+  <span class="fiw"><input type="text" id="l1-author-filter" placeholder="All authors (pinned top)" autocomplete="off"><span class="fic" data-for="l1-author-filter">✕</span></span>
+  <label>L2 Model ID:</label>
+  <span class="fiw"><input type="text" id="l2-model-filter" placeholder="Any base model" autocomplete="off"><span class="fic" data-for="l2-model-filter">✕</span></span>
+  <label>L3 Author:</label>
+  <span class="fiw"><input type="text" id="l3-author-filter" placeholder="Any quant author" autocomplete="off"><span class="fic" data-for="l3-author-filter">✕</span></span>
+  <label>L4 Model ID:</label>
+  <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" autocomplete="off"><span class="fic" data-for="l4-model-filter">✕</span></span>
+</div>
+<table id="main-table">
+  <thead>
+    <tr>
+      <th data-key="author">Model Author<span class="arrow"></span></th>
+      <th data-key="count" class="right"><span class="sort-arrow"></span>Base Models</th>
+      <th data-key="totalDownloads" class="right"><span class="sort-arrow"></span>Total Downloads</th>
+      <th data-key="totalLikes" class="right"><span class="sort-arrow"></span>Total Likes</th>
+    </tr>
+  </thead>
+  <tbody id="body"></tbody>
+</table>
+<div id="count"></div>
+
+<script>
+(function() {
+let _allFetched, _authorData, _canonicalAuthor;
+let _l1AuthorFilter = "", _l2ModelFilter = "", _l3AuthorFilter = "", _l4ModelFilter = "";
+const TO_TAGS = [
+  // Audio
+  { tag: "automatic-speech-recognition", from: ["audio"], to: "text", desc: "Transcribe speech to text" },
+  { tag: "audio-classification", from: ["audio"], to: "text", desc: "Classify audio by sound type" },
+  { tag: "voice-activity-detection", from: ["audio"], to: "audio", desc: "Detect when speech is present" },
+  { tag: "audio-to-audio", from: ["audio"], to: "audio", desc: "Transform input audio to output audio" },
+  { tag: "audio-text-to-text", from: ["audio", "text"], to: "text", desc: "Generate text from speech + text prompt" },
+  // Text → *
+  { tag: "text-to-speech", from: ["text"], to: "speech", desc: "Generate spoken audio from text" },
+  { tag: "text-to-audio", from: ["text"], to: "audio", desc: "Generate audio from text description" },
+  { tag: "text-to-image", from: ["text"], to: "image", desc: "Generate image from text prompt" },
+  { tag: "text-to-video", from: ["text"], to: "video", desc: "Generate video from text prompt" },
+  { tag: "text-to-3d", from: ["text"], to: "3d", desc: "Generate 3D assets from text" },
+  { tag: "text-generation", from: ["text"], to: "text", desc: "Generate continuing text from a prompt" },
+  { tag: "text-classification", from: ["text"], to: "text", desc: "Assign label/class to input text" },
+  { tag: "token-classification", from: ["text"], to: "text", desc: "Label individual tokens (NER, POS)" },
+  { tag: "question-answering", from: ["text"], to: "text", desc: "Answer a question given a context passage" },
+  { tag: "zero-shot-classification", from: ["text"], to: "text", desc: "Classify text into arbitrary labels" },
+  { tag: "translation", from: ["text"], to: "text", desc: "Translate text between languages" },
+  { tag: "summarization", from: ["text"], to: "text", desc: "Condense long text into a summary" },
+  { tag: "fill-mask", from: ["text"], to: "text", desc: "Predict masked tokens in text" },
+  { tag: "sentence-similarity", from: ["text"], to: "text", desc: "Score semantic similarity of sentences" },
+  { tag: "feature-extraction", from: ["text"], to: "text", desc: "Produce embedding vectors from text" },
+  { tag: "text-ranking", from: ["text"], to: "text", desc: "Rank documents by relevance to a query" },
+  { tag: "unconditional-image-generation", from: ["text"], to: "image", desc: "Generate image without text prompt" },
+  // Image → *
+  { tag: "image-to-text", from: ["image"], to: "text", desc: "Describe or caption an image" },
+  { tag: "image-classification", from: ["image"], to: "text", desc: "Assign label/class to an image" },
+  { tag: "object-detection", from: ["image"], to: "text", desc: "Detect objects with bounding boxes" },
+  { tag: "image-segmentation", from: ["image"], to: "text", desc: "Segment image into regions by object" },
+  { tag: "zero-shot-image-classification", from: ["image"], to: "text", desc: "Classify image into arbitrary labels" },
+  { tag: "zero-shot-object-detection", from: ["image"], to: "text", desc: "Detect objects by arbitrary text labels" },
+  { tag: "image-to-image", from: ["image"], to: "image", desc: "Transform an input image (style, enhance)" },
+  { tag: "depth-estimation", from: ["image"], to: "image", desc: "Predict depth map from a single image" },
+  { tag: "mask-generation", from: ["image"], to: "image", desc: "Generate segmentation mask for an image" },
+  { tag: "image-feature-extraction", from: ["image"], to: "image", desc: "Produce embedding vectors from images" },
+  { tag: "keypoint-detection", from: ["image"], to: "image", desc: "Detect key body/key-points in image" },
+  { tag: "image-to-video", from: ["image"], to: "video", desc: "Generate video from a single image" },
+  { tag: "image-to-3d", from: ["image"], to: "3d", desc: "Generate 3D assets from an image" },
+  // Video → *
+  { tag: "video-classification", from: ["video"], to: "text", desc: "Assign label/class to a video" },
+  { tag: "video-to-video", from: ["video"], to: "video", desc: "Transform an input video to output video" },
+  { tag: "video-text-to-text", from: ["video", "text"], to: "text", desc: "Generate text from video + text prompt" },
+  // Multimodal
+  { tag: "image-text-to-text", from: ["image", "text"], to: "text", desc: "Generate text from image + text prompt" },
+  { tag: "visual-question-answering", from: ["image", "text"], to: "text", desc: "Answer questions about an image" },
+  { tag: "document-question-answering", from: ["image", "text"], to: "text", desc: "Answer questions from a document image" },
+  { tag: "visual-document-retrieval", from: ["image", "text"], to: "text", desc: "Retrieve documents from image queries" },
+  { tag: "image-text-to-image", from: ["image", "text"], to: "image", desc: "Generate image from image + text prompt" },
+  { tag: "image-text-to-video", from: ["image", "text"], to: "video", desc: "Generate video from image + text prompt" },
+  { tag: "any-to-any", from: ["any"], to: "any", desc: "Process any input modality to any output" }
+];
+const FROM_OPTIONS = ["text", "image", "audio", "video", "any", "all"];
+const TO_OPTIONS = ["text", "speech", "audio", "image", "video", "3d", "any", "all"];
+const activeFromFilters = new Set(["text", "image", "any"]);
+const activeToFilters = new Set(["text", "any"]);
+const SPECIAL_DISPLAY = ["include untagged"];
+const DEFAULT_ACTIVE_TAGS = new Set([
+  "any-to-any",
+  "audio-to-audio",
+  "audio-text-to-text",
+  "automatic-speech-recognition",
+  "image-text-to-text",
+  "image-text-to-image",
+  "image-text-to-video",
+  "image-to-image",
+  "image-to-text",
+  "image-to-video",
+  "image-to-3d",
+  "text-generation",
+  "text-to-audio",
+  "text-to-image",
+  "text-to-speech",
+  "text-to-video",
+  "text-to-3d",
+  "video-classification",
+  "video-text-to-text",
+  "video-to-video"
+]);
+const activeSpecialFilters = new Set();
+const CONFIG = {
+  LIMIT: 500,
+  PARAM_SLIDER_MAX: 220,
+  RATE_LIMIT: 10,
+  RATE_WINDOW: 1000,
+  FETCH_TIMEOUT: 60000,
+  MAX_RETRIES: 3,
+  DATE_SLIDER_MAX: 80,
+  DAYS_PER_STEP: 14,
+  PARAM_BATCH_SIZE: 5,
+  INJECTION_BATCH_SIZE: 10,
+  PARAM_MIN_GAP: 5,
+  AUTHOR_LIMIT: 1000,
+  CHILD_LIMIT: 1000,
+  DEBOUNCE_MS: 200,
+  INIT_SLIDER_FROM: 79,
+  INIT_SLIDER_TO: 80,
+  INIT_PARAM_SLIDER_FROM: 100,
+  INIT_PARAM_SLIDER_TO: 130,
+  CACHE_MAX: 50,
+  ALL_FETCHED_MAX: 16384,
+};
+const fetchedTasks = new Set();
+let fetchedUntagged = false;
+let _fetchGeneration = 0;
+const _injectedBaseIds = new Set();
+let needsUpdate = false;
+let apiCalls = 0;
+function incApiCalls(n) { apiCalls += n; document.getElementById("api-counter").textContent = "API Calls: " + String(apiCalls); }
+function markDirty() { needsUpdate = true; document.getElementById("get-results-btn").classList.add("ready"); }
+let sliderFrom = CONFIG.INIT_SLIDER_FROM;
+let sliderTo = CONFIG.INIT_SLIDER_TO;
+let paramSliderFrom = CONFIG.INIT_PARAM_SLIDER_FROM;
+let paramSliderTo = CONFIG.INIT_PARAM_SLIDER_TO;
+const Q_METHODS = ["awq", "gptq", "bitsandbytes", "eetq", "aqlm", "gguf", "exl2", "marlin", "mlx", "bnb", "fp4", "fp8", "nf4", "int8", "int4", "q8", "q4"];
+const FILTER_DISPLAY = ["awq", "fp4", "fp8", "finetune", "gguf", "mlx", "safetensors", "others"];
+const activeFilters = new Set(["finetune", "gguf", "safetensors"]);
+const activeTaskFilters = new Set();
+function resolveTasks() {
+  return TO_TAGS.filter(t => {
+    const fromMatch = t.from.every(f => activeFromFilters.has(f));
+    const toMatch = activeToFilters.has(t.to);
+    return fromMatch && toMatch;
+  }).map(t => t.tag);
+}
+function matchesTaskFilter(pipelineTag) {
+  if (!pipelineTag) return true;
+  const t = TO_TAGS.find(x => x.tag === pipelineTag);
+  if (!t) return false;
+  const fromMatch = t.from.every(f => activeFromFilters.has(f));
+  const toMatch = activeToFilters.has(t.to);
+  return fromMatch && toMatch;
+}
+
+const _apiTimestamps = [];
+const _inflightFetches = new Map();
+
+async function fetchJson(url) {
+  const existing = _inflightFetches.get(url);
+  if (existing) return existing;
+
+  const promise = (async () => {
+    let retries = 0;
+    const MAX_RETRIES = CONFIG.MAX_RETRIES;
+    while (true) {
+      const now = Date.now();
+      const cutoff = now - CONFIG.RATE_WINDOW;
+      while (_apiTimestamps.length > 0 && _apiTimestamps[0] < cutoff) {
+        _apiTimestamps.shift();
+      }
+      if (_apiTimestamps.length >= CONFIG.RATE_LIMIT) {
+        const wait = _apiTimestamps[0] + CONFIG.RATE_WINDOW - now + 10;
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+      _apiTimestamps.push(now);
+      let res;
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT);
+        try {
+          res = await fetch(url, { signal: controller.signal });
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch (err) {
+        if (retries < MAX_RETRIES) {
+          retries++;
+          const delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
+          console.warn(`fetchJson: network error for ${url}, retry ${retries}/${MAX_RETRIES} in ${delay}ms`);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+        throw err;
+      }
+      if (res.ok) {
+        incApiCalls(1);
+        return res.json();
+      }
+      if ((res.status === 429 || res.status >= 500) && retries < MAX_RETRIES) {
+        retries++;
+        let delay;
+        if (res.status === 429) {
+          const ra = res.headers.get('Retry-After');
+          delay = ra ? parseInt(ra, 10) * 1000 : Math.min(1000 * Math.pow(2, retries - 1), 30000);
+        } else {
+          delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
+        }
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      incApiCalls(1);
+      throw new Error(`HTTP ${res.status}`);
+    }
+  })();
+
+  _inflightFetches.set(url, promise);
+  promise.finally(() => {
+    if (_inflightFetches.get(url) === promise) _inflightFetches.delete(url);
+  });
+  return promise;
+}
+
+async function fetchModels(task) {
+  return fetchJson(`https://huggingface.co/api/models?sort=downloads&direction=-1&limit=${CONFIG.LIMIT}&pipeline_tag=${task}&full=true&cardData=true`);
+}
+
+async function fetchRecentModels(task) {
+  return fetchJson(`https://huggingface.co/api/models?sort=lastModified&direction=-1&limit=${CONFIG.LIMIT}&pipeline_tag=${task}&full=true&cardData=true`);
+}
+
+async function fetchUntaggedModels() {
+  return fetchJson(`https://huggingface.co/api/models?sort=downloads&direction=-1&limit=${CONFIG.LIMIT}&full=true&cardData=true`);
+}
+
+function isBase(model) {
+  const cd = model.cardData;
+  if (!cd) return true;
+  const bm = cd.base_model;
+  if (!bm) return true;
+  const author = model.id.split("/")[0];
+  const firstBase = Array.isArray(bm) ? bm[0] : bm;
+  if (firstBase && firstBase.split("/")[0] === author) return true;
+  return false;
+}
+
+function inferParent(modelId, knownIds) {
+  const bits = modelId.split('/');
+  let name = bits[1];
+  while (name.length > 0) {
+    const dash = name.lastIndexOf('-');
+    if (dash <= 0) break;
+    name = name.substring(0, dash);
+    const candId = bits[0] + '/' + name;
+    if (knownIds.has(candId)) return candId;
+  }
+  return null;
+}
+
+function isOrphanQuant(model, knownIds) {
+  const cd = model.cardData;
+  if (cd && cd.base_model) return false;
+  const idLower = model.id.toLowerCase();
+  if (!Q_METHODS.some(t => idLower.includes(t))) return false;
+  return inferParent(model.id, knownIds) !== null;
+}
+
+function getOrphanQuantMethod(modelId) {
+  const idLower = modelId.toLowerCase();
+  return Q_METHODS.filter(t => idLower.includes(t));
+}
+
+function isNestedQuant(m, knownIds) {
+  const cd = m.cardData;
+  if (!cd || !cd.base_model) return false;
+  const idLower = m.id.toLowerCase();
+  if (!Q_METHODS.some(t => idLower.includes(t))) return false;
+  const bm = Array.isArray(cd.base_model) ? cd.base_model[0] : cd.base_model;
+  return knownIds.has(bm);
+}
+
+let _canonicalCache = null;
+function buildCanonicalAuthors() {
+  if (_canonicalCache && _canonicalCache.ref === _allFetched) {
+    _canonicalAuthor = _canonicalCache.result;
+    return;
+  }
+  _canonicalAuthor = {};
+  const byName = {};
+  (_allFetched || []).forEach(m => {
+    const name = m.id.split("/").slice(1).join("/");
+    if (!byName[name]) byName[name] = [];
+    byName[name].push({ author: m.id.split("/")[0], downloads: m.downloads || 0 });
+  });
+  Object.entries(byName).forEach(([name, entries]) => {
+    const authors = [...new Set(entries.map(e => e.author))];
+    if (authors.length <= 1) return;
+    let best = null;
+    entries.forEach(e => {
+      if (!best || e.downloads > best.downloads) best = e;
+    });
+    _canonicalAuthor[name] = best.author;
+  });
+  _canonicalCache = { result: _canonicalAuthor, ref: _allFetched };
+}
+
+function isCanonicalCopy(m) {
+  const name = m.id.split("/").slice(1).join("/");
+  return _canonicalAuthor && _canonicalAuthor[name] !== undefined && _canonicalAuthor[name] !== m.id.split("/")[0];
+}
+
+function fmt(n) { return n.toLocaleString(); }
+function fmtDate(d) { return d ? new Date(d).toISOString().slice(0, 10) : "—"; }
+function fmtAge(d) {
+  if (!d) return "";
+  const days = Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
+  if (days < 30) return `${days}d`;
+  if (days < 365) return `${Math.floor(days / 30)}mo`;
+  return `${(days / 365).toFixed(1)}y`;
+}
+const _htmlEsc = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function escapeHtml(str) { return String(str).replace(/[&<>"']/g, c => _htmlEsc[c]); }
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+function sliderValueToDate(val) {
+  if (val === 0) return new Date("2020-01-01");
+  if (val === CONFIG.DATE_SLIDER_MAX) return new Date();
+  const d = new Date();
+  d.setDate(d.getDate() - (CONFIG.DATE_SLIDER_MAX - val) * CONFIG.DAYS_PER_STEP);
+  return d;
+}
+function sliderValueToLabel(val) {
+  if (val === 0) return "Anytime";
+  if (val === CONFIG.DATE_SLIDER_MAX) return "Now";
+  const d = new Date();
+  d.setDate(d.getDate() - (CONFIG.DATE_SLIDER_MAX - val) * CONFIG.DAYS_PER_STEP);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}/${m}/${day}`;
+}
+function isInDateRange(dateStr) {
+  if (!dateStr) return true;
+  const c = new Date(dateStr);
+  return c >= sliderValueToDate(sliderFrom) && c <= sliderValueToDate(sliderTo);
+}
+function getParamCount(m) {
+  if (m.safetensors && m.safetensors.total) return m.safetensors.total / 1e9;
+  if (m.gguf && m.gguf.total) return m.gguf.total / 1e9;
+  const bMatch = m.id.match(/(\d+\.?\d*)[Bb]/);
+  if (bMatch) return parseFloat(bMatch[1]);
+  const mMatch = m.id.match(/(\d+\.?\d*)[Mm]/);
+  if (mMatch) return parseFloat(mMatch[1]) / 1000;
+  return null;
+}
+function paramPosToValue(pos) {
+  if (pos <= 0) return 0;
+  if (pos >= CONFIG.PARAM_SLIDER_MAX) return Infinity;
+  if (pos <= 40) return pos * 0.025;
+  if (pos <= 70) return 1 + (pos - 40) * 0.1;
+  if (pos <= 100) return 4 + (pos - 70) * 0.2;
+  if (pos <= 130) return 10 + (pos - 100) * 1;
+  if (pos <= 160) return 40 + (pos - 130) * 2;
+  if (pos <= 190) return 100 + (pos - 160) * 10;
+  return 400 + (pos - 190) * 20;
+}
+function valueToPos(val) {
+  if (val <= 0) return 0;
+  if (val <= 1) return val / 0.025;
+  if (val <= 4) return 40 + (val - 1) / 0.1;
+  if (val <= 10) return 70 + (val - 4) / 0.2;
+  if (val <= 40) return 100 + (val - 10) / 1;
+  if (val <= 100) return 130 + (val - 40) / 2;
+  if (val <= 400) return 160 + (val - 100) / 10;
+  if (val <= 1000) return 190 + (val - 400) / 20;
+  return CONFIG.PARAM_SLIDER_MAX;
+}
+function sliderCenterPct(input, pos, max) {
+  const thumbSize = 18, iw = input.clientWidth || 1, pct = pos / (max || CONFIG.PARAM_SLIDER_MAX);
+  return (thumbSize / 2 + pct * (iw - thumbSize)) / iw * 100;
+}
+function paramValueToLabel(val) {
+  if (val === Infinity) return ">1T";
+  if (val === 0) return "0";
+  if (val >= 1000) return `${Math.round(val / 1000)}T`;
+  if (val >= 10) return `${Math.round(val)}B`;
+  if (val >= 1) return `${val.toFixed(1)}B`;
+  return `${Math.round(val * 1000)}M`;
+}
+function isInParamRange(paramB) {
+  if (paramB === null || paramB === undefined) return true;
+  const fromVal = paramPosToValue(paramSliderFrom);
+  const toVal = paramPosToValue(paramSliderTo);
+  return paramB >= fromVal && (toVal === Infinity || paramB <= toVal);
+}
+function modelPassesAllFilters(m) {
+  if (_l2ModelFilter && !m.id.split("/").slice(1).join("/").toLowerCase().includes(_l2ModelFilter.toLowerCase())) return false;
+  if (!_injectedBaseIds.has(m.id) && !isInDateRange(m.lastModified)) return false;
+  const tag = m.pipeline_tag;
+  if (!tag && !activeSpecialFilters.has("include untagged")) return false;
+  if (!isInParamRange(m.paramB)) return false;
+  if (!matchesTaskFilter(tag)) return false;
+  if (tag && !activeTaskFilters.has(tag)) return false;
+  return true;
+}
+
+function computeAuthorData() {
+  buildCanonicalAuthors();
+  const all = _allFetched || [];
+  const knownIds = new Set(all.map(x => x.id));
+  const map = {};
+  all.forEach(m => {
+    if (!modelPassesAllFilters(m)) return;
+    if (!isBase(m)) return;
+    if (isOrphanQuant(m, knownIds)) return;
+    if (isNestedQuant(m, knownIds)) return;
+    if (isCanonicalCopy(m)) return;
+    const author = m.id.split("/")[0];
+    if (!map[author]) map[author] = { author, count: 0, totalDownloads: 0, totalLikes: 0 };
+    map[author].count++;
+    map[author].totalDownloads += m.downloads || 0;
+    map[author].totalLikes += m.likes || 0;
+  });
+  return Object.values(map);
+}
+
+// ── State ──
+let sortKey = "totalDownloads";
+let sortAsc = false;
+const detailSort = {};
+const cache = {};
+function cacheKeys() {
+  return Object.keys(cache).filter(k => k !== "___access");
+}
+function cacheSet(key, value) {
+  if (key in cache) delete cache[key];
+  const ck = cacheKeys();
+  if (ck.length >= CONFIG.CACHE_MAX) delete cache[ck[0]];
+  cache[key] = value;
+}
+function cacheAccess(key) {
+  if (!(key in cache)) return undefined;
+  const v = cache[key];
+  delete cache[key];
+  cache[key] = v;
+  return v;
+}
+const expandedSections = new Set();
+const _inflightChildren = new Map();
+
+function pruneExpiredExpansions() {
+  for (const key of [...expandedSections]) {
+    if (!key.startsWith("a|")) continue;
+    const author = key.slice(2);
+    const row = document.querySelector(`tr.l1-row[data-author="${author}"]`);
+    if (!row) {
+      expandedSections.delete(key);
+      for (const child of [...expandedSections]) {
+        if (child.startsWith("m|" + author + "/") || child.startsWith("g|" + author + "/")) {
+          expandedSections.delete(child);
+        }
+      }
+    }
+  }
+}
+
+function saveRestoreExpansions(saved) {
+  for (const key of saved) {
+    if (!expandedSections.has(key)) expandedSections.add(key);
+  }
+}
+
+function matchesFilter(qMethod) {
+  if (!qMethod) return true;
+  const methods = qMethod.toLowerCase().split(",").map(s => s.trim());
+  return methods.some(m => {
+    const cat = qMethodToCategory(m);
+    return activeFilters.has(cat);
+  });
+}
+function qMethodToCategory(method) {
+  const m = method.toLowerCase();
+  if (["awq", "finetune", "gguf", "mlx", "fp4", "fp8", "safetensors"].includes(m)) return m;
+  return "others";
+}
+
+function syncFilterChips() {
+  document.querySelectorAll("#filter-bar .filter-chip").forEach(chip => {
+    const m = chip.dataset.method;
+    const on = activeFilters.has(m);
+    chip.classList.toggle("active", on);
+    chip.classList.toggle("inactive", !on);
+    chip.setAttribute("aria-pressed", String(on));
+  });
+  document.querySelectorAll("#from-bar .filter-chip").forEach(chip => {
+    const f = chip.dataset.option;
+    const on = activeFromFilters.has(f);
+    chip.classList.toggle("active", on);
+    chip.classList.toggle("inactive", !on);
+    chip.setAttribute("aria-pressed", String(on));
+  });
+  document.querySelectorAll("#to-bar .filter-chip").forEach(chip => {
+    const t = chip.dataset.option;
+    const on = activeToFilters.has(t);
+    chip.classList.toggle("active", on);
+    chip.classList.toggle("inactive", !on);
+    chip.setAttribute("aria-pressed", String(on));
+  });
+  document.querySelectorAll("#special-bar .filter-chip").forEach(chip => {
+    const s = chip.dataset.special;
+    const on = activeSpecialFilters.has(s);
+    chip.classList.toggle("active", on);
+    chip.classList.toggle("inactive", !on);
+    chip.setAttribute("aria-pressed", String(on));
+  });
+  const tasks = resolveTasks().sort();
+  const activeContainer = document.getElementById("activated-types");
+  const availContainer = document.getElementById("available-types");
+  const activeLabel = activeContainer.querySelector(".filter-label");
+  const availLabel = availContainer.querySelector(".filter-label");
+  const activeTags = [];
+  const availTags = [];
+  tasks.forEach(tag => {
+    if (activeTaskFilters.has(tag)) activeTags.push(tag);
+    else availTags.push(tag);
+  });
+  const showUntagged = activeSpecialFilters.has("include untagged");
+  if (showUntagged) activeTags.push("__untagged__");
+  const buildTag = (tag) => {
+    const desc = TO_TAGS.find(t => t.tag === tag)?.desc || "";
+    const el = document.createElement("span");
+    el.className = "act-tag active";
+    el.dataset.tag = tag;
+    el.textContent = tag;
+    if (desc) el.title = desc;
+    el.addEventListener("click", () => {
+      applyActTagLogic(tag);
+      syncFilterChips();
+      markDirty();
+    });
+    return el;
+  };
+  const buildAvailTag = (tag) => {
+    const desc = TO_TAGS.find(t => t.tag === tag)?.desc || "";
+    const el = document.createElement("span");
+    el.className = "act-tag";
+    el.dataset.tag = tag;
+    el.textContent = tag;
+    if (desc) el.title = desc;
+    el.addEventListener("click", () => {
+      applyActTagLogic(tag);
+      syncFilterChips();
+      markDirty();
+    });
+    return el;
+  };
+  while (activeContainer.lastChild !== activeLabel) activeContainer.removeChild(activeContainer.lastChild);
+  while (availContainer.lastChild !== availLabel) availContainer.removeChild(availContainer.lastChild);
+  activeTags.forEach(tag => {
+    if (tag === "__untagged__") {
+      const span = document.createElement("span");
+      span.className = "act-tag active";
+      span.textContent = "(untagged)";
+      activeContainer.appendChild(span);
+    } else {
+      activeContainer.appendChild(buildTag(tag));
+    }
+  });
+  availTags.forEach(tag => availContainer.appendChild(buildAvailTag(tag)));
+}
+function applyFilterLogic(method) {
+  const wasEnabled = activeFilters.has(method);
+  const enabledCount = FILTER_DISPLAY.filter(m => activeFilters.has(m)).length;
+  if (!wasEnabled) {
+    activeFilters.add(method);
+  } else if (enabledCount === FILTER_DISPLAY.length) {
+    FILTER_DISPLAY.forEach(m => activeFilters.delete(m));
+    activeFilters.add(method);
+  } else if (enabledCount === 1) {
+    FILTER_DISPLAY.forEach(m => activeFilters.add(m));
+  } else {
+    activeFilters.delete(method);
+  }
+}
+function applyActTagLogic(tag) {
+  const tags = resolveTasks();
+  const wasEnabled = activeTaskFilters.has(tag);
+  const enabledCount = tags.filter(t => activeTaskFilters.has(t)).length;
+  if (!wasEnabled) {
+    activeTaskFilters.add(tag);
+  } else if (enabledCount === tags.length) {
+    tags.forEach(t => activeTaskFilters.delete(t));
+    activeTaskFilters.add(tag);
+  } else if (enabledCount === 1) {
+    tags.forEach(t => activeTaskFilters.add(t));
+  } else {
+    activeTaskFilters.delete(tag);
+  }
+}
+function buildFilterBar() {
+  const bar = document.getElementById("filter-bar");
+  FILTER_DISPLAY.forEach(method => {
+    const chip = document.createElement("span");
+    chip.className = "filter-chip active";
+    chip.dataset.method = method;
+    chip.textContent = method.toUpperCase();
+    chip.tabIndex = 0;
+    chip.role = "button";
+    chip.setAttribute("aria-pressed", "true");
+    chip.addEventListener("click", () => {
+      applyFilterLogic(method);
+      syncFilterChips();
+      markDirty();
+    });
+    chip.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); chip.click(); }
+    });
+    bar.appendChild(chip);
+  });
+}
+function buildFromToBars() {
+  buildBar("from-bar", FROM_OPTIONS, activeFromFilters, applyFromLogic);
+  buildBar("to-bar", TO_OPTIONS, activeToFilters, applyToLogic);
+}
+function buildSpecialBar() {
+  const bar = document.getElementById("special-bar");
+  SPECIAL_DISPLAY.forEach(opt => {
+    const chip = document.createElement("span");
+    chip.className = "filter-chip inactive";
+    chip.dataset.special = opt;
+    chip.textContent = opt.replace(/ /g, "\u00A0");
+    chip.tabIndex = 0;
+    chip.role = "button";
+    chip.setAttribute("aria-pressed", "false");
+    chip.addEventListener("click", () => {
+      if (activeSpecialFilters.has(opt)) activeSpecialFilters.delete(opt);
+      else activeSpecialFilters.add(opt);
+      syncFilterChips();
+      markDirty();
+    });
+    chip.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); chip.click(); }
+    });
+    bar.appendChild(chip);
+  });
+}
+function buildBar(barId, options, activeSet, clickHandler) {
+  const bar = document.getElementById(barId);
+  options.forEach(opt => {
+    const chip = document.createElement("span");
+    chip.className = "filter-chip " + (activeSet.has(opt) ? "active" : "inactive");
+    chip.dataset.option = opt;
+    chip.textContent = opt.charAt(0).toUpperCase() + opt.slice(1);
+    chip.tabIndex = 0;
+    chip.role = "button";
+    chip.setAttribute("aria-pressed", String(activeSet.has(opt)));
+    chip.addEventListener("click", () => {
+      clickHandler(opt);
+      syncFilterChips();
+      markDirty();
+    });
+    chip.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); chip.click(); }
+    });
+    bar.appendChild(chip);
+  });
+}
+function reseedActiveTaskFilters() {
+  const tasks = resolveTasks();
+  const resolvedSet = new Set(tasks);
+  for (const tag of activeTaskFilters) {
+    if (!resolvedSet.has(tag)) activeTaskFilters.delete(tag);
+  }
+  tasks.forEach(t => {
+    if (DEFAULT_ACTIVE_TAGS.has(t)) activeTaskFilters.add(t);
+  });
+}
+function applyFromLogic(option) {
+  applyBarLogic(option, FROM_OPTIONS, activeFromFilters);
+  reseedActiveTaskFilters();
+}
+function applyToLogic(option) {
+  applyBarLogic(option, TO_OPTIONS, activeToFilters);
+  reseedActiveTaskFilters();
+}
+function applyBarLogic(option, options, activeSet) {
+  const wasEnabled = activeSet.has(option);
+  const enabledCount = options.filter(o => activeSet.has(o)).length;
+  if (option === "all") {
+    if (!wasEnabled) {
+      options.forEach(o => activeSet.add(o));
+    } else {
+      activeSet.delete("all");
+    }
+  } else if (!wasEnabled) {
+    activeSet.add(option);
+  } else if (enabledCount === options.length) {
+    options.forEach(o => activeSet.delete(o));
+    activeSet.add(option);
+  } else if (enabledCount === 1) {
+    options.forEach(o => activeSet.add(o));
+  } else {
+    activeSet.delete(option);
+  }
+}
+
+function sortCoerce(v, k) {
+  if (["downloads", "likes", "totalDownloads", "totalLikes", "count", "paramB"].includes(k)) return Number(v);
+  if (["created_at", "updated_at", "lastModified"].includes(k)) return new Date(v || 0).getTime();
+  return String(v || "").toLowerCase();
+}
+function sortRows(rows, key, asc, subKey) {
+  return rows.slice().sort((a, b) => {
+    let cmp = 0;
+    if (subKey && a[key] != null && b[key] != null && a[key] === b[key]) {
+      const sa = sortCoerce(a[subKey], subKey);
+      const sb = sortCoerce(b[subKey], subKey);
+      if (sa < sb) return -1;
+      if (sa > sb) return 1;
+      cmp = 0;
+    } else {
+      let va = sortCoerce(a[key], key), vb = sortCoerce(b[key], key);
+      if (va < vb) cmp = -1;
+      else if (va > vb) cmp = 1;
+      else cmp = 0;
+    }
+    return asc ? cmp : -cmp;
+  });
+}
+
+// ── Level 1: Authors ──
+function renderMain(authorData) {
+  const tbody = document.getElementById("body");
+  let sorted = sortRows(authorData, sortKey, sortAsc, sortKey === "author" ? undefined : "author");
+  if (_l1AuthorFilter) {
+    const f = _l1AuthorFilter.toLowerCase();
+    sorted = [...sorted].sort((a, b) => {
+      const aMatch = a.author.toLowerCase().includes(f);
+      const bMatch = b.author.toLowerCase().includes(f);
+      if (aMatch && !bMatch) return -1;
+      if (!aMatch && bMatch) return 1;
+      return 0;
+    });
+  }
+
+  let html = "";
+  sorted.forEach((a, idx) => {
+    const zebra = idx % 2 === 0 ? "row-even" : "row-odd";
+    html += `<tr class="l1-row ${zebra}" data-l1-idx="${idx}" data-author="${escapeHtml(a.author)}">
+      <td><span class="toggle" id="t1-${idx}">▶</span><a href="https://huggingface.co/${escapeHtml(a.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(a.author)}</a></td>
+      <td class="right">${a.count}</td>
+      <td class="right">${fmt(a.totalDownloads)}</td>
+      <td class="right">${fmt(a.totalLikes)}</td>
+    </tr>
+    <tr class="detail-row" id="d1-${idx}" style="display:none"><td colspan="4"><div class="detail-inner" id="i1-${idx}"></div></td></tr>`;
+  });
+
+  tbody.innerHTML = html;
+  document.getElementById("count").textContent =
+    `${sorted.length} authors with base models in selected range. Click to expand.`;
+}
+
+async function loadAuthorModels(idx, author, container) {
+  const gen = _fetchGeneration;
+  try {
+    const models = cacheAccess(author + "_models") || await fetchJson(
+      `https://huggingface.co/api/models?author=${author}&sort=downloads&direction=-1&limit=${CONFIG.AUTHOR_LIMIT}&full=true&cardData=true`
+    );
+    if (!cacheAccess(author + "_models")) cacheSet(author + "_models", models);
+
+    const authorKnownIds = new Set(models.map(x => x.id));
+    const baseModels = models.filter(m => isBase(m)).map(m => ({
+      id: m.id,
+      downloads: m.downloads || 0,
+      likes: m.likes || 0,
+      created_at: m.createdAt || "",
+      updated_at: m.lastModified || "",
+      lastModified: m.lastModified || "",
+      tags: m.tags || [],
+      paramB: getParamCount(m),
+      pipeline_tag: m.pipeline_tag || "",
+      _orphanQuant: isOrphanQuant(m, authorKnownIds),
+      _nestedQuant: m.cardData && m.cardData.base_model ? (() => {
+          const idLower = m.id.toLowerCase();
+          if (!Q_METHODS.some(t => idLower.includes(t))) return false;
+          const bm = Array.isArray(m.cardData.base_model) ? m.cardData.base_model[0] : m.cardData.base_model;
+          return authorKnownIds.has(bm);
+        })() : false
+    }));
+
+    cacheSet(author, baseModels);
+
+    const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
+    const filterApplied = () => nonQuantBase.filter(m => modelPassesAllFilters(m));
+
+    const dated = filterApplied();
+
+    if (gen !== _fetchGeneration) return;
+    const ad = _authorData;
+    for (const a of ad) {
+      if (a.author === author) {
+        a.count = dated.length;
+        a.totalDownloads = dated.reduce((s, m) => s + m.downloads, 0);
+        a.totalLikes = dated.reduce((s, m) => s + m.likes, 0);
+        break;
+      }
+    }
+    const row = document.querySelector(`.l1-row[data-author="${author}"]`);
+    if (row) {
+      const cells = row.querySelectorAll("td");
+      cells[1].textContent = dated.length;
+      cells[2].textContent = fmt(dated.reduce((s, m) => s + m.downloads, 0));
+      cells[3].textContent = fmt(dated.reduce((s, m) => s + m.likes, 0));
+    }
+
+    if (gen !== _fetchGeneration) return;
+    renderL2(idx, author, dated, container, nonQuantBase.length);
+
+    const unknownModels = dated.filter(m => m.paramB === null);
+    if (unknownModels.length > 0) {
+      const statusEl = document.getElementById("status");
+      const totalUnk = unknownModels.length;
+      for (let i = 0; i < totalUnk; i += CONFIG.PARAM_BATCH_SIZE) {
+        const batch = unknownModels.slice(i, i + CONFIG.PARAM_BATCH_SIZE);
+        statusEl.textContent = `Resolving parameters for ${author}… (${Math.min(i + CONFIG.PARAM_BATCH_SIZE, totalUnk)}/${totalUnk})`;
+        await Promise.all(batch.map(async (m) => {
+          try {
+            const full = await fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`);
+            const p = getParamCount(full);
+            if (p !== null) m.paramB = p;
+          } catch (e) {
+            console.warn("Failed to fetch param for", m.id, e);
+          }
+        }));
+        if (gen !== _fetchGeneration) return;
+        const pruned = filterApplied();
+        const detailRow = document.getElementById(`d1-${idx}`);
+        if (detailRow && detailRow.style.display !== "none") {
+          renderL2(idx, author, pruned, container, nonQuantBase.length);
+        }
+      }
+      for (const m of unknownModels) {
+        if (m.paramB != null) continue;
+        const bits = m.id.split('/');
+        let name = bits[1];
+        while (name.length > 0) {
+          const dash = name.lastIndexOf('-');
+          if (dash <= 0) break;
+          name = name.substring(0, dash);
+          const candId = bits[0] + '/' + name;
+          const parent = baseModels.find(b => b.id === candId && b.paramB != null) ||
+            (_allFetched || []).find(f => f.id === candId && f.paramB != null);
+          if (parent) { m.paramB = parent.paramB; break; }
+        }
+      }
+      if (gen !== _fetchGeneration) return;
+      statusEl.textContent = "";
+      const updated = filterApplied();
+      const detailRow = document.getElementById(`d1-${idx}`);
+      if (detailRow && detailRow.style.display !== "none") {
+        renderL2(idx, author, updated, container, nonQuantBase.length);
+      }
+    }
+  } catch (err) {
+    container.innerHTML = `<div class="detail-error">Error: ${err.message}</div>`;
+  }
+}
+
+// ── Level 2: Base Models ──
+function thHtml(c, state, level) {
+  const isSorted = state.key === c.key;
+  const allCls = (c.headerCls || "") + " " + (c.cls || "");
+  const cls = allCls.trim() + (isSorted ? " sorted" : "");
+  const arrow = isSorted ? (state.asc ? "▲" : "▼") : "";
+  const ariaSort = isSorted ? ` aria-sort="${state.asc ? "ascending" : "descending"}"` : "";
+  if (allCls.includes("right") || allCls.includes("center") || allCls.includes("updated-header")) {
+    return `<th data-key="${c.key}" data-level="${level}" class="${cls}"${ariaSort}><span class="arrow-left">${arrow}</span>${c.label}</th>`;
+  }
+  return `<th data-key="${c.key}" data-level="${level}" class="${cls}"${ariaSort}>${c.label}<span class="arrow">${arrow}</span></th>`;
+}
+
+function renderL2(idx, author, models, container, totalBeforeFilter) {
+  const state = detailSort[`l2-${author}`] || { key: "downloads", asc: false };
+  const sorted = sortRows(models, state.key, state.asc, state.key === "id" ? undefined : "id");
+
+  const cols = [
+    { key: "id", label: "Model ID" },
+    { key: "paramB", label: "Params", headerCls: "updated-header", cls: "center", width: 160 },
+    { key: "downloads", label: "Downloads", cls: "right", width: 110 },
+    { key: "likes", label: "Likes", cls: "right", width: 80 },
+    { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header", width: 135 }
+  ];
+
+  let html = `<table><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
+  cols.forEach(c => { html += thHtml(c, state, "2"); });
+  html += `</tr></thead><tbody>`;
+
+  sorted.forEach((m, mIdx) => {
+    const qMethods = getOrphanQuantMethod(m.id);
+    const orphanBadge = qMethods.length ? qMethods.map(m => `<span class="badge orphan">${escapeHtml(m.toUpperCase())}</span>`).join(' ') + ' ' : '';
+    html += `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}">
+      <td class="model-id-cell"><span class="toggle" id="t2-${idx}-${mIdx}">▶</span>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
+      <td class="center" style="font-size:0.78rem">${m.paramB != null ? paramValueToLabel(m.paramB) : "—"}</td>
+      <td class="right">${fmt(m.downloads)}</td>
+      <td class="right">${fmt(m.likes)}<span class="likes-icon">♥</span></td>
+      <td class="updated-cell">${fmtDate(m.lastModified)} <span style="color:#484f58;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
+    </tr>
+    <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none"><td colspan="5"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
+  });
+
+  const hidden = (totalBeforeFilter != null && totalBeforeFilter > models.length) ? totalBeforeFilter - models.length : 0;
+  html += `</tbody></table><div class="detail-count">${models.length} model(s)` + (hidden > 0 ? `, <span style="color:#484f58;font-size:0.75rem">+${hidden} hidden by search settings</span>` : '') + `</div>`;
+  container.innerHTML = html;
+  container._l2State = { idx, author, models, totalBeforeFilter };
+
+  if (!container._delegatedL2) {
+    container._delegatedL2 = true;
+    container.addEventListener("click", function(e) {
+      const inner = e.target.closest(".detail-inner");
+      if (inner && inner !== this) return;
+      const s = this._l2State;
+      const th = e.target.closest("thead th");
+      if (th) {
+        if (th.dataset.level !== "2") return;
+        const key = th.dataset.key;
+        const st = detailSort[`l2-${s.author}`] || { key: "downloads", asc: false };
+        if (st.key === key) st.asc = !st.asc;
+        else { st.key = key; st.asc = false; }
+        detailSort[`l2-${s.author}`] = st;
+        renderL2(s.idx, s.author, s.models, this, s.totalBeforeFilter);
+        return;
+      }
+      const tr = e.target.closest("tr.l2-row");
+      if (tr && e.target.tagName !== "A") {
+        const l2Idx = parseInt(tr.dataset.l2Idx);
+        const modelIdx = parseInt(tr.dataset.modelIdx);
+        const modelId = tr.dataset.model;
+        const detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
+        const inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
+        const tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
+        const modelKey = `m|${modelId}`;
+        if (detailRow.style.display === "none") {
+          detailRow.style.display = "";
+          tog.classList.add("open");
+          expandedSections.add(modelKey);
+          const key = `children-${modelId}`;
+          const cached = cacheAccess(key);
+          if (cached) {
+            renderL3(l2Idx, modelIdx, modelId, cached, inner);
+          } else {
+            inner.innerHTML = '<div class="detail-loading">Fetching children/quantizations…</div>';
+            loadChildren(l2Idx, modelIdx, modelId, inner);
+          }
+        } else {
+          detailRow.style.display = "none";
+          tog.classList.remove("open");
+          expandedSections.delete(modelKey);
+          for (const k of [...expandedSections]) {
+            if (k.startsWith(`g|${modelId}|`)) expandedSections.delete(k);
+          }
+        }
+      }
+    });
+  }
+}
+
+async function loadChildren(l2Idx, modelIdx, parentId, container) {
+  const cacheKey = `children-${parentId}`;
+
+  // Deduplicate concurrent fetches for the same parent
+  if (_inflightChildren.has(cacheKey)) {
+    await _inflightChildren.get(cacheKey);
+    const cached = cacheAccess(cacheKey);
+    if (cached) renderL3(l2Idx, modelIdx, parentId, cached, container);
+    return;
+  }
+
+  const promise = (async () => {
+    try {
+      const modelName = parentId.split("/").slice(1).join("/");
+      const results = [];
+      const seen = new Set();
+
+      const strictNameMatch = (candidateId) => {
+        let name = candidateId.split("/").slice(1).join("/");
+        let changed;
+        do {
+          changed = false;
+          for (const q of Q_METHODS) {
+            const suffix = '-' + q;
+            if (name.toLowerCase().endsWith(suffix)) {
+              name = name.slice(0, -suffix.length);
+              changed = true;
+              break;
+            }
+          }
+        } while (changed);
+        return name.toLowerCase() === modelName.toLowerCase();
+      };
+
+      const processChildren = (models) => {
+        let count = 0;
+        for (const m of models) {
+          if (m.id === parentId || seen.has(m.id)) continue;
+          seen.add(m.id);
+
+          const cd = m.cardData || {};
+          const baseModel = cd.base_model;
+          const idLower = m.id.toLowerCase();
+          const tagsStr = (m.tags || []).join(" ").toLowerCase();
+          const isQuant = Q_METHODS.some(t => idLower.includes(t) || tagsStr.includes(t));
+          const hasBaseModel = baseModel === parentId ||
+                               Array.isArray(baseModel) && baseModel.some(b => b === parentId);
+          const childAuthor = m.id.split("/")[0];
+          const parentAuthor = parentId.split("/")[0];
+          if (childAuthor === parentAuthor) continue;
+
+          if (hasBaseModel || (strictNameMatch(m.id) && isQuant)) {
+              if (!hasBaseModel) {
+                if (m.pipeline_tag && !activeTaskFilters.has(m.pipeline_tag)) continue;
+                if (_allFetched && _allFetched.some(f => f.id === m.id)) continue;
+              }
+              const qMethods = Q_METHODS.filter(t => idLower.includes(t) || tagsStr.includes(t));
+              let qMethod = qMethods.length ? qMethods.join(", ") : (hasBaseModel ? "finetune" : (tagsStr.includes("safetensors") ? "safetensors" : "derivative"));
+              results.push({
+              id: m.id,
+              author: m.id.split("/")[0],
+              downloads: m.downloads || 0,
+              likes: m.likes || 0,
+              created_at: m.createdAt || "",
+              updated_at: m.lastModified || "",
+              lastModified: m.lastModified || "",
+              q_method: qMethod,
+              tags: m.tags || []
+            });
+            count++;
+          }
+        }
+        return count;
+      };
+
+      const nameUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
+      let childCount = processChildren(await fetchJson(nameUrl));
+
+      if (childCount === 0) {
+        const fullUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(parentId)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
+        processChildren(await fetchJson(fullUrl));
+      }
+
+      cacheSet(cacheKey, results);
+      renderL3(l2Idx, modelIdx, parentId, results, container);
+    } catch (err) {
+      container.innerHTML = `<div class="detail-error">Error: ${err.message}</div>`;
+    }
+  })();
+
+  _inflightChildren.set(cacheKey, promise);
+  await promise;
+  _inflightChildren.delete(cacheKey);
+}
+
+// ── Level 3: Quant Author Groups ──
+function renderL3(l2Idx, modelIdx, parentId, children, container) {
+  const filtered = children.filter(c => matchesFilter(c.q_method) && isInDateRange(c.lastModified));
+  const groups = {};
+  filtered.forEach(c => {
+    if (!groups[c.author]) groups[c.author] = [];
+    groups[c.author].push(c);
+  });
+
+  const groupEntries = Object.entries(groups).map(([author, quants]) => ({
+    author,
+    count: quants.length,
+    totalDownloads: quants.reduce((s, q) => s + q.downloads, 0),
+    quants
+  })).filter(g => !_l3AuthorFilter || g.author.toLowerCase().includes(_l3AuthorFilter.toLowerCase()));
+
+  const state = detailSort[`l3-${parentId}`] || { key: "totalDownloads", asc: false };
+  const sorted = sortRows(groupEntries, state.key, state.asc, state.key === "author" ? undefined : "author");
+
+  const cols = [
+    { key: "author", label: "Quant Author" },
+    { key: "count", label: "Models", cls: "right", width: 75 },
+    { key: "totalDownloads", label: "Downloads", cls: "right", width: 120 }
+  ];
+
+  let html = `<table><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
+  cols.forEach(c => { html += thHtml(c, state, "3"); });
+  html += `</tr></thead><tbody>`;
+
+  sorted.forEach((g, gIdx) => {
+    html += `<tr class="l3-row" data-l3-l2="${l2Idx}" data-l3-model-idx="${modelIdx}" data-l3-parent="${escapeHtml(parentId)}" data-l3-idx="${gIdx}" data-l3-author="${escapeHtml(g.author)}">
+      <td><span class="toggle" id="t3-${l2Idx}-${modelIdx}-${gIdx}">▶</span><a href="https://huggingface.co/${escapeHtml(g.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(g.author)}</a></td>
+      <td class="models-cell">${g.count}</td>
+      <td class="right">${fmt(g.totalDownloads)}</td>
+    </tr>
+    <tr class="detail-row" id="d3-${l2Idx}-${modelIdx}-${gIdx}" style="display:none"><td colspan="3"><div class="detail-inner" id="i3-${l2Idx}-${modelIdx}-${gIdx}"></div></td></tr>`;
+  });
+  html += `</tbody></table>`;
+  html += `<div class="detail-count">${filtered.length} child model(s) from ${groupEntries.length} author(s)${filtered.length !== children.length ? ` (filtered from ${children.length})` : ''}</div>`;
+  container.innerHTML = html;
+  container._l3State = { l2Idx, modelIdx, parentId, children };
+
+  if (!container._delegatedL3) {
+    container._delegatedL3 = true;
+    container.addEventListener("click", function(e) {
+      const inner = e.target.closest(".detail-inner");
+      if (inner && inner !== this) return;
+      const s = this._l3State;
+      const th = e.target.closest("thead th");
+      if (th) {
+        if (th.dataset.level !== "3") return;
+        const key = th.dataset.key;
+        if (!key) return;
+        const st = detailSort[`l3-${s.parentId}`] || { key: "totalDownloads", asc: false };
+        if (st.key === key) st.asc = !st.asc;
+        else { st.key = key; st.asc = false; }
+        detailSort[`l3-${s.parentId}`] = st;
+        renderL3(s.l2Idx, s.modelIdx, s.parentId, s.children, this);
+        return;
+      }
+      const tr = e.target.closest("tr.l3-row");
+      if (tr && e.target.tagName !== "A") {
+        const l2Idx = parseInt(tr.dataset.l3L2);
+        const modelIdx = parseInt(tr.dataset.l3ModelIdx);
+        const parentId = tr.dataset.l3Parent;
+        const gIdx = parseInt(tr.dataset.l3Idx);
+        const author = tr.dataset.l3Author;
+        const detailRow = document.getElementById(`d3-${l2Idx}-${modelIdx}-${gIdx}`);
+        const inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
+        const tog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
+        const groupKey = `g|${parentId}|${author}`;
+        if (detailRow.style.display === "none") {
+          detailRow.style.display = "";
+          tog.classList.add("open");
+          expandedSections.add(groupKey);
+          const allChildren = cacheAccess(`children-${parentId}`) || [];
+          const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
+          renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, inner);
+        } else {
+          detailRow.style.display = "none";
+          tog.classList.remove("open");
+          expandedSections.delete(groupKey);
+        }
+      }
+    });
+  }
+}
+
+// ── Level 4: Individual Quantizations ──
+function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
+  const st = detailSort[`l4-${parentId}-${author}`] || { key: "downloads", asc: false };
+  if (_l4ModelFilter) quants = quants.filter(q => q.id.split("/").slice(1).join("/").toLowerCase().includes(_l4ModelFilter.toLowerCase()));
+  const sorted = sortRows(quants, st.key, st.asc, st.key === "id" ? undefined : "id");
+
+  const cols = [
+    { key: "id", label: "Model ID" },
+    { key: "q_method", label: "Quant", headerCls: "updated-header", cls: "center", width: 160 },
+    { key: "downloads", label: "Downloads", cls: "right", width: 110 },
+    { key: "likes", label: "Likes", cls: "right", width: 80 },
+    { key: "lastModified", label: "Updated", cls: "right", width: 110 }
+  ];
+
+  let html = `<table><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
+  cols.forEach(c => { html += thHtml(c, st, "4"); });
+  html += `</tr></thead><tbody>`;
+
+  sorted.forEach(q => {
+    html += `<tr class="l4-row">
+      <td class="model-id-cell"><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.id.split("/").slice(1).join("/"))}">${escapeHtml(q.id.split("/").slice(1).join("/"))}</a></td>
+      <td class="center"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
+      <td class="right">${fmt(q.downloads)}</td>
+      <td class="right">${fmt(q.likes)}<span class="likes-icon">♥</span></td>
+      <td class="right">${fmtDate(q.lastModified)}</td>
+    </tr>`;
+  });
+
+  html += `</tbody></table>`;
+  container.innerHTML = html;
+  container._l4State = { l2Idx, modelIdx, gIdx, parentId, author, quants };
+
+  if (!container._delegatedL4) {
+    container._delegatedL4 = true;
+    container.addEventListener("click", function(e) {
+      const th = e.target.closest("thead th");
+      if (!th || th.dataset.level !== "4") return;
+      const s = this._l4State;
+      const key = th.dataset.key;
+      const st = detailSort[`l4-${s.parentId}-${s.author}`] || { key: "downloads", asc: false };
+      if (st.key === key) st.asc = !st.asc;
+      else { st.key = key; st.asc = false; }
+      detailSort[`l4-${s.parentId}-${s.author}`] = st;
+      renderL4(s.l2Idx, s.modelIdx, s.gIdx, s.parentId, s.author, s.quants, this);
+    });
+  }
+}
+
+function refreshAllExpanded() {
+  // Phase 1: re-expand L1 author rows
+  for (const key of expandedSections) {
+    if (!key.startsWith("a|")) continue;
+    const author = key.slice(2);
+    const trs = document.querySelectorAll("tr.l1-row");
+    let row, idx;
+    for (const r of trs) {
+      if (r.dataset.author === author) { row = r; idx = parseInt(r.dataset.l1Idx); break; }
+    }
+    if (!row) continue;
+    const detailRow = document.getElementById(`d1-${idx}`);
+    const inner = document.getElementById(`i1-${idx}`);
+    const tog = document.getElementById(`t1-${idx}`);
+    if (!detailRow || detailRow.style.display !== "none") continue;
+    detailRow.style.display = "";
+    if (tog) tog.classList.add("open");
+    const models = cacheAccess(author);
+    if (models) {
+     const nonQuantBase = models.filter(m => !m._orphanQuant && !m._nestedQuant);
+      const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
+      renderL2(idx, author, filtered, inner, nonQuantBase.length);
+    }
+  }
+
+  // Phase 2: re-expand L2 model rows
+  for (const key of expandedSections) {
+    if (!key.startsWith("m|")) continue;
+    const modelId = key.slice(2);
+    const trs = document.querySelectorAll("tr.l2-row");
+    let row, l2Idx, modelIdx;
+    for (const r of trs) {
+      if (r.dataset.model === modelId) { row = r; l2Idx = parseInt(r.dataset.l2Idx); modelIdx = parseInt(r.dataset.modelIdx); break; }
+    }
+    if (!row || !row.closest(".detail-inner")) continue;
+    const detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
+    const inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
+    const tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
+    if (!detailRow || detailRow.style.display !== "none") continue;
+    detailRow.style.display = "";
+    if (tog) tog.classList.add("open");
+    const children = cacheAccess(`children-${modelId}`);
+    if (children) {
+      renderL3(l2Idx, modelIdx, modelId, children, inner);
+    }
+  }
+
+  // Phase 3: re-expand L3 quant author group rows
+  for (const key of expandedSections) {
+    if (!key.startsWith("g|")) continue;
+    const parts = key.split("|");
+    const modelId = parts[1];
+    const groupAuthor = parts.slice(2).join("|");
+    const trs = document.querySelectorAll("tr.l3-row");
+    let row, l2Idx, modelIdx, gIdx;
+    for (const r of trs) {
+      if (r.dataset.l3Parent === modelId && r.dataset.l3Author === groupAuthor) {
+        row = r; l2Idx = parseInt(r.dataset.l3L2); modelIdx = parseInt(r.dataset.l3ModelIdx); gIdx = parseInt(r.dataset.l3Idx);
+        break;
+      }
+    }
+    if (!row || !row.closest(".detail-inner")) continue;
+    const detailRow = document.getElementById(`d3-${l2Idx}-${modelIdx}-${gIdx}`);
+    const inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
+    const tog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
+    if (!detailRow || detailRow.style.display !== "none") continue;
+    detailRow.style.display = "";
+    if (tog) tog.classList.add("open");
+    const allChildren = cacheAccess(`children-${modelId}`) || [];
+    const quants = allChildren.filter(c => c.author === groupAuthor && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
+    renderL4(l2Idx, modelIdx, gIdx, modelId, groupAuthor, quants, inner);
+  }
+}
+
+function applyTextFilters() {
+  _l1AuthorFilter = document.getElementById("l1-author-filter").value.trim();
+  _l2ModelFilter = document.getElementById("l2-model-filter").value.trim();
+  _l3AuthorFilter = document.getElementById("l3-author-filter").value.trim();
+  _l4ModelFilter = document.getElementById("l4-model-filter").value.trim();
+  const saved = new Set(expandedSections);
+  _authorData = computeAuthorData();
+  renderMain(_authorData);
+  updateArrows();
+  pruneExpiredExpansions();
+  saveRestoreExpansions(saved);
+  refreshAllExpanded();
+}
+const debouncedTextFilter = debounce(applyTextFilters, CONFIG.DEBOUNCE_MS);
+
+// ── Date slider ──
+function buildDateSlider() {
+  const from = document.getElementById("ds-from");
+  const to = document.getElementById("ds-to");
+
+  from.value = sliderFrom;
+  to.value = sliderTo;
+
+  const read = () => { sliderFrom = parseInt(from.value); sliderTo = parseInt(to.value); };
+
+  const sliderMarkDirty = debounce(markDirty, CONFIG.DEBOUNCE_MS);
+  from.addEventListener("input", () => {
+    let nv = parseInt(from.value), tv = parseInt(to.value);
+    if (nv >= tv - 1) { to.value = String(Math.min(nv + 1, CONFIG.DATE_SLIDER_MAX)); read(); if (sliderFrom >= sliderTo - 1) { from.value = String(sliderTo - 1); read(); } } else { read(); }
+    updateDateUI();
+  });
+  from.addEventListener("change", () => {
+    let fv = parseInt(from.value), tv = parseInt(to.value);
+    if (fv >= tv - 1) { to.value = String(Math.min(fv + 1, CONFIG.DATE_SLIDER_MAX)); read(); if (sliderFrom >= sliderTo - 1) { from.value = String(sliderTo - 1); read(); } }
+    sliderMarkDirty();
+  });
+  to.addEventListener("input", () => {
+    let nv = parseInt(to.value), fv = parseInt(from.value);
+    if (nv <= fv + 1) { from.value = String(Math.max(nv - 1, 0)); read(); if (sliderTo <= sliderFrom + 1) { to.value = String(sliderFrom + 1); read(); } } else { read(); }
+    updateDateUI();
+  });
+  to.addEventListener("change", () => {
+    let fv = parseInt(from.value), tv = parseInt(to.value);
+    if (tv <= fv + 1) { from.value = String(Math.max(tv - 1, 0)); read(); if (sliderTo <= sliderFrom + 1) { to.value = String(sliderFrom + 1); read(); } }
+    sliderMarkDirty();
+  });
+
+  updateDateUI();
+}
+
+function applyFilters() {
+  if (!needsUpdate) return;
+  needsUpdate = false;
+  const savedExpansions = new Set(expandedSections);
+  _fetchGeneration++;
+  const gen = _fetchGeneration;
+  const btn = document.getElementById("get-results-btn");
+  btn.classList.remove("ready");
+  btn.classList.add("disabled");
+  const tasks = resolveTasks().filter(t => activeTaskFilters.has(t));
+  const newTasks = tasks.filter(t => !fetchedTasks.has(t));
+  const needUntagged = activeSpecialFilters.has("include untagged") && !fetchedUntagged;
+  if (newTasks.length > 0 || needUntagged) {
+    (async () => {
+      try {
+        const status = document.getElementById("status");
+        status.textContent = `Fetching models…`;
+        let fresh = [];
+        if (newTasks.length > 0) {
+          fresh = await fetchTasks(newTasks);
+        }
+        if (gen !== _fetchGeneration) return;
+        if (needUntagged) {
+          const raw = await fetchUntaggedModels();
+          fresh = fresh.concat(raw.filter(m => !m.pipeline_tag));
+          fetchedUntagged = true;
+        }
+        if (gen !== _fetchGeneration) return;
+        const seen = new Set((_allFetched || []).map(m => m.id));
+        const all = [...(_allFetched || [])];
+        for (const m of fresh) {
+          if (!seen.has(m.id)) {
+            seen.add(m.id);
+            all.push(m);
+          }
+        }
+        _allFetched = all;
+        _authorData = computeAuthorData();
+        renderMain(_authorData);
+        updateArrows();
+        pruneExpiredExpansions();
+        saveRestoreExpansions(savedExpansions);
+        refreshAllExpanded();
+        status.textContent = `Rendered ${_authorData.length} authors, resolving base models…`;
+        try {
+          await injectBaseModels(all, () => {
+            if (gen !== _fetchGeneration) return;
+            const saved = new Set(expandedSections);
+            _authorData = computeAuthorData();
+            renderMain(_authorData);
+            updateArrows();
+            pruneExpiredExpansions();
+            saveRestoreExpansions(saved);
+            refreshAllExpanded();
+          });
+        } catch (e) {
+          console.warn("Base model injection error:", e);
+        }
+        if (gen !== _fetchGeneration) return;
+        if (all.length > CONFIG.ALL_FETCHED_MAX) {
+          all.sort((a, b) => {
+            const da = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+            const db = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+            return db - da;
+          });
+          all.length = CONFIG.ALL_FETCHED_MAX;
+        }
+        status.textContent = "";
+        _authorData = computeAuthorData();
+        renderMain(_authorData);
+        updateArrows();
+        pruneExpiredExpansions();
+        saveRestoreExpansions(savedExpansions);
+        refreshAllExpanded();
+      } catch (e) {
+        console.warn("applyFilters error:", e);
+        document.getElementById("status").textContent = "Error: " + e.message;
+      } finally {
+        btn.classList.remove("disabled");
+        btn.textContent = "Refresh";
+      }
+    })();
+  } else {
+    document.getElementById("get-results-btn").textContent = "Refresh";
+    document.getElementById("get-results-btn").classList.remove("disabled");
+    _authorData = computeAuthorData();
+    renderMain(_authorData);
+    updateArrows();
+    pruneExpiredExpansions();
+    saveRestoreExpansions(savedExpansions);
+    refreshAllExpanded();
+  }
+}
+
+function updateDateUI() {
+  document.getElementById("ds-from-label").textContent = sliderValueToLabel(sliderFrom);
+  document.getElementById("ds-to-label").textContent = sliderValueToLabel(sliderTo);
+
+  const fromInput = document.getElementById("ds-from");
+  const toInput = document.getElementById("ds-to");
+  fromInput.setAttribute("aria-valuenow", String(sliderFrom));
+  toInput.setAttribute("aria-valuenow", String(sliderTo));
+  const left = sliderCenterPct(fromInput, sliderFrom, CONFIG.DATE_SLIDER_MAX);
+  const right = sliderCenterPct(toInput, sliderTo, CONFIG.DATE_SLIDER_MAX);
+  const fill = document.getElementById("ds-fill");
+  fill.style.left = left + "%";
+  fill.style.width = (right - left) + "%";
+
+  const tipFrom = document.getElementById("ds-tooltip-from");
+  const tipTo = document.getElementById("ds-tooltip-to");
+  if (tipFrom) { tipFrom.style.left = left + "%"; tipFrom.className = "ps-tooltip align-right"; tipFrom.textContent = sliderValueToLabel(sliderFrom); }
+  if (tipTo) { tipTo.style.left = right + "%"; tipTo.className = "ps-tooltip align-left"; tipTo.textContent = sliderValueToLabel(sliderTo); }
+}
+
+// ── Param slider ──
+function buildParamLegend() {
+  const input = document.getElementById("ps-from");
+  const legend = document.getElementById("ps-legend");
+  const ticks = [0, 0.5, 1, 4, 10, 40, 100, 400, 1000];
+  legend.innerHTML = ticks.map(v => {
+    const left = sliderCenterPct(input, valueToPos(v));
+    return `<div class="ps-legend-tick" style="left:${left}%"><span class="ps-legend-label">${paramValueToLabel(v)}</span></div>`;
+  }).join("");
+}
+function buildParamSlider() {
+  const from = document.getElementById("ps-from");
+  const to = document.getElementById("ps-to");
+
+  from.value = paramSliderFrom;
+  to.value = paramSliderTo;
+
+  const read = () => { paramSliderFrom = parseInt(from.value); paramSliderTo = parseInt(to.value); };
+
+  const sliderMarkDirty = debounce(markDirty, CONFIG.DEBOUNCE_MS);
+  from.addEventListener("input", () => {
+    let nv = parseInt(from.value), tv = parseInt(to.value);
+    if (nv >= tv - (CONFIG.PARAM_MIN_GAP - 1)) { to.value = String(Math.min(nv + CONFIG.PARAM_MIN_GAP, parseInt(to.max))); read(); if (paramSliderFrom >= paramSliderTo - (CONFIG.PARAM_MIN_GAP - 1)) { from.value = String(paramSliderTo - CONFIG.PARAM_MIN_GAP); read(); } } else { read(); }
+    updateParamUI();
+  });
+  from.addEventListener("change", () => {
+    let fv = parseInt(from.value), tv = parseInt(to.value);
+    if (fv >= tv - (CONFIG.PARAM_MIN_GAP - 1)) { to.value = String(Math.min(fv + CONFIG.PARAM_MIN_GAP, parseInt(to.max))); read(); if (paramSliderFrom >= paramSliderTo - (CONFIG.PARAM_MIN_GAP - 1)) { from.value = String(paramSliderTo - CONFIG.PARAM_MIN_GAP); read(); } }
+    sliderMarkDirty();
+  });
+  to.addEventListener("input", () => {
+    let nv = parseInt(to.value), fv = parseInt(from.value);
+    if (nv <= fv + (CONFIG.PARAM_MIN_GAP - 1)) { from.value = String(Math.max(nv - CONFIG.PARAM_MIN_GAP, 0)); read(); if (paramSliderTo <= paramSliderFrom + (CONFIG.PARAM_MIN_GAP - 1)) { to.value = String(paramSliderFrom + CONFIG.PARAM_MIN_GAP); read(); } } else { read(); }
+    updateParamUI();
+  });
+  to.addEventListener("change", () => {
+    let fv = parseInt(from.value), tv = parseInt(to.value);
+    if (tv <= fv + (CONFIG.PARAM_MIN_GAP - 1)) { from.value = String(Math.max(tv - CONFIG.PARAM_MIN_GAP, 0)); read(); if (paramSliderTo <= paramSliderFrom + (CONFIG.PARAM_MIN_GAP - 1)) { to.value = String(paramSliderFrom + CONFIG.PARAM_MIN_GAP); read(); } }
+    sliderMarkDirty();
+  });
+
+  updateParamUI();
+}
+
+function updateParamUI() {
+  const fromVal = paramPosToValue(paramSliderFrom);
+  const toVal = paramPosToValue(paramSliderTo);
+
+  const fromInput = document.getElementById("ps-from");
+  const toInput = document.getElementById("ps-to");
+  fromInput.setAttribute("aria-valuenow", String(paramSliderFrom));
+  toInput.setAttribute("aria-valuenow", String(paramSliderTo));
+  const left = sliderCenterPct(fromInput, paramSliderFrom);
+  const right = sliderCenterPct(toInput, paramSliderTo);
+
+  document.getElementById("ps-from-label").textContent = paramValueToLabel(fromVal);
+  document.getElementById("ps-to-label").textContent = paramValueToLabel(toVal);
+
+  const fill = document.getElementById("ps-fill");
+  fill.style.left = left + "%";
+  fill.style.width = (right - left) + "%";
+
+  const tipFrom = document.getElementById("ps-tooltip-from");
+  const tipTo = document.getElementById("ps-tooltip-to");
+  if (tipFrom) { tipFrom.style.left = left + "%"; tipFrom.textContent = paramValueToLabel(fromVal); }
+  if (tipTo) { tipTo.style.left = right + "%"; tipTo.textContent = paramValueToLabel(toVal); }
+}
+
+// ── Main Table Sort ──
+function updateArrows() {
+  document.querySelectorAll("#main-table thead th").forEach(th => {
+    const arrow = th.querySelector(".arrow, .sort-arrow, .arrow-left");
+    if (!arrow) return;
+    const active = th.dataset.key === sortKey;
+    arrow.textContent = active ? (sortAsc ? "▲" : "▼") : "";
+    arrow.className = th.classList.contains("right") ? "arrow-left" : "arrow";
+    th.classList.toggle("sorted", active);
+    if (active) th.setAttribute("aria-sort", sortAsc ? "ascending" : "descending");
+    else th.removeAttribute("aria-sort");
+  });
+}
+
+document.querySelector("#main-table").addEventListener("click", e => {
+  if (e.target.closest(".detail-inner")) return;
+  const th = e.target.closest("#main-table > thead > tr > th");
+  if (th) {
+    const key = th.dataset.key;
+    if (sortKey === key) sortAsc = !sortAsc;
+    else { sortKey = key; sortAsc = false; }
+    const savedSort = new Set(expandedSections);
+    renderMain(_authorData);
+    updateArrows();
+    saveRestoreExpansions(savedSort);
+    refreshAllExpanded();
+    return;
+  }
+  const tr = e.target.closest("tr.l1-row");
+  if (tr && e.target.tagName !== "A") {
+    const idx = parseInt(tr.dataset.l1Idx);
+    const author = tr.dataset.author;
+    const detailRow = document.getElementById(`d1-${idx}`);
+    const inner = document.getElementById(`i1-${idx}`);
+    const tog = document.getElementById(`t1-${idx}`);
+    const authorKey = `a|${author}`;
+    if (detailRow.style.display === "none") {
+      detailRow.style.display = "";
+      tog.classList.add("open");
+      expandedSections.add(authorKey);
+      const baseModels = cacheAccess(author);
+      if (!baseModels) {
+        inner.innerHTML = '<div class="detail-loading">Fetching base models…</div>';
+        loadAuthorModels(idx, author, inner);
+      } else {
+        const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
+        const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
+        renderL2(idx, author, filtered, inner, nonQuantBase.length);
+      }
+    } else {
+      detailRow.style.display = "none";
+      tog.classList.remove("open");
+      expandedSections.delete(authorKey);
+      for (const key of [...expandedSections]) {
+        if (key.startsWith(`m|${author}/`) || key.startsWith(`g|${author}/`)) {
+          expandedSections.delete(key);
+        }
+      }
+    }
+  }
+});
+document.getElementById("get-results-btn").addEventListener("click", applyFilters);
+
+// ── Init ──
+async function fetchTasks(tasks) {
+  const status = document.getElementById("status");
+  const seen = new Set();
+  const allFetched = [];
+  const CONCURRENCY = 5;
+  for (let start = 0; start < tasks.length; start += CONCURRENCY) {
+    const batch = tasks.slice(start, start + CONCURRENCY);
+    status.textContent = `Fetching ${batch.join(", ")}… (${Math.min(start + CONCURRENCY, tasks.length)}/${tasks.length})`;
+    const results = await Promise.allSettled(batch.map(async tag => {
+      const downloadsModels = await fetchModels(tag);
+      const recentModels = await fetchRecentModels(tag);
+      return { tag, combined: [...downloadsModels, ...recentModels] };
+    }));
+    for (const r of results) {
+      if (r.status === "rejected") {
+        console.warn("fetchTasks: task failed", r.reason);
+        continue;
+      }
+      const { tag, combined } = r.value;
+      for (const m of combined) {
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
+        m.paramB = getParamCount(m);
+        if (!m.pipeline_tag) m.pipeline_tag = tag;
+        allFetched.push(m);
+      }
+      fetchedTasks.add(tag);
+    }
+  }
+  return allFetched;
+}
+
+async function injectBaseModels(all, onBatch) {
+  const gen = _fetchGeneration;
+  if (gen !== _fetchGeneration) return;
+  _injectedBaseIds.clear();
+  const seen = new Set(all.map(m => m.id));
+  const seenAuthors = new Set(all.map(m => m.id.split("/")[0]));
+  const status = document.getElementById("status");
+  const injected = [];
+  const fetchQueue = new Map();
+
+  for (let i = 0; i < all.length; i++) {
+    if (gen !== _fetchGeneration) return;
+    const m = all[i];
+    if (!isInDateRange(m.lastModified)) continue;
+
+    let baseId = null;
+    const cd = m.cardData;
+    const bm = cd && cd.base_model;
+
+    if (bm) {
+      baseId = Array.isArray(bm) ? bm[0] : bm;
+    } else {
+      const idLower = m.id.toLowerCase();
+      if (!Q_METHODS.some(t => idLower.includes(t))) continue;
+      const bits = m.id.split('/');
+      let name = bits[1];
+      while (name.length > 0) {
+        const dash = name.lastIndexOf('-');
+        if (dash <= 0) break;
+        name = name.substring(0, dash);
+        const candId = bits[0] + '/' + name;
+        if (seen.has(candId)) { baseId = candId; break; }
+        if (name.match(/\d+\.?\d*[Bb]/) || name.match(/\d+[Mm]/)) { baseId = candId; break; }
+      }
+      if (!baseId) continue;
+    }
+
+    if (seen.has(baseId)) {
+      const parent = all.find(p => p.id === baseId);
+      if (parent) {
+        parent._injected = true;
+        if (gen === _fetchGeneration) _injectedBaseIds.add(baseId);
+      }
+    } else if (bm && !isBase(m)) {
+      const baseAuthor = baseId.split("/")[0];
+      if (!seenAuthors.has(baseAuthor)) {
+        if (!fetchQueue.has(baseId)) {
+          fetchQueue.set(baseId, true);
+        }
+      }
+    }
+  }
+
+  const baseIds = [...fetchQueue.keys()];
+  let total = 0;
+  for (let i = 0; i < baseIds.length; i += CONFIG.INJECTION_BATCH_SIZE) {
+    if (gen !== _fetchGeneration) return;
+    const batch = baseIds.slice(i, i + CONFIG.INJECTION_BATCH_SIZE);
+    total += batch.length;
+    status.textContent = `Resolving base models… (${total})`;
+    const results = await Promise.allSettled(batch.map(async (baseId) => {
+      const full = await fetchJson(`https://huggingface.co/api/models/${baseId}?full=true`);
+      full.paramB = getParamCount(full);
+      full._injected = true;
+      return full;
+    }));
+    for (const r of results) {
+      if (r.status === "fulfilled") {
+        const full = r.value;
+        injected.push(full);
+        seen.add(full.id);
+        if (gen === _fetchGeneration) _injectedBaseIds.add(full.id);
+      } else {
+        console.warn("Failed to fetch base model", r.reason);
+      }
+    }
+    if (gen !== _fetchGeneration) return;
+    if (onBatch) onBatch();
+  }
+
+  if (gen !== _fetchGeneration) return;
+  all.push(...injected);
+  all.forEach(m => { if (m._injected && gen === _fetchGeneration) _injectedBaseIds.add(m.id); });
+  status.textContent = "";
+}
+(() => {
+  const status = document.getElementById("status");
+  document.getElementById("ds-from").max = CONFIG.DATE_SLIDER_MAX;
+  document.getElementById("ds-to").max = CONFIG.DATE_SLIDER_MAX;
+  document.getElementById("ps-from").max = CONFIG.PARAM_SLIDER_MAX;
+  document.getElementById("ps-to").max = CONFIG.PARAM_SLIDER_MAX;
+  sortKey = "totalDownloads";
+  sortAsc = false;
+  updateArrows();
+  buildFilterBar();
+  buildFromToBars();
+  buildSpecialBar();
+  buildDateSlider();
+  buildParamSlider();
+  buildParamLegend();
+  const sliderResize = new ResizeObserver(() => { updateDateUI(); updateParamUI(); });
+  sliderResize.observe(document.getElementById("date-slider"));
+  sliderResize.observe(document.getElementById("param-slider"));
+  reseedActiveTaskFilters();
+  syncFilterChips();
+  document.getElementById("l1-author-filter").addEventListener("input", debouncedTextFilter);
+  document.getElementById("l2-model-filter").addEventListener("input", debouncedTextFilter);
+  document.getElementById("l3-author-filter").addEventListener("input", debouncedTextFilter);
+  document.getElementById("l4-model-filter").addEventListener("input", debouncedTextFilter);
+  document.getElementById("text-filter-row").addEventListener("click", e => {
+    const fic = e.target.closest(".fic");
+    if (!fic) return;
+    const input = document.getElementById(fic.dataset.for);
+    if (input) { input.value = ""; input.dispatchEvent(new Event("input", { bubbles: true })); }
+  });
+  markDirty();
+  document.getElementById("api-counter").textContent = "API Calls: 0";
+  status.textContent = "Select your filters, then click Get Results.";
+  renderMain([]);
+})();
+})();
+</script>
+</body>
+</html>
