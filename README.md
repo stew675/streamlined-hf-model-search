@@ -19,7 +19,7 @@ Open `streamlined-hf-model-search.html` in any modern browser. Select your From/
 Select your search criteria and click **Get Results**.  A 4-level multi-level model navigation tree is presented
 
 | Level | Role | What You See | Sortable By |
-|-------|-------------|-------------|
+|-------|------|-------|-------------|
 | **1** | **Base Model Authors** | Organizations with base models matching all active filters | Model Author, Base Models, Total Downloads, Total Likes |
 | **2** | **Base Author Models** | Individual base models by that author | Model ID, Params, Updated, Downloads, Likes |
 | **3** | **Derivative Authors** | Who made derivative models, grouped by author | Author, Models, Downloads |
