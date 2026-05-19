@@ -25,23 +25,26 @@ Select your search criteria and click **Get Results**.  A 4-level multi-level mo
 | **3** | **Derivative Authors** | Who made derivative models, grouped by author | Author, Models, Downloads |
 | **4** | **Derivative Models** | Derivative quantized/finetuned models with method badges | Model ID, Quant, Downloads, Likes, Updated |
 
-Above the displated results are 4 text boxes which may be used to selectively filter the displayed results.
-The *L1 Author* box will move all Base Model Authors that match the text to the top of the displayed hierarchical tree.
-The other text filters control which models and derivative authors will be displayed at the L2, L3, and L4 expansion levels.
-
 
 ## Dual-Range Sliders
 
-Two sliders let you filter by **date** and **parameter size**.  Live tool-tips show what has been selected.  Selection knobs have a minimum gap with bi-directional pushing.
+Two sliders let you filter by **date** and **parameter size**.  Live tool-tips show what has been selected.
 
-- **Date:** The Left Most Position = *Anytime*. Middle Positions are in 14-day increments prior to *Now*. Right-most position = *Now*
-- **Parameter size:** Select from 0B to >1T parameters via piecewise linear mapping across 7 zoom segments.
+Selection knobs have a minimum gap with bi-directional pushing.
+
+**Date:**
+- Left Most Position = *Anytime*
+- Middle Positions are in 14-day increments prior to *Now*
+- Right-most position = *Now*
+
+**Parameter size:**
+- Select from 0B to >1T parameters via piecewise linear mapping across 7 zoom segments.
 
 
 ## Filter Bars
 
 Three *Type* filter bars control which pipeline tags are active.
-**FROM**, **To**, and **Special** are used to quickly activate broad categories of pipeline tags.
+**From**, **To**, and **Special** are used to quickly activate broad categories of pipeline tags.
 The user may then selectively activate/deactivate individual tags to refine their choices.
 
 It should be noted that *Any* refers to the specific modality with the name *any* and is not intended to activate all modalities.
@@ -68,13 +71,20 @@ Quant method detection checks both model name and tags for known keywords (awq, 
 Fine-tunes (cross-author models derived from a base) are labeled "finetune" with a green badge.
 All detected quant methods are displayed when a model ID contains multiple keywords.
 
+## Output Display Filters
+
+Above the displayed results are 4 text boxes which may be used to selectively filter the output.
+
+The *L1 Author* box will move all Base Model Authors that match the text to the top of the displayed hierarchical tree.
+
+The other text filters control which models and derivative authors will be displayed at the L2, L3, and L4 expansion levels.
 
 ## Additional Main Table Features
 
 - **Column sorting** - Available at every level by clicking the column headers
 - **Expandable rows** - Click on any row (excluding the link) to expand 
 - **Cached results** - Re-expanding is instant; task fetches are skipped once complete; stale-generation renders are discarded
-- **Parameter deepening** - Models with unknown parameter counts are fetched in batches of 5 when rows are opened and results (if available) are updated in real time
+- **Parameter deepening** - Models with unknown parameter counts are fetched when rows are opened and results are updated in real time (if available)
 - **API call counter** - displays total requests made in the session
 - **Quant badges** - color-coded by method (FP4, FP8, AWQ, GGUF, MLX, etc.); all detected methods shown
 
