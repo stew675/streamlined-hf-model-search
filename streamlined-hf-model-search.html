@@ -1436,22 +1436,22 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
   cols.forEach(c => { html += thHtml(c, st, "4"); });
   html += `</tr></thead><tbody>`;
 
-  sorted.forEach(q => {
-    html += `<tr class="l4-row">
+  // Optimized: Use map + join for table rows instead of forEach + +=
+  html += sorted.map(q => {
+    return `<tr class="l4-row">
       <td class="model-id-cell"><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.id.split("/").slice(1).join("/"))}">${escapeHtml(q.id.split("/").slice(1).join("/"))}</a></td>
       <td class="center"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
       <td class="right">${fmt(q.downloads)}</td>
       <td class="right">${fmt(q.likes)}<span class="likes-icon">♥</span></td>
       <td class="right">${fmtDate(q.lastModified)}</td>
     </tr>`;
-  });
+  }).join('');
 
   html += `</tbody></table>`;
   container.innerHTML = html;
   container._l4State = { l2Idx, modelIdx, gIdx, parentId, author, quants };
 
   if (!container._delegatedL4) {
-    // Event delegation: same rationale as L2/L3.
     container._delegatedL4 = true;
     container.addEventListener("click", function(e) {
       const th = e.target.closest("thead th");
