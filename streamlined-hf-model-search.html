@@ -172,8 +172,8 @@
   <div class="ds-track-wrap">
     <div class="ds-track-bg"></div>
     <div class="ds-track-fill" id="ds-fill"></div>
-    <input type="range" id="ds-from" min="0" max="80" value="68" step="1" role="slider" aria-label="Date range start" aria-valuemin="0" aria-valuemax="80" aria-valuenow="68">
-    <input type="range" id="ds-to" min="0" max="80" value="80" step="1" role="slider" aria-label="Date range end" aria-valuemin="0" aria-valuemax="80" aria-valuenow="80">
+    <input type="range" id="ds-from" min="0" max="80" value="68" step="1" role="slider" aria-label="Date range start" aria-valuemin="0" aria-valuemax="80" aria-valuenow="68" aria-describedby="ds-tooltip-from">
+    <input type="range" id="ds-to" min="0" max="80" value="80" step="1" role="slider" aria-label="Date range end" aria-valuemin="0" aria-valuemax="80" aria-valuenow="80" aria-describedby="ds-tooltip-to">
     <div class="ps-tooltip align-right" id="ds-tooltip-from" aria-hidden="true"></div>
     <div class="ps-tooltip align-left" id="ds-tooltip-to" aria-hidden="true">Now</div>
   </div>
@@ -187,10 +187,10 @@
   <div class="ds-track-wrap">
     <div class="ds-track-bg"></div>
     <div class="ds-track-fill" id="ps-fill"></div>
-    <input type="range" id="ps-from" min="0" max="220" value="30" step="1" role="slider" aria-label="Parameter size start" aria-valuemin="0" aria-valuemax="220" aria-valuenow="30">
-    <input type="range" id="ps-to" min="0" max="220" value="220" step="1" role="slider" aria-label="Parameter size end" aria-valuemin="0" aria-valuemax="220" aria-valuenow="220">
-    <div class="ps-tooltip" id="ps-tooltip-from" style="left:0%" aria-hidden="true">750M</div>
-    <div class="ps-tooltip" id="ps-tooltip-to" style="left:100%" aria-hidden="true">&gt;1T</div>
+    <input type="range" id="ps-from" min="0" max="220" value="100" step="1" role="slider" aria-label="Parameter size start" aria-valuemin="0" aria-valuemax="220" aria-valuenow="100" aria-describedby="ps-tooltip-from">
+    <input type="range" id="ps-to" min="0" max="220" value="130" step="1" role="slider" aria-label="Parameter size end" aria-valuemin="0" aria-valuemax="220" aria-valuenow="130" aria-describedby="ps-tooltip-to">
+    <div class="ps-tooltip" id="ps-tooltip-from" style="left:0%" aria-hidden="true">10B</div>
+    <div class="ps-tooltip" id="ps-tooltip-to" style="left:100%" aria-hidden="true">40B</div>
   </div>
   <div class="ds-labels">
     <span><span class="ds-l">From:</span> <span class="ds-v" id="ps-from-label">750M</span></span>
@@ -199,13 +199,13 @@
   <div class="ps-legend" id="ps-legend"></div>
 </div>
 <div id="task-bars">
-<div id="from-bar">
+<div id="from-bar" role="group" aria-label="Input modality filters">
   <span class="filter-label">From:</span>
 </div>
-<div id="to-bar">
+<div id="to-bar" role="group" aria-label="Output modality filters">
   <span class="filter-label">To:</span>
 </div>
-<div id="special-bar">
+<div id="special-bar" role="group" aria-label="Special filters">
   <span class="filter-label">Special:</span>
 </div>
 </div>
@@ -216,11 +216,12 @@
   <span class="filter-label">Available Types:</span>
 </div>
 <div id="filter-row">
-<div id="filter-bar">
+<div id="filter-bar" role="group" aria-label="Quantization type filters">
   <span class="filter-label">Quant types:</span>
 </div>
 <span id="api-counter" class="filter-label" style="margin-left:auto; font-variant-numeric: tabular-nums; min-width: 100px; text-align: right;">API Calls: 0</span>
 </div>
+<div id="sort-announce" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></div>
 <div id="get-results-btn" style="display:flex;justify-content:center;margin:8px 0 12px;">Get Results</div>
 <div id="text-filter-row">
   <label>L1 Author:</label>
@@ -232,7 +233,7 @@
   <label>L4 Model ID:</label>
   <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" autocomplete="off"><span class="fic" data-for="l4-model-filter">✕</span></span>
 </div>
-<table id="main-table">
+<table id="main-table" aria-label="Authors and base model counts">
   <thead>
     <tr>
       <th data-key="author" scope="col">Model Author<span class="arrow"></span></th>
@@ -350,6 +351,8 @@ const CONFIG = {
   INIT_PARAM_SLIDER_TO: 130,
   CACHE_MAX: 200,
   ALL_FETCHED_MAX: 16384,
+  FETCH_CONCURRENCY: 5,
+  THUMB_SIZE: 18,
 };
 const fetchedTasks = new Set();
 let fetchedUntagged = false;
@@ -631,7 +634,7 @@ function valueToPos(val) {
   return CONFIG.PARAM_SLIDER_MAX;
 }
 function sliderCenterPct(input, pos, max) {
-  const thumbSize = 18, iw = input.clientWidth || 1, pct = pos / (max || CONFIG.PARAM_SLIDER_MAX);
+  const thumbSize = CONFIG.THUMB_SIZE, iw = input.clientWidth || 1, pct = pos / (max || CONFIG.PARAM_SLIDER_MAX);
   return Math.min(100, Math.max(0, (thumbSize / 2 + pct * (iw - thumbSize)) / iw * 100));
 }
 function paramValueToLabel(val) {
@@ -725,6 +728,15 @@ function saveRestoreExpansions(saved) {
   for (const key of saved) {
     if (!expandedSections.has(key)) expandedSections.add(key);
   }
+}
+
+function recomputeAndRender(saved) {
+  _authorData = computeAuthorData();
+  renderMain(_authorData);
+  updateArrows();
+  pruneExpiredExpansions();
+  saveRestoreExpansions(saved);
+  refreshAllExpanded();
 }
 
 function matchesFilter(qMethod) {
@@ -1119,7 +1131,7 @@ async function loadAuthorModels(idx, author, container) {
       }
     }
   } catch (err) {
-    container.innerHTML = `<div class="detail-error">Error: ${err.message}</div>`;
+    container.innerHTML = `<div class="detail-error" role="alert">Error: ${err.message}</div>`;
   }
 }
 
@@ -1149,7 +1161,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
   ];
 
   // Header table structure
-  let html = `<table><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
+  let html = `<table aria-label="Base models for ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
   cols.forEach(c => { html += thHtml(c, state, "2"); });
   html += `</tr></thead><tbody>`;
 
@@ -1207,7 +1219,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
           if (cached) {
             renderL3(l2Idx, modelIdx, modelId, cached, inner);
           } else {
-            inner.innerHTML = '<div class="detail-loading">Fetching children/quantizations…</div>';
+            inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
             loadChildren(l2Idx, modelIdx, modelId, inner);
           }
         } else {
@@ -1318,7 +1330,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       cacheSet(cacheKey, results);
       renderL3(l2Idx, modelIdx, parentId, results, container);
     } catch (err) {
-      container.innerHTML = `<div class="detail-error">Error: ${err.message}</div>`;
+      container.innerHTML = `<div class="detail-error" role="alert">Error: ${err.message}</div>`;
     }
   })();
 
@@ -1352,7 +1364,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
     { key: "totalDownloads", label: "Downloads", cls: "right", width: 120 }
   ];
 
-  let html = `<table><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
+  let html = `<table aria-label="Quant author groups for ${escapeHtml(parentId)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
   cols.forEach(c => { html += thHtml(c, state, "3"); });
   html += `</tr></thead><tbody>`;
 
@@ -1431,7 +1443,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
     { key: "lastModified", label: "Updated", cls: "right", width: 110 }
   ];
 
-  let html = `<table><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
+  let html = `<table aria-label="Individual quantizations for ${escapeHtml(parentId)} by ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
   cols.forEach(c => { html += thHtml(c, st, "4"); });
   html += `</tr></thead><tbody>`;
 
@@ -1550,12 +1562,7 @@ function applyTextFilters() {
   _l3AuthorFilter = document.getElementById("l3-author-filter").value.trim();
   _l4ModelFilter = document.getElementById("l4-model-filter").value.trim();
   const saved = new Set(expandedSections);
-  _authorData = computeAuthorData();
-  renderMain(_authorData);
-  updateArrows();
-  pruneExpiredExpansions();
-  saveRestoreExpansions(saved);
-  refreshAllExpanded();
+  recomputeAndRender(saved);
 }
 const debouncedTextFilter = debounce(applyTextFilters, CONFIG.DEBOUNCE_MS);
 
@@ -1638,26 +1645,21 @@ function applyFilters() {
           }
         }
         _allFetched = all;
-        _authorData = computeAuthorData();
-        renderMain(_authorData);
-        updateArrows();
-        pruneExpiredExpansions();
-        saveRestoreExpansions(savedExpansions);
-        refreshAllExpanded();
+        recomputeAndRender(savedExpansions);
         status.textContent = `Rendered ${_authorData.length} authors, resolving base models…`;
         let injectionBatches = 0;
         try {
-          await injectBaseModels(all, () => {
-            injectionBatches++;
-            if (gen !== _fetchGeneration) return;
-            const saved = new Set(expandedSections);
-            _authorData = computeAuthorData();
-            renderMain(_authorData);
-            updateArrows();
-            pruneExpiredExpansions();
-            saveRestoreExpansions(saved);
-            refreshAllExpanded();
-          });
+          await injectBaseModels(all, (() => {
+            let renderCounter = 0;
+            return () => {
+              injectionBatches++;
+              renderCounter++;
+              if (gen !== _fetchGeneration) return;
+              if (renderCounter % 2 !== 0) return;
+              const saved = new Set(expandedSections);
+              recomputeAndRender(saved);
+            };
+          })());
         } catch (e) {
           console.warn("Base model injection error:", e);
         }
@@ -1677,12 +1679,7 @@ function applyFilters() {
         // as _injected (bypassing the date filter via _injectedBaseIds), which changes
         // the output of computeAuthorData() even when no new models were fetched.
         if (gen !== _fetchGeneration) return;
-        _authorData = computeAuthorData();
-        renderMain(_authorData);
-        updateArrows();
-        pruneExpiredExpansions();
-        saveRestoreExpansions(savedExpansions);
-        refreshAllExpanded();
+        recomputeAndRender(savedExpansions);
         status.textContent = "";
       } catch (e) {
         console.warn("applyFilters error:", e);
@@ -1695,12 +1692,7 @@ function applyFilters() {
   } else {
     document.getElementById("get-results-btn").textContent = "Refresh";
     document.getElementById("get-results-btn").classList.remove("disabled");
-    _authorData = computeAuthorData();
-    renderMain(_authorData);
-    updateArrows();
-    pruneExpiredExpansions();
-    saveRestoreExpansions(savedExpansions);
-    refreshAllExpanded();
+    recomputeAndRender(savedExpansions);
   }
 }
 
@@ -1804,6 +1796,8 @@ function updateArrows() {
     if (active) th.setAttribute("aria-sort", sortAsc ? "ascending" : "descending");
     else th.removeAttribute("aria-sort");
   });
+  const ann = document.getElementById("sort-announce");
+  if (ann) ann.textContent = `Sorted by ${sortKey} ${sortAsc ? "ascending" : "descending"}`;
 }
 
 document.querySelector("#main-table").addEventListener("click", e => {
@@ -1834,7 +1828,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
       expandedSections.add(authorKey);
       const baseModels = cacheAccess(author);
       if (!baseModels) {
-        inner.innerHTML = '<div class="detail-loading">Fetching base models…</div>';
+        inner.innerHTML = '<div class="detail-loading" role="status">Fetching base models…</div>';
         loadAuthorModels(idx, author, inner);
       } else {
         const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
@@ -1862,7 +1856,7 @@ async function fetchTasks(tasks) {
   const status = document.getElementById("status");
   const seen = new Set();
   const allFetched = [];
-  const CONCURRENCY = 5; // stays under browser per-domain connection limit (typically 6-8)
+  const CONCURRENCY = CONFIG.FETCH_CONCURRENCY;
   for (let start = 0; start < tasks.length; start += CONCURRENCY) {
     const batch = tasks.slice(start, start + CONCURRENCY);
     status.textContent = `Fetching ${batch.join(", ")}… (${Math.min(start + CONCURRENCY, tasks.length)}/${tasks.length})`;
