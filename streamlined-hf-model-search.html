@@ -40,6 +40,7 @@
   .arrow-left { margin-right: 4px; font-size: 0.7rem; color: #58a6ff; }
   .task { text-align: left; white-space: nowrap; }
   #count { font-size: 0.85rem; color: #8b949e; margin-top: 8px; }
+  #version { font-size: 0.65rem; color: #30363d; margin-top: 4px; }
 
   .toggle { display: inline-block; width: 16px; text-align: center; color: #8b949e; margin-right: 4px; font-size: 0.7rem; transition: transform 0.15s, color 0.15s; flex-shrink: 0; }
   .toggle.open { transform: rotate(90deg); color: #58a6ff; }
@@ -106,6 +107,7 @@
   #get-results-btn.ready { background: #238636; color: #fff; border-color: #2ea043; cursor: pointer; box-shadow: 0 0 8px #23863666; }
   #get-results-btn.ready:hover { background: #2ea043; box-shadow: 0 0 12px #2ea04388; }
   #get-results-btn:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+  .filter-chip:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
   #get-results-btn.disabled { pointer-events: none; opacity: 0.5; }
 
   #text-filter-row { display: flex; gap: 10px; margin: 0 0 10px; align-items: center; flex-wrap: wrap; }
@@ -241,6 +243,7 @@
   <tbody id="body"></tbody>
 </table>
 <div id="count"></div>
+<div id="version">39e6d5f</div>
 
 <script>
 (function() {
@@ -629,7 +632,7 @@ function valueToPos(val) {
 }
 function sliderCenterPct(input, pos, max) {
   const thumbSize = 18, iw = input.clientWidth || 1, pct = pos / (max || CONFIG.PARAM_SLIDER_MAX);
-  return (thumbSize / 2 + pct * (iw - thumbSize)) / iw * 100;
+  return Math.min(100, Math.max(0, (thumbSize / 2 + pct * (iw - thumbSize)) / iw * 100));
 }
 function paramValueToLabel(val) {
   if (val === Infinity) return ">1T";
@@ -686,23 +689,17 @@ function computeAuthorData() {
 let sortKey = "totalDownloads";
 let sortAsc = false;
 const detailSort = {};
-// Hand-rolled LRU cache (object + delete/reinsert). Map would be simpler but we want
-// O(1) eviction of the oldest entry. 50 entries is small enough that this never matters.
-const cache = {};
-function cacheKeys() {
-  return Object.keys(cache).filter(k => k !== "___access");
-}
+const cache = new Map();
 function cacheSet(key, value) {
-  if (key in cache) delete cache[key];
-  const ck = cacheKeys();
-  if (ck.length >= CONFIG.CACHE_MAX) delete cache[ck[0]];
-  cache[key] = value;
+  if (cache.has(key)) cache.delete(key);
+  if (cache.size >= CONFIG.CACHE_MAX) cache.delete(cache.keys().next().value);
+  cache.set(key, value);
 }
 function cacheAccess(key) {
-  if (!(key in cache)) return undefined;
-  const v = cache[key];
-  delete cache[key];
-  cache[key] = v;
+  if (!cache.has(key)) return undefined;
+  const v = cache.get(key);
+  cache.delete(key);
+  cache.set(key, v);
   return v;
 }
 const expandedSections = new Set();
