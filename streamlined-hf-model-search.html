@@ -1516,7 +1516,12 @@ function refreshAllExpanded() {
     for (const r of trs) {
       if (r.dataset.model === modelId) { row = r; l2Idx = parseInt(r.dataset.l2Idx); modelIdx = parseInt(r.dataset.modelIdx); break; }
     }
+
+    // Skip rows that no longer belong to an active L1 expansion after filter changes.
+    // L2 sections live inside .detail-inner panes; if the parent author was filtered out,
+    // collapsed, or shifted during refresh, re-expanding them would create orphaned UI state.
     if (!row || !row.closest(".detail-inner")) continue;
+
     const detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
     const inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
     const tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
@@ -1974,6 +1979,12 @@ async function injectBaseModels(all, onBatch) {
 
   if (gen !== _fetchGeneration) return;
   all.push(...injected);
+
+  // Final reconciliation: guarantee every model flagged as _injected is whitelisted 
+  // in _injectedBaseIds. Async batching, generation guards, or Pass 1/Pass 2 races 
+  // can cause flagged parents to slip through earlier set additions. This ensures 
+  // hierarchy integrity so quantizations attach to their true parent even when that 
+  // parent falls outside the active date range (see modelPassesAllFilters).
   all.forEach(m => { if (m._injected && gen === _fetchGeneration) _injectedBaseIds.add(m.id); });
   status.textContent = "";
 }
