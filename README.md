@@ -2,19 +2,21 @@
 
 A dark-color themed, browser-based, 4-level hierarchical explorer for HuggingFace base models and their quantizations.
 
-- No server. No install steps. Just open the HTML file!
-- Uses the public HuggingFace Hub API (`https://huggingface.co/api/models`). No API key required.
+**Key Features:**
+- No server. No install steps. Just open the `streamlined-hf-model-search.html` file in your browser.
+- Uses the public HuggingFace Hub API (`https://huggingface.co/api/models`).
+- No API key required.
 - All API calls are rate-limited to be gentle on the Hugging Face server.
 
 
-## Quick Start
-
-Open `streamlined-hf-model-search.html` in any modern browser. Select your From/To filters and click **Get Results**.
+## Example Output
 
 ![Hugging Face Search](./search.png "Example Search")
 
 
-## How It Works
+## Feature specifics
+
+### Tiered Output Structure
 
 Select your search criteria and click **Get Results**.  A 4-level multi-level model navigation tree is presented
 
@@ -26,7 +28,7 @@ Select your search criteria and click **Get Results**.  A 4-level multi-level mo
 | **4** | **Derivative Models** | Derivative quantized/finetuned models with method badges | Model ID, Quant, Downloads, Likes, Updated |
 
 
-## Dual-Range Sliders
+### Dual-Range Sliders
 
 Two sliders let you filter by **date** and **parameter size**.  Live tool-tips show what has been selected.
 
@@ -41,7 +43,7 @@ Selection knobs have a minimum gap with bi-directional pushing.
 - Select from 0B to >1T parameters via piecewise linear mapping across 7 zoom segments.
 
 
-## Filter Bars
+### Filter Bars
 
 Three *Type* filter bars control which pipeline tags are active.
 **From**, **To**, and **Special** are used to quickly activate broad categories of pipeline tags.
@@ -55,7 +57,7 @@ The *All* activation chip is used for quickly activating all modalities.
 - **Special:** toggles like "include untagged" (models with no pipeline tag)
 
 
-## Quantization Filter Selection
+### Quantization Filter Selection
 
 The **Quant Types** chip bar lets you toggle popular quant type categories on/off:
 - AWQ
@@ -67,11 +69,11 @@ The **Quant Types** chip bar lets you toggle popular quant type categories on/of
 - Safe Tensors
 - Others - whatever doesn't match the above
 
-Quant method detection checks both model name and tags for known keywords (awq, fp4, fp8, gptq, bitsandbytes, eetq, aqlm, gguf, exl2, marlin, mlx, etc.).
+Quant method detection checks both model name and tags for known keywords (awq, fp4, fp8, gguf, mlx, etc.).
 Fine-tunes (cross-author models derived from a base) are labeled "finetune" with a green badge.
 All detected quant methods are displayed when a model ID contains multiple keywords.
 
-## Output Display Filters
+### Output Display Filters
 
 Above the displayed results are 4 text boxes which may be used to selectively filter the output.
 
@@ -79,7 +81,7 @@ The *L1 Author* box will move all Base Model Authors that match the text to the 
 
 The other text filters control which models and derivative authors will be displayed at the L2, L3, and L4 expansion levels.
 
-## Additional Main Table Features
+### Additional Result Table Features
 
 - **Column sorting** - Available at every level by clicking the column headers
 - **Expandable rows** - Click on any row (excluding the link) to expand 
