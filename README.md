@@ -18,7 +18,7 @@ A dark-color themed, browser-based, 4-level hierarchical explorer for HuggingFac
 
 ### Tiered Output Structure
 
-Select your search criteria and click **Get Results**.  A 4-level multi-level model navigation tree is presented
+Select your search criteria and click **Get Results**.  A four tier model navigation tree is presented:
 
 | Level | Role | What You See | Sortable By |
 |-------|------|-------|-------------|
