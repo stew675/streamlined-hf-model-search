@@ -174,7 +174,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260520.06</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260521.00</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -487,17 +487,27 @@ async function fetchUntaggedModels() {
   return fetchJson(`https://huggingface.co/api/models?sort=downloads&direction=-1&limit=${CONFIG.LIMIT}&full=true&cardData=true`);
 }
 
+function getBaseModelId(cd) {
+  if (!cd || !cd.base_model) return null;
+  const bm = cd.base_model;
+  if (typeof bm === "string") return bm;
+  if (Array.isArray(bm)) {
+    const first = bm[0];
+    return typeof first === "string" ? first : (first && first.id) || null;
+  }
+  return null;
+}
+
 // A model is "base" if it has no cardData.base_model, or its base_model points to the same author.
 // Same-author fine-tunes appear at L2 alongside true base models, since users
 // browsing an author page already see them as part of that author's lineage.
 function isBase(model) {
   const cd = model.cardData;
   if (!cd) return true;
-  const bm = cd.base_model;
-  if (!bm) return true;
+  const baseId = getBaseModelId(cd);
+  if (!baseId) return true;
   const author = model.id.split("/")[0];
-  const firstBase = Array.isArray(bm) && bm.length ? bm[0] : (typeof bm === "string" ? bm : null);
-  if (firstBase && firstBase.split("/")[0] === author) return true;
+  if (baseId.split("/")[0] === author) return true;
   return false;
 }
 
@@ -535,11 +545,12 @@ function getOrphanQuantMethod(modelId) {
 
 function isNestedQuant(m, knownIds) {
   const cd = m.cardData;
-  if (!cd || !cd.base_model) return false;
+  if (!cd) return false;
+  const baseId = getBaseModelId(cd);
+  if (!baseId) return false;
   const idLower = m.id.toLowerCase();
   if (!Q_METHODS.some(t => idLower.includes(t))) return false;
-  const bm = Array.isArray(cd.base_model) ? cd.base_model[0] : cd.base_model;
-  return knownIds.has(bm);
+  return knownIds.has(baseId);
 }
 
 let _canonicalCache = null;
@@ -792,14 +803,14 @@ function syncFilterChips() {
   });
   document.querySelectorAll("#from-bar .filter-chip").forEach(chip => {
     const f = chip.dataset.option;
-    const on = activeFromFilters.has(f);
+    const on = f === "all" ? FROM_OPTIONS.every(o => o === "all" || activeFromFilters.has(o)) : activeFromFilters.has(f);
     chip.classList.toggle("active", on);
     chip.classList.toggle("inactive", !on);
     chip.setAttribute("aria-pressed", String(on));
   });
   document.querySelectorAll("#to-bar .filter-chip").forEach(chip => {
     const t = chip.dataset.option;
-    const on = activeToFilters.has(t);
+    const on = t === "all" ? TO_OPTIONS.every(o => o === "all" || activeToFilters.has(o)) : activeToFilters.has(t);
     chip.classList.toggle("active", on);
     chip.classList.toggle("inactive", !on);
     chip.setAttribute("aria-pressed", String(on));
@@ -982,21 +993,25 @@ function applyToLogic(option) {
   reseedActiveTaskFilters();
 }
 function applyBarLogic(option, options, activeSet) {
-  const wasEnabled = activeSet.has(option);
-  const enabledCount = options.filter(o => activeSet.has(o)).length;
+  const nonAllOptions = options.filter(o => o !== "all");
   if (option === "all") {
-    if (!wasEnabled) {
-      options.forEach(o => activeSet.add(o));
+    const allActive = nonAllOptions.every(o => activeSet.has(o));
+    if (allActive) {
+      nonAllOptions.forEach(o => activeSet.delete(o));
     } else {
-      activeSet.delete("all");
+      nonAllOptions.forEach(o => activeSet.add(o));
     }
-  } else if (!wasEnabled) {
+    return;
+  }
+  const wasEnabled = activeSet.has(option);
+  const enabledCount = nonAllOptions.filter(o => activeSet.has(o)).length;
+  if (!wasEnabled) {
     activeSet.add(option);
-  } else if (enabledCount === options.length) {
-    options.forEach(o => activeSet.delete(o));
+  } else if (enabledCount === nonAllOptions.length) {
+    nonAllOptions.forEach(o => activeSet.delete(o));
     activeSet.add(option);
   } else if (enabledCount === 1) {
-    options.forEach(o => activeSet.add(o));
+    nonAllOptions.forEach(o => activeSet.add(o));
   } else {
     activeSet.delete(option);
   }
@@ -1091,8 +1106,8 @@ async function loadAuthorModels(idx, author, container) {
       _nestedQuant: m.cardData && m.cardData.base_model ? (() => {
           const idLower = m.id.toLowerCase();
           if (!Q_METHODS.some(t => idLower.includes(t))) return false;
-          const bm = Array.isArray(m.cardData.base_model) ? m.cardData.base_model[0] : m.cardData.base_model;
-          return authorKnownIds.has(bm);
+          const baseId = getBaseModelId(m.cardData);
+          return baseId ? authorKnownIds.has(baseId) : false;
         })() : false
     }));
 
@@ -1338,8 +1353,11 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
           const idLower = m.id.toLowerCase();
           const tagsStr = (m.tags || []).join(" ").toLowerCase();
           const isQuant = Q_METHODS.some(t => idLower.includes(t) || tagsStr.includes(t));
-          const hasBaseModel = baseModel === parentId ||
-                               Array.isArray(baseModel) && baseModel.some(b => b === parentId);
+          const hasBaseModel = typeof baseModel === "string" ? baseModel === parentId :
+                               Array.isArray(baseModel) ? baseModel.some(b => {
+                                 const bid = typeof b === "string" ? b : (b && b.id || "");
+                                 return bid === parentId;
+                               }) : false;
           const childAuthor = m.id.split("/")[0];
           const parentAuthor = parentId.split("/")[0];
           if (childAuthor === parentAuthor) continue;
@@ -1619,6 +1637,9 @@ function refreshAllExpanded() {
   }
 }
 
+// Live-update is intentional here — text inputs are the one place where immediate feedback
+// is expected (user is focused on typing, not watching the table). Sliders and filter chips
+// use the dirty-flag + button pattern instead to avoid unnecessary re-renders on drag.
 function applyTextFilters() {
   _l1AuthorFilter = document.getElementById("l1-author-filter").value.trim();
   _l2ModelFilter = document.getElementById("l2-model-filter").value.trim();
@@ -1980,7 +2001,7 @@ async function injectBaseModels(all, onBatch) {
     const bm = cd && cd.base_model;
 
     if (bm) {
-      baseId = Array.isArray(bm) && typeof bm[0] === "string" ? bm[0] : (typeof bm === "string" ? bm : null);
+      baseId = getBaseModelId(cd);
       if (!baseId) continue;
     } else {
       const idLower = m.id.toLowerCase();
