@@ -58,6 +58,10 @@
   .detail-inner td { padding: 4px 8px; font-size: 0.8rem; }
   .detail-loading { color: #8b949e; font-style: italic; padding: 8px 0; }
   .detail-error { color: #f85149; padding: 8px 0; }
+  .retry-btn { margin-left: 12px; padding: 2px 14px; font-size: 0.78rem; font-weight: 600;
+    border-radius: 10px; cursor: pointer; background: #21262d; color: #c9d1d9;
+    border: 1px solid #30363d; font-family: inherit; transition: background 0.15s, border-color 0.15s; }
+  .retry-btn:hover { background: #30363d; border-color: #58a6ff; }
   .detail-count { font-size: 0.75rem; color: #8b949e; margin-top: 4px; }
 
   tr.l2-row td { cursor: pointer; padding-left: 32px !important; }
@@ -170,7 +174,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260520.04</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260520.05</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -1054,6 +1058,15 @@ function renderMain(authorData) {
     `${sorted.length} authors with base models in selected range. Click to expand.`;
 }
 
+function renderErrorWithRetry(container, message, retryFn) {
+  container.innerHTML = `<div class="detail-error" role="alert">
+    <span>${escapeHtml(message)}</span>
+    <button class="retry-btn" type="button">Retry</button>
+  </div>`;
+  const btn = container.querySelector(".retry-btn");
+  if (btn) btn.addEventListener("click", retryFn, { once: true });
+}
+
 async function loadAuthorModels(idx, author, container) {
   const gen = _fetchGeneration;
   try {
@@ -1157,7 +1170,9 @@ async function loadAuthorModels(idx, author, container) {
       }
     }
   } catch (err) {
-    container.innerHTML = `<div class="detail-error" role="alert">Error: ${err.message}</div>`;
+    renderErrorWithRetry(container, err.message, () => {
+      if (container.isConnected) loadAuthorModels(idx, author, container);
+    });
   }
 }
 
@@ -1366,7 +1381,9 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       cacheSet(cacheKey, results);
       if (container.isConnected) renderL3(l2Idx, modelIdx, parentId, results, container);
     } catch (err) {
-      if (container.isConnected) container.innerHTML = `<div class="detail-error" role="alert">Error: ${err.message}</div>`;
+      if (container.isConnected) renderErrorWithRetry(container, err.message, () => {
+        if (container.isConnected) loadChildren(l2Idx, modelIdx, parentId, container);
+      });
     }
   })();
 
@@ -1670,6 +1687,7 @@ function applyFilters(force) {
   const needUntagged = activeSpecialFilters.has("include untagged") && !fetchedUntagged;
   if (newTasks.length > 0 || needUntagged) {
     (async () => {
+      document.getElementById("main-table").setAttribute("aria-busy", "true");
       try {
         const status = document.getElementById("status");
         status.textContent = `Fetching models…`;
@@ -1735,6 +1753,7 @@ function applyFilters(force) {
       } finally {
         btn.disabled = false;
         btn.textContent = "Refresh";
+        document.getElementById("main-table").setAttribute("aria-busy", "false");
       }
     })();
   } else {
