@@ -174,7 +174,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260520.05</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260520.06</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -341,8 +341,8 @@ const activeSpecialFilters = new Set();
 const CONFIG = {
   LIMIT: 500,
   PARAM_SLIDER_MAX: 220,
-  RATE_LIMIT: 1,
-  RATE_WINDOW: 250,
+  RATE_LIMIT: 1,   // 1 call per 250ms window = 4 req/s = 240 req/min. Tested in practice
+  RATE_WINDOW: 250,// at up to 8 req/s with no 429s; 4 req/s is a safe long-term rate.
   FETCH_TIMEOUT: 60000,
   MAX_RETRIES: 3,
   DATE_SLIDER_MAX: 80,
