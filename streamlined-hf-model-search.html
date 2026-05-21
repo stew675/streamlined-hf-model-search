@@ -170,7 +170,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260520.01</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260520.02</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -1091,7 +1091,7 @@ async function loadAuthorModels(idx, author, container) {
       cells[3].textContent = fmt(dated.reduce((s, m) => s + m.likes, 0));
     }
 
-    if (gen !== _fetchGeneration) return;
+    if (gen !== _fetchGeneration || !container.isConnected) return;
     renderL2(idx, author, dated, container, nonQuantBase.length);
 
     const unknownModels = dated.filter(m => m.paramB === null);
@@ -1110,7 +1110,7 @@ async function loadAuthorModels(idx, author, container) {
             console.warn("Failed to fetch param for", m.id, e);
           }
         }));
-        if (gen !== _fetchGeneration) return;
+        if (gen !== _fetchGeneration || !container.isConnected) return;
         const pruned = filterApplied();
         const detailRow = document.getElementById(`d1-${idx}`);
         if (detailRow && detailRow.style.display !== "none") {
@@ -1131,7 +1131,7 @@ async function loadAuthorModels(idx, author, container) {
           if (parent) { m.paramB = parent.paramB; break; }
         }
       }
-      if (gen !== _fetchGeneration) return;
+      if (gen !== _fetchGeneration || !container.isConnected) return;
       statusEl.textContent = "";
       const updated = filterApplied();
       const detailRow = document.getElementById(`d1-${idx}`);
@@ -1265,7 +1265,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
   const entry = _inflightChildren.get(cacheKey);
   if (entry) {
     await entry.promise;
-    if (entry.results) renderL3(l2Idx, modelIdx, parentId, entry.results, container);
+    if (entry.results && container.isConnected) renderL3(l2Idx, modelIdx, parentId, entry.results, container);
     return;
   }
 
@@ -1345,9 +1345,9 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
 
       newEntry.results = results;
       cacheSet(cacheKey, results);
-      renderL3(l2Idx, modelIdx, parentId, results, container);
+      if (container.isConnected) renderL3(l2Idx, modelIdx, parentId, results, container);
     } catch (err) {
-      container.innerHTML = `<div class="detail-error" role="alert">Error: ${err.message}</div>`;
+      if (container.isConnected) container.innerHTML = `<div class="detail-error" role="alert">Error: ${err.message}</div>`;
     }
   })();
 
