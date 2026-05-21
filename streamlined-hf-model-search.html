@@ -174,7 +174,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260521.03</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260521.04</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -633,14 +633,23 @@ function normalizeModel(m) {
     cardData: m.cardData ? { base_model: m.cardData.base_model } : null
   };
 }
+const _paramCache = new Map();
 function getParamCount(m) {
-  if (m.safetensors && m.safetensors.total != null) return m.safetensors.total / 1e9;
-  if (m.gguf && m.gguf.total != null) return m.gguf.total / 1e9;
-  const bMatch = m.id.match(/(\d+\.?\d*)[Bb]/);
-  if (bMatch) return parseFloat(bMatch[1]);
-  const mMatch = m.id.match(/(\d+\.?\d*)[Mm]/);
-  if (mMatch) return parseFloat(mMatch[1]) / 1000;
-  return null;
+  const cached = _paramCache.get(m.id);
+  if (cached !== undefined) return cached;
+  let result;
+  if (m.safetensors && m.safetensors.total != null) result = m.safetensors.total / 1e9;
+  else if (m.gguf && m.gguf.total != null) result = m.gguf.total / 1e9;
+  else {
+    const bMatch = m.id.match(/(\d+\.?\d*)[Bb]/);
+    if (bMatch) result = parseFloat(bMatch[1]);
+    else {
+      const mMatch = m.id.match(/(\d+\.?\d*)[Mm]/);
+      result = mMatch ? parseFloat(mMatch[1]) / 1000 : null;
+    }
+  }
+  _paramCache.set(m.id, result);
+  return result;
 }
 // Piecewise-linear mapping: 7 segments covering 0..1000B params on a 220-position slider.
 // Dense at low end (0.025B/step up to 1B), coarser above. Chosen over continuous
