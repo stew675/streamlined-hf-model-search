@@ -67,7 +67,7 @@ IMPROVEMENTS.md          — Code review tracking
 | `isBase(model)` | Checks if a model is a base model (no `cardData.base_model`, or same-author fine-tune) |
 | `inferParent(modelId, knownIds)` | Iteratively strips trailing `-segment` from model ID until a known parent is found in `knownIds` |
 | `isOrphanQuant(model, knownIds)` | Detects quant models whose parent exists in `_allFetched` but has no explicit `cardData.base_model`; suppresses them from L1 |
-| `isNestedQuant(m, knownIds)` | Detects quants whose `cardData.base_model` points to a known quant (not a true base); suppresses from L1 |
+| `isNestedQuant(m, knownIds, allFetched)` | Detects quants whose `cardData.base_model` points to a known quant (not a true base); suppresses from L1 |
 | `buildCanonicalAuthors()` | Scans `_allFetched` for model names under multiple authors; keeps only highest-download variant per name |
 | `isCanonicalCopy(m)` | Returns true if this author's copy of a model name is not the canonical (highest-download) version |
 | `getOrphanQuantMethod(modelId)` | Extracts quant method keywords from model ID for orphan badge display |
@@ -143,8 +143,9 @@ Open `streamlined-hf-model-search.html` in a browser. Validate:
 12. API call counter updates and rate limiting stays ≤4 req/s (1 call per 250ms window)
 13. L4 sort by Model ID doesn't collapse L4 content
 14. GGUF models without B/M suffix in name (e.g. `Qwen/Qwen3-Coder-Next-GGUF`) show inherited param count from their parent after deepening
-15. Rapid double-clicking "Get Results" or rapidly expanding/collapsing L2 rows does not produce stale renders or duplicate API calls (generation guard and inflight dedup)
-16. `_allFetched` does not exceed 16,384 entries (oldest models dropped by `lastModified`)
+15. Same-author quants (e.g. `Qwen/Qwen2.5-7B-GGUF` alongside `Qwen/Qwen2.5-7B`) appear at L2 under their author, not silently suppressed
+16. Rapid double-clicking "Get Results" or rapidly expanding/collapsing L2 rows does not produce stale renders or duplicate API calls (generation guard and inflight dedup)
+17. `_allFetched` does not exceed 16,384 entries (oldest models dropped by `lastModified`)
 
 ## Common Pitfalls
 
@@ -162,5 +163,6 @@ Open `streamlined-hf-model-search.html` in a browser. Validate:
 - **Same-author fine-tunes**: `isBase()` treats same-author fine-tunes as base models (e.g., `Qwen/Qwen3.5-9B` is a fine-tune of `Qwen/Qwen3.5-9B-Base` but both author = "Qwen", so both appear at L2). `loadChildren()` skips same-author fine-tunes at L3 (already at L2) and labels cross-author fine-tunes as "finetune".
 - **Parent param inheritance**: GGUF/AWQ/GPTQ quant models without B/M in their name (e.g. `Qwen/Qwen3-Coder-Next-GGUF`) get `paramB` from their parent via the post-deepening pass. The parent must be in the same `baseModels` array (same author) or `_allFetched`. Stripping is iterative — removes trailing `-segment` one at a time until a known parent is found.
 - **Inflight dedup**: `_inflightChildren` map stores `{ promise, results }` entries keyed by `children-{parentId}` to prevent duplicate L3/L4 fetches. The entry is set synchronously before the first `await`; concurrent callers await the same promise and read results directly from the entry (bypassing the evictable LRU cache).
+- **Cache eviction fallback**: The LRU cache (`cache`) is capped at 200 entries. `children-{parentId}` entries can be evicted if many L2 models are expanded. When this happens, L3 expansion falls back to `s.children` from `l3StateMap` (which stores the full children array and survives eviction).
 - **CSS.escape in selectors**: `refreshAllExpanded` uses `CSS.escape(author)` in query selectors — any new dynamic selector that interpolates user-controlled strings (author names, model IDs) should follow suit to prevent broken queries or injection. `loadAuthorModels` at line 1140 currently omits it.
-- **_paramCache never cleared**: The `_paramCache` Map accumulates across sessions and is never cleared on "Get Results". For long sessions with many authors expanded, this can grow unbounded. Consider clearing in the init IIFE or at the start of `applyFilters`.
+- **_paramCache intentionally never cleared**: Model parameter counts are immutable (they don't change between sessions). Keeping the cache avoids redundant individual API fetches for already-resolved model IDs. The Map grows only with unique model IDs encountered, which is bounded by the number of models the user has expanded — negligible memory impact.

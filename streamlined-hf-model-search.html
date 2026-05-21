@@ -175,7 +175,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260521.05</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260521.06</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -544,14 +544,18 @@ function getOrphanQuantMethod(modelId) {
   return Q_METHODS.filter(t => idLower.includes(t));
 }
 
-function isNestedQuant(m, knownIds) {
+function isNestedQuant(m, knownIds, allFetched) {
   const cd = m.cardData;
   if (!cd) return false;
   const baseId = getBaseModelId(cd);
   if (!baseId) return false;
   const idLower = m.id.toLowerCase();
   if (!Q_METHODS.some(t => idLower.includes(t))) return false;
-  return knownIds.has(baseId);
+  if (!knownIds.has(baseId)) return false;
+  // Only suppress if the parent is itself a non-base (quant/derivative).
+  // Same-author quants whose parent is a true base model should appear at L2.
+  const parent = allFetched.find(f => f.id === baseId);
+  return parent ? !isBase(parent) : false;
 }
 
 let _canonicalCache = null;
@@ -639,6 +643,8 @@ function normalizeModel(m) {
     cardData: m.cardData ? { base_model: m.cardData.base_model } : null
   };
 }
+// Parameter count cache: persists across sessions because model param counts are immutable.
+// Never cleared — avoids redundant individual API fetches for already-resolved models.
 const _paramCache = new Map();
 function getParamCount(m) {
   const cached = _paramCache.get(m.id);
@@ -730,7 +736,7 @@ function computeAuthorData() {
     if (!modelPassesAllFilters(m)) return;
     if (!isBase(m)) return;
     if (isOrphanQuant(m, knownIds)) return;
-    if (isNestedQuant(m, knownIds)) return;
+    if (isNestedQuant(m, knownIds, all)) return;
     if (isCanonicalCopy(m)) return;
     const author = m.id.split("/")[0];
     if (!map[author]) map[author] = { author, count: 0, totalDownloads: 0, totalLikes: 0 };
@@ -1129,7 +1135,9 @@ async function loadAuthorModels(idx, author, container) {
           const idLower = m.id.toLowerCase();
           if (!Q_METHODS.some(t => idLower.includes(t))) return false;
           const baseId = getBaseModelId(m.cardData);
-          return baseId ? authorKnownIds.has(baseId) : false;
+          if (!baseId || !authorKnownIds.has(baseId)) return false;
+          const parent = models.find(f => f.id === baseId);
+          return parent ? !isBase(parent) : false;
         })() : false
     }));
 
@@ -1528,7 +1536,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
           tog.classList.add("open");
           tog.setAttribute("aria-expanded", "true");
           expandedSections.add(groupKey);
-          const allChildren = cacheAccess(`children-${parentId}`) || [];
+          const allChildren = cacheAccess(`children-${parentId}`) || s.children || [];
           const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
           renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, inner);
         } else {
