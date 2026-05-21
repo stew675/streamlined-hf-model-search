@@ -1317,6 +1317,9 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
 // Cross-author fine-tunes without explicit base_model are only included if they pass the
 // active task filter and aren't already in _allFetched (avoids duplicating base models
 // that happen to be surfaced by the search endpoint).
+// No _fetchGeneration guard needed: container.isConnected catches stale renders after
+// L2 re-render, and _inflightChildren dedup ensures the second caller (from refreshAllExpanded)
+// renders into the new connected container when the shared promise resolves.
 async function loadChildren(l2Idx, modelIdx, parentId, container) {
   const cacheKey = `children-${parentId}`;
 
