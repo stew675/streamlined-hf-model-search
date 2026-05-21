@@ -174,7 +174,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260521.00</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260521.01</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -1563,12 +1563,9 @@ function refreshAllExpanded() {
   for (const key of expandedSections) {
     if (!key.startsWith("a|")) continue;
     const author = key.slice(2);
-    const trs = document.querySelectorAll("tr.l1-row");
-    let row, idx;
-    for (const r of trs) {
-      if (r.dataset.author === author) { row = r; idx = parseInt(r.dataset.l1Idx); break; }
-    }
+    const row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
     if (!row) continue;
+    const idx = parseInt(row.dataset.l1Idx);
     const detailRow = document.getElementById(`d1-${idx}`);
     const inner = document.getElementById(`i1-${idx}`);
     const tog = document.getElementById(`t1-${idx}`);
@@ -1587,11 +1584,10 @@ function refreshAllExpanded() {
   for (const key of expandedSections) {
     if (!key.startsWith("m|")) continue;
     const modelId = key.slice(2);
-    const trs = document.querySelectorAll("tr.l2-row");
-    let row, l2Idx, modelIdx;
-    for (const r of trs) {
-      if (r.dataset.model === modelId) { row = r; l2Idx = parseInt(r.dataset.l2Idx); modelIdx = parseInt(r.dataset.modelIdx); break; }
-    }
+    const row = document.querySelector(`tr.l2-row[data-model="${CSS.escape(modelId)}"]`);
+    if (!row) continue;
+    const l2Idx = parseInt(row.dataset.l2Idx);
+    const modelIdx = parseInt(row.dataset.modelIdx);
 
     // Skip rows that no longer belong to an active L1 expansion after filter changes.
     // L2 sections live inside .detail-inner panes; if the parent author was filtered out,
@@ -1616,15 +1612,11 @@ function refreshAllExpanded() {
     const parts = key.split("|");
     const modelId = parts[1];
     const groupAuthor = parts.slice(2).join("|");
-    const trs = document.querySelectorAll("tr.l3-row");
-    let row, l2Idx, modelIdx, gIdx;
-    for (const r of trs) {
-      if (r.dataset.l3Parent === modelId && r.dataset.l3Author === groupAuthor) {
-        row = r; l2Idx = parseInt(r.dataset.l3L2); modelIdx = parseInt(r.dataset.l3ModelIdx); gIdx = parseInt(r.dataset.l3Idx);
-        break;
-      }
-    }
+    const row = document.querySelector(`tr.l3-row[data-l3-parent="${CSS.escape(modelId)}"][data-l3-author="${CSS.escape(groupAuthor)}"]`);
     if (!row || !row.closest(".detail-inner")) continue;
+    const l2Idx = parseInt(row.dataset.l3L2);
+    const modelIdx = parseInt(row.dataset.l3ModelIdx);
+    const gIdx = parseInt(row.dataset.l3Idx);
     const detailRow = document.getElementById(`d3-${l2Idx}-${modelIdx}-${gIdx}`);
     const inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
     const tog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
