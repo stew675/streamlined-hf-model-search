@@ -174,7 +174,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260521.02</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260521.03</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -1264,6 +1264,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
         else { st.key = key; st.asc = false; }
         detailSort[`l2-${s.author}`] = st;
         renderL2(s.idx, s.author, s.models, this, s.totalBeforeFilter);
+        refreshAllExpanded();
         return;
       }
       const tr = e.target.closest("tr.l2-row");
@@ -1474,6 +1475,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
         else { st.key = key; st.asc = false; }
         detailSort[`l3-${s.parentId}`] = st;
         renderL3(s.l2Idx, s.modelIdx, s.parentId, s.children, this);
+        refreshAllExpanded();
         return;
       }
       const tr = e.target.closest("tr.l3-row");
