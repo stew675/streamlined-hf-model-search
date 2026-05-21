@@ -101,22 +101,23 @@
       transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; color: #8b949e; }
    .task-bar-row .act-tag:hover { background: #1c2129; color: #c9d1d9; }
    .task-bar-row .act-tag.active { color: #58a6ff; border-color: #58a6ff; background: #1f6feb22; box-shadow: 0 0 6px #1f6feb33; }
-  #get-results-btn { display: inline-flex; align-items: center; justify-content: center; padding: 6px 20px;
-    font-size: 0.82rem; font-weight: 600; border-radius: 14px; cursor: pointer; user-select: none;
-    background: #21262d; color: #484f58; border: 1px solid #30363d; transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
-    margin-left: auto; }
+  #get-results-btn { display: flex; align-items: center; justify-content: center; width: fit-content;
+    padding: 6px 20px; font-size: 0.82rem; font-weight: 600; border-radius: 14px; cursor: pointer;
+    user-select: none; background: #21262d; color: #6e7681; border: 1px solid #30363d; font-family: inherit;
+    transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
+    margin: 8px auto 12px; }
   #get-results-btn.ready { background: #238636; color: #fff; border-color: #2ea043; cursor: pointer; box-shadow: 0 0 8px #23863666; }
   #get-results-btn.ready:hover { background: #2ea043; box-shadow: 0 0 12px #2ea04388; }
   #get-results-btn:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
   .filter-chip:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
-  #get-results-btn.disabled { pointer-events: none; opacity: 0.5; }
+  #get-results-btn:disabled { pointer-events: none; opacity: 0.5; }
 
   #text-filter-row { display: flex; gap: 10px; margin: 0 0 10px; align-items: center; flex-wrap: wrap; }
   #text-filter-row input { background: #161b22; border: 1px solid #30363d; border-radius: 6px;
     padding: 4px 10px; font-size: 0.8rem; color: #c9d1d9; width: 180px; outline: none;
     transition: border-color 0.15s; font-family: inherit; }
   #text-filter-row input:focus { border-color: #58a6ff; }
-  #text-filter-row input::placeholder { color: #484f58; }
+  #text-filter-row input::placeholder { color: #6e7681; }
   #text-filter-row label { color: #8b949e; font-size: 0.78rem; }
   #text-filter-row .fiw { position: relative; display: inline-flex; align-items: center; }
   #text-filter-row .fiw input { padding-right: 20px; }
@@ -159,14 +160,17 @@
   .ps-tooltip.align-right::after { left: auto; right: 4px; margin-left: 0; }
   .ps-tooltip.align-left::after { left: 9px; margin-left: 0; }
   .ps-legend { position: relative; height: 18px; }
-  .ps-legend-tick { position: absolute; top: 0; transform: translateX(-50%); width: 1px; height: 5px; background: #484f58; }
+  .ps-legend-tick { position: absolute; top: 0; transform: translateX(-50%); width: 1px; height: 5px; background: #6e7681; }
   .ps-legend-label { position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
-    font-size: 0.62rem; color: #6e7681; white-space: nowrap; }
+    font-size: 0.62rem; color: #848d97; white-space: nowrap; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: 0s !important; }
+  }
 </style>
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 1ff6897</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260520.00</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -222,16 +226,16 @@
 <span id="api-counter" class="filter-label" style="margin-left:auto; font-variant-numeric: tabular-nums; min-width: 100px; text-align: right;">API Calls: 0</span>
 </div>
 <div id="sort-announce" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></div>
-<div id="get-results-btn" style="display:flex;justify-content:center;margin:8px 0 12px;">Get Results</div>
+<button id="get-results-btn">Get Results</button>
 <div id="text-filter-row">
   <label>L1 Author:</label>
-  <span class="fiw"><input type="text" id="l1-author-filter" placeholder="All authors (pinned top)" autocomplete="off"><span class="fic" data-for="l1-author-filter">✕</span></span>
+   <span class="fiw"><input type="text" id="l1-author-filter" placeholder="All authors (pinned top)" autocomplete="off"><span class="fic" data-for="l1-author-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
   <label>L2 Model ID:</label>
-  <span class="fiw"><input type="text" id="l2-model-filter" placeholder="Any base model" autocomplete="off"><span class="fic" data-for="l2-model-filter">✕</span></span>
+  <span class="fiw"><input type="text" id="l2-model-filter" placeholder="Any base model" autocomplete="off"><span class="fic" data-for="l2-model-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
   <label>L3 Author:</label>
-  <span class="fiw"><input type="text" id="l3-author-filter" placeholder="Any quant author" autocomplete="off"><span class="fic" data-for="l3-author-filter">✕</span></span>
+  <span class="fiw"><input type="text" id="l3-author-filter" placeholder="Any quant author" autocomplete="off"><span class="fic" data-for="l3-author-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
   <label>L4 Model ID:</label>
-  <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" autocomplete="off"><span class="fic" data-for="l4-model-filter">✕</span></span>
+  <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" autocomplete="off"><span class="fic" data-for="l4-model-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
 </div>
 <table id="main-table" aria-label="Authors and base model counts">
   <thead>
@@ -488,7 +492,7 @@ function isBase(model) {
   const bm = cd.base_model;
   if (!bm) return true;
   const author = model.id.split("/")[0];
-  const firstBase = Array.isArray(bm) ? bm[0] : bm;
+  const firstBase = Array.isArray(bm) && bm.length ? bm[0] : bm;
   if (firstBase && firstBase.split("/")[0] === author) return true;
   return false;
 }
@@ -498,6 +502,7 @@ function isBase(model) {
 function inferParent(modelId, knownIds) {
   const bits = modelId.split('/');
   let name = bits[1];
+  if (!name) return null;
   while (name.length > 0) {
     const dash = name.lastIndexOf('-');
     if (dash <= 0) break;
@@ -600,8 +605,8 @@ function isInDateRange(dateStr) {
   return c >= sliderValueToDate(sliderFrom) && c <= sliderValueToDate(sliderTo);
 }
 function getParamCount(m) {
-  if (m.safetensors && m.safetensors.total) return m.safetensors.total / 1e9;
-  if (m.gguf && m.gguf.total) return m.gguf.total / 1e9;
+  if (m.safetensors && m.safetensors.total != null) return m.safetensors.total / 1e9;
+  if (m.gguf && m.gguf.total != null) return m.gguf.total / 1e9;
   const bMatch = m.id.match(/(\d+\.?\d*)[Bb]/);
   if (bMatch) return parseFloat(bMatch[1]);
   const mMatch = m.id.match(/(\d+\.?\d*)[Mm]/);
@@ -668,6 +673,10 @@ function modelPassesAllFilters(m) {
 // Filter pipeline: compute L1 authors from _allFetched. knownIds is the full set (not date-filtered)
 // so isOrphanQuant and isNestedQuant can correctly suppress quants whose parent is in our dataset
 // even if the parent is hidden by the date/param sliders.
+// Text filters (_l1AuthorFilter, _l2ModelFilter, _l3AuthorFilter, _l4ModelFilter) are each
+// scoped to their respective tree level — L1 filters authors at the top level, L2 filters base
+// model names, etc. _l1AuthorFilter pins matching authors to the top rather than hiding
+// non-matches (see renderMain), while L2-L4 filters are strict substring matches.
 function computeAuthorData() {
   buildCanonicalAuthors();
   const all = _allFetched || [];
@@ -1152,6 +1161,11 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
   const state = detailSort[`l2-${author}`] || { key: "downloads", asc: false };
   const sorted = sortRows(models, state.key, state.asc, state.key === "id" ? undefined : "id");
 
+  if (sorted.length === 0) {
+    container.innerHTML = '<div class="detail-count" style="color:#6e7681">No base models match current filters.</div>';
+    return;
+  }
+
   const cols = [
     { key: "id", label: "Model ID" },
     { key: "paramB", label: "Params", headerCls: "updated-header", cls: "center", width: 160 },
@@ -1174,13 +1188,13 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
       <td class="center" style="font-size:0.78rem">${m.paramB != null ? paramValueToLabel(m.paramB) : "—"}</td>
       <td class="right">${fmt(m.downloads)}</td>
       <td class="right">${fmt(m.likes)}<span class="likes-icon">♥</span></td>
-      <td class="updated-cell">${fmtDate(m.lastModified)} <span style="color:#484f58;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
+      <td class="updated-cell">${fmtDate(m.lastModified)} <span style="color:#6e7681;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
     </tr>
     <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none"><td colspan="5"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
   }).join('');
 
   const hidden = (totalBeforeFilter != null && totalBeforeFilter > models.length) ? totalBeforeFilter - models.length : 0;
-  html += `</tbody></table><div class="detail-count">${models.length} model(s)` + (hidden > 0 ? `, <span style="color:#484f58;font-size:0.75rem">+${hidden} hidden by search settings</span>` : '') + `</div>`;
+  html += `</tbody></table><div class="detail-count">${models.length} model(s)` + (hidden > 0 ? `, <span style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by search settings</span>` : '') + `</div>`;
   container.innerHTML = html;
   container._l2State = { idx, author, models, totalBeforeFilter };
 
@@ -1245,7 +1259,9 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
 async function loadChildren(l2Idx, modelIdx, parentId, container) {
   const cacheKey = `children-${parentId}`;
 
-  // Deduplicate concurrent fetches for the same parent
+  // Deduplicate concurrent fetches for the same parent — same approach as _inflightFetches
+  // in fetchJson: concurrent L3 expansions for the same model share one inflight promise
+  // rather than each issuing a separate API call.
   const entry = _inflightChildren.get(cacheKey);
   if (entry) {
     await entry.promise;
@@ -1319,9 +1335,10 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       };
 
       const nameUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
-      let childCount = processChildren(await fetchJson(nameUrl));
+      const nameResults = await fetchJson(nameUrl);
+      processChildren(nameResults);
 
-      if (childCount === 0) {
+      if (nameResults.length === 0) {
         const fullUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(parentId)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
         processChildren(await fetchJson(fullUrl));
       }
@@ -1574,6 +1591,8 @@ const debouncedTextFilter = debounce(applyTextFilters, CONFIG.DEBOUNCE_MS);
 // ── Date slider ──
 // Date and param sliders share ~80% of their logic. Abstracting into a factory would save
 // ~40 lines but add indirection. Keeping them separate keeps each path trivially traceable.
+// PARAM_MIN_GAP:5 prevents the "to" knob from crossing the "from" knob — the gap constraint is
+// enforced on each input/change event so the two thumbs can't overlap or swap order.
 function buildDateSlider() {
   const from = document.getElementById("ds-from");
   const to = document.getElementById("ds-to");
@@ -1613,15 +1632,15 @@ function buildDateSlider() {
 // (5) compute author data and render. If all tasks are already fetched, skips to (5).
 // The "Refresh" button on subsequent clicks re-checks — filters alone (no new task data)
 // just recompute from _allFetched via computeAuthorData.
-function applyFilters() {
-  if (!needsUpdate) return;
+function applyFilters(force) {
+  if (!needsUpdate && !force) return;
   needsUpdate = false;
   const savedExpansions = new Set(expandedSections);
   _fetchGeneration++;
   const gen = _fetchGeneration;
   const btn = document.getElementById("get-results-btn");
   btn.classList.remove("ready");
-  btn.classList.add("disabled");
+  btn.disabled = true;
   const tasks = resolveTasks().filter(t => activeTaskFilters.has(t));
   const newTasks = tasks.filter(t => !fetchedTasks.has(t));
   const needUntagged = activeSpecialFilters.has("include untagged") && !fetchedUntagged;
@@ -1690,13 +1709,13 @@ function applyFilters() {
         console.warn("applyFilters error:", e);
         document.getElementById("status").textContent = "Error: " + e.message;
       } finally {
-        btn.classList.remove("disabled");
+        btn.disabled = false;
         btn.textContent = "Refresh";
       }
     })();
   } else {
     document.getElementById("get-results-btn").textContent = "Refresh";
-    document.getElementById("get-results-btn").classList.remove("disabled");
+    document.getElementById("get-results-btn").disabled = false;
     recomputeAndRender(savedExpansions);
   }
 }
@@ -1852,7 +1871,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
     }
   }
 });
-document.getElementById("get-results-btn").addEventListener("click", applyFilters);
+document.getElementById("get-results-btn").addEventListener("click", () => applyFilters(true));
 
 // ── Init ──
 // Fetch top models per pipeline tag (by downloads + by lastModified, merged + deduped).
@@ -2016,7 +2035,12 @@ async function injectBaseModels(all, onBatch) {
     const fic = e.target.closest(".fic");
     if (!fic) return;
     const input = document.getElementById(fic.dataset.for);
-    if (input) { input.value = ""; input.dispatchEvent(new Event("input", { bubbles: true })); }
+    if (input) { input.value = ""; input.dispatchEvent(new Event("input", { bubbles: true })); input.focus(); }
+  });
+  document.getElementById("text-filter-row").addEventListener("keydown", e => {
+    const fic = e.target.closest(".fic");
+    if (!fic) return;
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fic.click(); }
   });
   markDirty();
   document.getElementById("api-counter").textContent = "API Calls: 0";
