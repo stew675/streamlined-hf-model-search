@@ -645,6 +645,7 @@ function normalizeModel(m) {
 }
 // Parameter count cache: persists across sessions because model param counts are immutable.
 // Never cleared — avoids redundant individual API fetches for already-resolved models.
+// Worst case memory impact with a maximum of 16384 expanded models estimated to be ~1.4MB
 const _paramCache = new Map();
 function getParamCount(m) {
   const cached = _paramCache.get(m.id);
