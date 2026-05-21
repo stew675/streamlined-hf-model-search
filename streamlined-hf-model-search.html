@@ -170,7 +170,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260520.00</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260520.01</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -492,7 +492,7 @@ function isBase(model) {
   const bm = cd.base_model;
   if (!bm) return true;
   const author = model.id.split("/")[0];
-  const firstBase = Array.isArray(bm) && bm.length ? bm[0] : bm;
+  const firstBase = Array.isArray(bm) && bm.length ? bm[0] : (typeof bm === "string" ? bm : null);
   if (firstBase && firstBase.split("/")[0] === author) return true;
   return false;
 }
@@ -1936,7 +1936,8 @@ async function injectBaseModels(all, onBatch) {
     const bm = cd && cd.base_model;
 
     if (bm) {
-      baseId = Array.isArray(bm) ? bm[0] : bm;
+      baseId = Array.isArray(bm) && typeof bm[0] === "string" ? bm[0] : (typeof bm === "string" ? bm : null);
+      if (!baseId) continue;
     } else {
       const idLower = m.id.toLowerCase();
       if (!Q_METHODS.some(t => idLower.includes(t))) continue;
