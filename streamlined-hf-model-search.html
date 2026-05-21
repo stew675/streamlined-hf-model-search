@@ -170,7 +170,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260520.02</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260520.04</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -604,6 +604,20 @@ function isInDateRange(dateStr) {
   const c = new Date(dateStr);
   return c >= sliderValueToDate(sliderFrom) && c <= sliderValueToDate(sliderTo);
 }
+function normalizeModel(m) {
+  return {
+    id: m.id,
+    downloads: m.downloads || 0,
+    likes: m.likes || 0,
+    lastModified: m.lastModified || "",
+    createdAt: m.createdAt || "",
+    pipeline_tag: m.pipeline_tag || "",
+    tags: m.tags || [],
+    safetensors: m.safetensors || null,
+    gguf: m.gguf || null,
+    cardData: m.cardData ? { base_model: m.cardData.base_model } : null
+  };
+}
 function getParamCount(m) {
   if (m.safetensors && m.safetensors.total != null) return m.safetensors.total / 1e9;
   if (m.gguf && m.gguf.total != null) return m.gguf.total / 1e9;
@@ -716,13 +730,15 @@ function cacheAccess(key) {
 }
 const expandedSections = new Set();
 const _inflightChildren = new Map();
+const l2StateMap = new Map();
+const l3StateMap = new Map();
+const l4StateMap = new Map();
 
-function pruneExpiredExpansions() {
+function pruneExpiredExpansions(renderedAuthors) {
   for (const key of [...expandedSections]) {
     if (!key.startsWith("a|")) continue;
     const author = key.slice(2);
-    const row = document.querySelector(`tr.l1-row[data-author="${author}"]`);
-    if (!row) {
+    if (!renderedAuthors.has(author)) {
       expandedSections.delete(key);
       for (const child of [...expandedSections]) {
         if (child.startsWith("m|" + author + "/") || child.startsWith("g|" + author + "/")) {
@@ -743,7 +759,7 @@ function recomputeAndRender(saved) {
   _authorData = computeAuthorData();
   renderMain(_authorData);
   updateArrows();
-  pruneExpiredExpansions();
+  pruneExpiredExpansions(new Set(_authorData.map(a => a.author)));
   saveRestoreExpansions(saved);
   refreshAllExpanded();
 }
@@ -1041,9 +1057,10 @@ function renderMain(authorData) {
 async function loadAuthorModels(idx, author, container) {
   const gen = _fetchGeneration;
   try {
-    const models = cacheAccess(author + "_models") || await fetchJson(
+    const raw = cacheAccess(author + "_models") || await fetchJson(
       `https://huggingface.co/api/models?author=${author}&sort=downloads&direction=-1&limit=${CONFIG.AUTHOR_LIMIT}&full=true&cardData=true`
     );
+    const models = raw.map(normalizeModel);
     if (!cacheAccess(author + "_models")) cacheSet(author + "_models", models);
 
     const authorKnownIds = new Set(models.map(x => x.id));
@@ -1196,14 +1213,16 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
   const hidden = (totalBeforeFilter != null && totalBeforeFilter > models.length) ? totalBeforeFilter - models.length : 0;
   html += `</tbody></table><div class="detail-count">${models.length} model(s)` + (hidden > 0 ? `, <span style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by search settings</span>` : '') + `</div>`;
   container.innerHTML = html;
-  container._l2State = { idx, author, models, totalBeforeFilter };
+  container.dataset.l2Author = author;
+  l2StateMap.set(author, { idx, author, models, totalBeforeFilter });
 
   if (!container._delegatedL2) {
     container._delegatedL2 = true;
     container.addEventListener("click", function(e) {
       const inner = e.target.closest(".detail-inner");
       if (inner && inner !== this) return;
-      const s = this._l2State;
+      const s = l2StateMap.get(this.dataset.l2Author);
+      if (!s) return;
       const th = e.target.closest("thead th");
       if (th) {
         if (th.dataset.level !== "2") return;
@@ -1335,12 +1354,12 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       };
 
       const nameUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
-      const nameResults = await fetchJson(nameUrl);
+      const nameResults = (await fetchJson(nameUrl)).map(normalizeModel);
       processChildren(nameResults);
 
       if (nameResults.length === 0) {
         const fullUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(parentId)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
-        processChildren(await fetchJson(fullUrl));
+        processChildren((await fetchJson(fullUrl)).map(normalizeModel));
       }
 
       newEntry.results = results;
@@ -1397,7 +1416,8 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   html += `</tbody></table>`;
   html += `<div class="detail-count">${filtered.length} child model(s) from ${groupEntries.length} author(s)${filtered.length !== children.length ? ` (filtered from ${children.length})` : ''}</div>`;
   container.innerHTML = html;
-  container._l3State = { l2Idx, modelIdx, parentId, children };
+  container.dataset.l3Parent = parentId;
+  l3StateMap.set(parentId, { l2Idx, modelIdx, parentId, children });
 
   if (!container._delegatedL3) {
     // Event delegation: same rationale as L2 — survives innerHTML re-renders.
@@ -1405,7 +1425,8 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
     container.addEventListener("click", function(e) {
       const inner = e.target.closest(".detail-inner");
       if (inner && inner !== this) return;
-      const s = this._l3State;
+      const s = l3StateMap.get(this.dataset.l3Parent);
+      if (!s) return;
       const th = e.target.closest("thead th");
       if (th) {
         if (th.dataset.level !== "3") return;
@@ -1477,14 +1498,17 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 
   html += `</tbody></table>`;
   container.innerHTML = html;
-  container._l4State = { l2Idx, modelIdx, gIdx, parentId, author, quants };
+  const l4Key = `${parentId}|${author}`;
+  container.dataset.l4Key = l4Key;
+  l4StateMap.set(l4Key, { l2Idx, modelIdx, gIdx, parentId, author, quants });
 
   if (!container._delegatedL4) {
     container._delegatedL4 = true;
     container.addEventListener("click", function(e) {
       const th = e.target.closest("thead th");
       if (!th || th.dataset.level !== "4") return;
-      const s = this._l4State;
+      const s = l4StateMap.get(this.dataset.l4Key);
+      if (!s) return;
       const key = th.dataset.key;
       const st = detailSort[`l4-${s.parentId}-${s.author}`] || { key: "downloads", asc: false };
       if (st.key === key) st.asc = !st.asc;
@@ -1656,7 +1680,7 @@ function applyFilters(force) {
         if (gen !== _fetchGeneration) return;
         if (needUntagged) {
           const raw = await fetchUntaggedModels();
-          fresh = fresh.concat(raw.filter(m => !m.pipeline_tag));
+          fresh = fresh.concat(raw.filter(m => !m.pipeline_tag).map(normalizeModel));
           fetchedUntagged = true;
         }
         if (gen !== _fetchGeneration) return;
@@ -1898,9 +1922,10 @@ async function fetchTasks(tasks) {
       for (const m of combined) {
         if (seen.has(m.id)) continue;
         seen.add(m.id);
-        m.paramB = getParamCount(m);
-        if (!m.pipeline_tag) m.pipeline_tag = tag;
-        allFetched.push(m);
+        const norm = normalizeModel(m);
+        norm.paramB = getParamCount(norm);
+        if (!norm.pipeline_tag) norm.pipeline_tag = tag;
+        allFetched.push(norm);
       }
       fetchedTasks.add(tag);
     }
@@ -1978,7 +2003,8 @@ async function injectBaseModels(all, onBatch) {
     total += batch.length;
     status.textContent = `Resolving base models… (${total})`;
     const results = await Promise.allSettled(batch.map(async (baseId) => {
-      const full = await fetchJson(`https://huggingface.co/api/models/${baseId}?full=true`);
+      const raw = await fetchJson(`https://huggingface.co/api/models/${baseId}?full=true`);
+      const full = normalizeModel(raw);
       full.paramB = getParamCount(full);
       full._injected = true;
       return full;
