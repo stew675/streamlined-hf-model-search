@@ -1909,7 +1909,6 @@ function applyFilters(force, deep) {
   needsUpdate = false;
   const savedExpansions = new Set(expandedSections);
   _fetchGeneration++;
-  _inferredParamIds.clear();
   const gen = _fetchGeneration;
   const quickBtn = document.getElementById("get-quick-results-btn");
   const deepBtn = document.getElementById("get-deep-results-btn");
