@@ -180,7 +180,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.11</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.12</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -1213,19 +1213,31 @@ async function loadAuthorModels(idx, author, container) {
         await Promise.all(batch.map(async (m) => {
           try {
             const full = await fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`);
-            // For quant models, skip safetensors/gguf from the full response —
-            // their element counts can differ slightly from the actual parameter
-            // count (e.g. extra scaling tensors), leading to rounded display
-            // values that don't match the model name. Parent inheritance and the
-            // B/M regex fallback in tryResolveModelParam give clean integers.
+            // For quant models, prefer B/M regex from the model ID (clean
+            // integer) over safetensors/gguf element counts, which can be
+            // slightly inflated by extra tensors (scales, zero points) and
+            // cause rounding mismatches vs the model name.  Fall back to
+            // safetensors/gguf only when the ID has no B/M suffix at all.
             const idLower = (m.id || "").toLowerCase();
             const isQuant = Q_METHODS.some(t => idLower.includes(t));
             let p = null;
-            if (!isQuant) {
+            if (isQuant) {
+              const idB = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Bb]/);
+              if (idB) p = parseFloat(idB[1]);
+              else {
+                const idM = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Mm]/);
+                if (idM) p = parseFloat(idM[1]) / 1000;
+              }
+            } else {
               if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
               else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
             }
             if (p === null) p = getParamCount(full);
+            if (p === null && isQuant) {
+              // Last resort for quants: safetensors/gguf from full response
+              if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
+              else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
+            }
             if (p !== null) { m.paramB = p; _paramCache.set(m.id, p); }
           } catch (e) {
             console.warn("Failed to fetch param for", m.id, e);
