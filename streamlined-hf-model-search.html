@@ -179,7 +179,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.06</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.07</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -387,6 +387,7 @@ let needsUpdate = false;
 let _derivedParamEnabled = false;
 let _hideMissingParamEnabled = false;
 const _inferredParamIds = new Set();
+const _inferredAttemptedIds = new Set();
 let apiCalls = 0;
 function incApiCalls(n) { apiCalls += n; document.getElementById("api-counter").textContent = "API Calls: " + String(apiCalls); }
 function markDirty() { needsUpdate = true; document.getElementById("get-quick-results-btn").classList.add("ready"); document.getElementById("get-deep-results-btn").classList.add("ready"); }
@@ -1239,7 +1240,7 @@ async function loadAuthorModels(idx, author, container) {
         }
       }
       if (_derivedParamEnabled) {
-        const stillUnknown = unknownModels.filter(m => m.paramB === null);
+        const stillUnknown = unknownModels.filter(m => m.paramB === null && !_inferredAttemptedIds.has(m.id));
         for (const m of stillUnknown) {
           if (gen !== _fetchGeneration || !container.isConnected) return;
           await tryResolveModelParam(m, gen, idx, author, container, filterApplied, nonQuantBase.length);
@@ -1842,9 +1843,24 @@ async function tryResolveModelParam(m, gen, idx, author, container, getFiltered,
   if (rowEl) rowEl.classList.add("inferring");
   document.getElementById("status").textContent =
     `Inferring params from children for ${m.id.split("/").slice(1).join("/")}…`;
-  const resolved = await resolveParamFromChildren(m.id);
+  let resolved = await resolveParamFromChildren(m.id);
   if (rowEl) rowEl.classList.remove("inferring");
-  if (resolved === null) return false;
+  _inferredAttemptedIds.add(m.id);
+  if (resolved === null) {
+    // Last resort for quant models: extract B/M from model ID.
+    // The normal getParamCount skips ID-based parsing for quant models because
+    // suffixes like -4B can be ambiguous (bit width vs param count). But at this
+    // point we've already tried safetensors/gguf, individual API fetch, parent
+    // inheritance, and children inference — so any remaining B/M in the name is
+    // almost certainly the parameter count.
+    const idB = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Bb]/);
+    if (idB) resolved = parseFloat(idB[1]);
+    else {
+      const idM = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Mm]/);
+      if (idM) resolved = parseFloat(idM[1]) / 1000;
+    }
+    if (resolved === null) return false;
+  }
   m.paramB = resolved;
   _paramCache.set(m.id, resolved);
   _inferredParamIds.add(m.id);
@@ -1865,7 +1881,7 @@ async function deriveVisibleUnknowns() {
     const author = key.slice(2);
     const models = cacheAccess(author);
     if (!models) continue;
-    const unknown = models.filter(m => m.paramB === null && modelPassesAllFilters(m));
+    const unknown = models.filter(m => m.paramB === null && !_inferredAttemptedIds.has(m.id) && modelPassesAllFilters(m));
     if (unknown.length === 0) continue;
     for (const m of unknown) {
       if (gen !== _fetchGeneration) return;
