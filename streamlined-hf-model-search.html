@@ -81,6 +81,7 @@
            background: #1f6feb33; color: #58a6ff; border: 1px solid #1f6feb55; margin: 1px 2px; box-shadow: 0 0 4px #1f6feb22; }
   .badge.deriv { background: #23863633; color: #3fb950; border-color: #23863655; box-shadow: 0 0 4px #23863622; }
   .badge.orphan { background: #d2992233; color: #e3b341; border-color: #d2992255; box-shadow: 0 0 4px #d2992222; }
+  .inferred-param { color: #d29922; border-bottom: 1px dashed #d29922; cursor: help; }
   .likes-icon { color: #f85149; margin-left: 2px; }
   .cell-flex { display: flex; align-items: center; }
 
@@ -1150,6 +1151,49 @@ async function loadAuthorModels(idx, author, container) {
 
     cacheSet(author, baseModels);
 
+    // Infer paramB for models where it's still null by scanning children already
+    // in _allFetched. If a child (quant or fine-tune) has a known param count we
+    // can use the largest value rather than making an individual API call.
+    if (_allFetched) {
+      const allFetchedSeen = new Set(_allFetched.map(m => m.id));
+      const childParamMap = new Map();
+      for (const cm of _allFetched) {
+        if (cm.paramB == null) continue;
+        let parentId = null;
+        const cd = cm.cardData;
+        const bm = cd && cd.base_model;
+        if (bm) {
+          parentId = getBaseModelId(cd);
+          if (!parentId) continue;
+        } else {
+          const idLower = cm.id.toLowerCase();
+          if (!Q_METHODS.some(t => idLower.includes(t))) continue;
+          const bits = cm.id.split('/');
+          let name = bits[1];
+          while (name.length > 0) {
+            const dash = name.lastIndexOf('-');
+            if (dash <= 0) break;
+            name = name.substring(0, dash);
+            const candId = bits[0] + '/' + name;
+            if (allFetchedSeen.has(candId)) { parentId = candId; break; }
+            if (name.match(/\d+\.?\d*[Bb]/) || name.match(/\d+[Mm]/)) { parentId = candId; break; }
+          }
+        }
+        if (parentId && allFetchedSeen.has(parentId)) {
+          const current = childParamMap.get(parentId) || 0;
+          if (cm.paramB > current) childParamMap.set(parentId, cm.paramB);
+        }
+      }
+      for (const m of baseModels) {
+        if (m.paramB != null) continue;
+        const inferred = childParamMap.get(m.id);
+        if (inferred != null && inferred > 0) {
+          m.paramB = inferred;
+          m._inferredParam = true;
+        }
+      }
+    }
+
     const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
     const filterApplied = () => nonQuantBase.filter(m => modelPassesAllFilters(m));
 
@@ -1187,7 +1231,7 @@ async function loadAuthorModels(idx, author, container) {
           try {
             const full = await fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`);
             const p = getParamCount(full);
-            if (p !== null) m.paramB = p;
+            if (p !== null) { m.paramB = p; m._inferredParam = false; }
           } catch (e) {
             console.warn("Failed to fetch param for", m.id, e);
           }
@@ -1271,7 +1315,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
     const orphanBadge = qMethods.length ? qMethods.map(q => `<span class="badge orphan" title="Parent base model filtered out">${escapeHtml(q.toUpperCase())}</span>`).join(' ') + ' ' : '';
     return `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}">
       <td class="model-id-cell"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
-      <td class="center" style="font-size:0.78rem">${m.paramB != null ? paramValueToLabel(m.paramB) : "—"}</td>
+      <td class="center" style="font-size:0.78rem">${m.paramB != null ? (m._inferredParam ? `<span class="inferred-param" title="Inferred from child models">${paramValueToLabel(m.paramB)}</span>` : paramValueToLabel(m.paramB)) : "—"}</td>
       <td class="right">${fmt(m.downloads)}</td>
       <td class="right">${fmt(m.likes)}<span class="likes-icon">♥</span></td>
       <td class="updated-cell">${fmtDate(m.lastModified)} <span style="color:#6e7681;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
