@@ -25,6 +25,42 @@ IMPROVEMENTS.md          — Code review tracking
 7. **L3/L4**: Group children by quant author, apply active quant filters, render sortable table. Text filters (`_l3AuthorFilter`, `_l4ModelFilter`) apply at their respective render levels, not in `modelPassesAllFilters`.
 
 ### State Management
+
+#### RenderCoordinator (Centralized)
+All render-related state is now managed by `RenderCoordinator` — a centralized coordinator that provides a unified API for state updates and rendering.
+
+| State | Location in Coordinator | Purpose |
+|-------|------------------------|---------|
+| L1 sort | `_state.l1Sort` | `{key, asc}` for L1 table sorting |
+| Detail sort | `_state.detailSort` | Per-section sort keyed by `"l2-{author}"`, `"l3-{parentId}"`, `"l4-{parentId}-{author}"` |
+| Expanded rows | `_state.expandedSections` | Set of `"a|{author}"`, `"m|{modelId}"`, `"g|{parentId}|{author}"` keys |
+| Text filters | `_state.textFilters` | `{l1Author, l2Model, l3Author, l4Model}` |
+| L2 render state | `_levelState.l2` | Map `author → {idx, author, models, totalBeforeFilter}` |
+| L3 render state | `_levelState.l3` | Map `parentId → {l2Idx, modelIdx, parentId, children}` |
+| L4 render state | `_levelState.l4` | Map `key → {l2Idx, modelIdx, gIdx, parentId, author, quants}` |
+
+#### RenderCoordinator Public API
+
+| Method | Purpose |
+|--------|---------|
+| `requestRender(saved?, skipDerive?)` | Single entry point for full re-render. Uses `requestAnimationFrame` for batching. |
+| `refreshExpanded()` | Re-render only expanded sections (no L1 recompute) |
+| `setL1Sort(key)` | Update L1 sort state and toggle direction if same key |
+| `setDetailSort(levelKey, sortKey)` | Update L2/L3/L4 sort for a specific level/section |
+| `toggleExpanded(key)` | Toggle expansion state of a row; cascades to descendants on collapse |
+| `hasExpanded(key)` | Check if a key is in expanded set |
+| `getExpandedList()` | Get array of all expanded keys |
+| `setTextFilter(level, value)` | Set text filter for a level (l1Author, l2Model, etc.) |
+| `setLevelState(level, key, value)` / `getLevelState(level, key)` | Access level-specific state maps |
+
+#### Backward-Compatible Proxies
+For backward compatibility, these variables are proxied to `RenderCoordinator`:
+- `expandedSections` → `RenderCoordinator._state.expandedSections`
+- `detailSort[key]` → `RenderCoordinator._state.detailSort[key]`
+- `l2StateMap` / `l3StateMap` / `l4StateMap` → `RenderCoordinator._levelState.{l2,l3,l4}`
+- `_l1AuthorFilter` / `_l2ModelFilter` / etc. → `RenderCoordinator._state.textFilters.*`
+
+#### Other State (Non-Render)
 - `_allFetched` — All base models fetched during init (trimmed to 16k, no date/param filter applied before storage)
 - `_authorData` — L1 author records (mutable, updated on L1 expand, slider changes)
 - `_canonicalAuthor` — Map of model name → canonical author; computed lazily and cached via `_canonicalCache`
@@ -40,20 +76,52 @@ IMPROVEMENTS.md          — Code review tracking
   - `"{author}_models"` → raw API response for author
   - `"children-{parentId}"` → L3/L4 children array
 - `cacheSet(key, val)` / `cacheAccess(key)` — Cache accessors; `cacheAccess` promotes the key to most-recently-used
-- `detailSort` — Per-section sort state keyed by `"l2-{author}"`, `"l3-{parentId}"`, `"l4-{parentId}-{author}"`
-- `expandedSections` — Set of `"a|{author}"`, `"m|{modelId}"`, `"g|{parentId}|{author}"` keys tracking open rows
 - `activeFilters` — Set of enabled quant type strings (awq, fp4, fp8, finetune, gguf, mlx, safetensors, others)
 - `activeFromFilters` / `activeToFilters` — Sets controlling which pipeline tags resolve
 - `activeSpecialFilters` — Set for special toggles (include untagged)
 - `activeTaskFilters` — Set of pipeline tags the user has explicitly selected via the activated types bar
 - `sliderFrom` / `sliderTo` — Date slider positions (0..80, where 0=Anytime, 1-79=YYYY/MM/DD with 14-day increments, 80=Now)
 - `paramSliderFrom` / `paramSliderTo` — Param size slider positions (0..220, mapped via piecewise linear 7-segment mapping)
-- `l2StateMap` / `l3StateMap` / `l4StateMap` — `Map<key, state>` storing current render data for each expanded container; used by delegated click handlers to re-render without re-fetching
 - `fetchedTasks` — Set of pipeline tags already fetched during init (persists across "Get Results" clicks)
 - `fetchedUntagged` — Boolean flag tracking whether untagged models have been fetched
 
+### Render Pipeline (Unified)
+
+```
+Any State Change
+       │
+       ▼
+┌──────────────────┐
+│  requestRender() │  ←── Single entry point (batched via requestAnimationFrame)
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                     RenderCoordinator._doFullRender()                │
+├──────────────────────────────────────────────────────────────────────┤
+│  1. syncSortState()     → Sync legacy sortKey/sortAsc               │
+│  2. computeAuthorData() → Apply all filters to _allFetched          │
+│  3. renderL1()          → Render L1 author table                     │
+│  4. updateArrows()      → Update sort arrow indicators               │
+│  5. pruneExpiredExpansions() → Remove stale expansion keys           │
+│  6. saveRestoreExpansions(saved) → Restore saved expansions          │
+│  7. refreshAllExpanded() → Re-expand L2→L3→L4 cascade               │
+│  8. deriveVisibleUnknowns() [optional] → Infer missing params        │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
 ### Key Functions
 
+#### RenderCoordinator Methods (Preferred New API)
+| Method | Purpose |
+|--------|---------|
+| `requestRender(saved?, skipDerive?)` | **Single entry point** for full re-render. Batches calls via `requestAnimationFrame` |
+| `refreshExpanded()` | Re-render only expanded sections (no L1 recompute) |
+| `setL1Sort(key)` / `setDetailSort(levelKey, sortKey)` | Update sort state |
+| `toggleExpanded(key)` / `hasExpanded(key)` / `getExpandedList()` | Manage expansion state |
+| `setTextFilter(level, value)` | Update text filter state |
+
+#### Render Functions (Internal)
 | Function | Purpose |
 |----------|---------|
 | `renderMain(authorData)` | Renders L1 author table |
