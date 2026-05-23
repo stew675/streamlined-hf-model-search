@@ -1446,10 +1446,39 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       const nameUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
       const nameResults = (await fetchJson(nameUrl)).map(normalizeModel);
       processChildren(nameResults);
+      let rawResults = nameResults;
 
       if (nameResults.length === 0) {
         const fullUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(parentId)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
-        processChildren((await fetchJson(fullUrl)).map(normalizeModel));
+        rawResults = (await fetchJson(fullUrl)).map(normalizeModel);
+        processChildren(rawResults);
+      }
+
+      // Backfill parent paramB from child safetensors/gguf metadata — the search
+      // API occasionally returns gguf.total for GGUF children, which reveals the
+      // parent's true parameter count without an extra individual fetch.
+      let maxChildParam = null;
+      for (const cm of rawResults) {
+        if (cm.safetensors && cm.safetensors.total != null) {
+          const p = cm.safetensors.total / 1e9;
+          if (maxChildParam === null || p > maxChildParam) maxChildParam = p;
+        }
+        if (cm.gguf && cm.gguf.total != null) {
+          const p = cm.gguf.total / 1e9;
+          if (maxChildParam === null || p > maxChildParam) maxChildParam = p;
+        }
+      }
+      if (maxChildParam !== null) {
+        const cached = _paramCache.get(parentId);
+        if (cached === undefined || cached === null) {
+          _paramCache.set(parentId, maxChildParam);
+          const pauthor = parentId.split("/")[0];
+          const st = l2StateMap.get(pauthor);
+          if (st) {
+            const pm = st.models.find(m => m.id === parentId);
+            if (pm && pm.paramB == null) pm.paramB = maxChildParam;
+          }
+        }
       }
 
       newEntry.results = results;
