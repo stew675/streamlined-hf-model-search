@@ -1530,15 +1530,39 @@ async function resolveParamFromChildren(modelId) {
     fetchJson(nameUrl).catch(() => []),
     fetchJson(idUrl).catch(() => [])
   ]);
+  // Same matching logic as loadChildren's processChildren: accept if
+  // cardData.base_model points to parent OR name matches after stripping
+  // quant suffixes (covers children without explicit base_model annotation).
+  const strictNameMatch = (candidateId) => {
+    let name = candidateId.split("/").slice(1).join("/");
+    let changed;
+    do {
+      changed = false;
+      for (const q of Q_METHODS) {
+        const suffix = '-' + q;
+        if (name.toLowerCase().endsWith(suffix)) {
+          name = name.slice(0, -suffix.length);
+          changed = true;
+          break;
+        }
+      }
+    } while (changed);
+    return name.toLowerCase() === modelName.toLowerCase();
+  };
   const seen = new Set();
   const children = [];
   for (const raw of [...nameRes, ...idRes]) {
     if (!raw || !raw.id || seen.has(raw.id)) continue;
     seen.add(raw.id);
     if (raw.id === modelId) continue;
-    if (!raw.cardData || !raw.cardData.base_model) continue;
-    const baseId = getBaseModelId(raw.cardData);
-    if (baseId !== modelId) continue;
+    const cd = raw.cardData || {};
+    const baseModel = cd.base_model;
+    const hasBaseModel = typeof baseModel === "string" ? baseModel === modelId :
+      Array.isArray(baseModel) ? baseModel.some(b => {
+        const bid = typeof b === "string" ? b : (b && b.id || "");
+        return bid === modelId;
+      }) : false;
+    if (!hasBaseModel && !strictNameMatch(raw.id)) continue;
     children.push(normalizeModel(raw));
   }
   // Pass 1: scan child IDs for B/M patterns (free, no extra API calls)
