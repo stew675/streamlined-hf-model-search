@@ -180,7 +180,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.12</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.14</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -270,7 +270,28 @@
 <script>
 (function() {
 let _allFetched, _authorData, _canonicalAuthor;
-let _l1AuthorFilter = "", _l2ModelFilter = "", _l3AuthorFilter = "", _l4ModelFilter = "";
+
+Object.defineProperty(window, '_l1AuthorFilter', {
+  get: () => RenderCoordinator._state.textFilters.l1Author,
+  set: (v) => { RenderCoordinator._state.textFilters.l1Author = v; },
+  configurable: true
+});
+Object.defineProperty(window, '_l2ModelFilter', {
+  get: () => RenderCoordinator._state.textFilters.l2Model,
+  set: (v) => { RenderCoordinator._state.textFilters.l2Model = v; },
+  configurable: true
+});
+Object.defineProperty(window, '_l3AuthorFilter', {
+  get: () => RenderCoordinator._state.textFilters.l3Author,
+  set: (v) => { RenderCoordinator._state.textFilters.l3Author = v; },
+  configurable: true
+});
+Object.defineProperty(window, '_l4ModelFilter', {
+  get: () => RenderCoordinator._state.textFilters.l4Model,
+  set: (v) => { RenderCoordinator._state.textFilters.l4Model = v; },
+  configurable: true
+});
+
 const TO_TAGS = [
   // Audio
   { tag: "automatic-speech-recognition", from: ["audio"], to: "text", desc: "Transcribe speech to text" },
@@ -777,10 +798,193 @@ function computeAuthorData() {
   return Object.values(map);
 }
 
-// ── State ──
+// ── Render Coordinator ──
+// Centralizes all render state and provides a unified pipeline for state updates → rendering.
+// All state mutations go through this coordinator, which schedules renders automatically.
+const RenderCoordinator = {
+  _state: {
+    l1Sort: { key: "totalDownloads", asc: false },
+    detailSort: {},
+    expandedSections: new Set(),
+    textFilters: {
+      l1Author: "",
+      l2Model: "",
+      l3Author: "",
+      l4Model: ""
+    }
+  },
+  
+  _levelState: {
+    l2: new Map(),
+    l3: new Map(),
+    l4: new Map()
+  },
+  
+  _renderScheduled: false,
+  _savedExpansions: null,
+  _skipDerive: false,
+
+  requestRender(savedExpansions = null, skipDerive = false) {
+    if (savedExpansions) this._savedExpansions = savedExpansions;
+    this._skipDerive = skipDerive;
+    if (this._renderScheduled) return;
+    this._renderScheduled = true;
+    requestAnimationFrame(() => {
+      this._renderScheduled = false;
+      this._doFullRender();
+    });
+  },
+
+  _doFullRender() {
+    const saved = this._savedExpansions;
+    const skipDerive = this._skipDerive;
+    this._savedExpansions = null;
+    this._skipDerive = false;
+
+    syncSortState();
+    _authorData = computeAuthorData();
+    this.renderL1(_authorData);
+    this.updateArrows();
+    this.pruneExpiredExpansions(new Set(_authorData.map(a => a.author)));
+    if (saved) this.saveRestoreExpansions(saved);
+    this.refreshAllExpanded();
+    
+    if (!skipDerive) deriveVisibleUnknowns();
+  },
+
+  setL1Sort(key) {
+    if (this._state.l1Sort.key === key) {
+      this._state.l1Sort.asc = !this._state.l1Sort.asc;
+    } else {
+      this._state.l1Sort.key = key;
+      this._state.l1Sort.asc = false;
+    }
+  },
+
+  setDetailSort(levelKey, sortKey) {
+    const defaults = { "l2": "downloads", "l3": "totalDownloads", "l4": "downloads" };
+    const prefix = levelKey.split("-")[0];
+    const st = this._state.detailSort[levelKey] || { key: defaults[prefix] || "downloads", asc: false };
+    if (st.key === sortKey) {
+      st.asc = !st.asc;
+    } else {
+      st.key = sortKey;
+      st.asc = false;
+    }
+    this._state.detailSort[levelKey] = st;
+  },
+
+  getDetailSort(levelKey) {
+    return this._state.detailSort[levelKey];
+  },
+
+  toggleExpanded(key) {
+    if (this._state.expandedSections.has(key)) {
+      this._state.expandedSections.delete(key);
+      this._pruneDescendantKeys(key);
+    } else {
+      this._state.expandedSections.add(key);
+    }
+  },
+
+  hasExpanded(key) {
+    return this._state.expandedSections.has(key);
+  },
+
+  getExpandedList() {
+    return [...this._state.expandedSections];
+  },
+
+  clearExpanded() {
+    this._state.expandedSections.clear();
+  },
+
+  _pruneDescendantKeys(key) {
+    if (key.startsWith("a|")) {
+      const author = key.slice(2);
+      for (const k of [...this._state.expandedSections]) {
+        if (k.startsWith("m|" + author + "/") || k.startsWith("g|" + author + "/")) {
+          this._state.expandedSections.delete(k);
+        }
+      }
+    } else if (key.startsWith("m|")) {
+      const modelId = key.slice(2);
+      for (const k of [...this._state.expandedSections]) {
+        if (k.startsWith("g|" + modelId + "|")) {
+          this._state.expandedSections.delete(k);
+        }
+      }
+    }
+  },
+
+  setTextFilter(level, value) {
+    this._state.textFilters[level] = value.trim();
+  },
+
+  getTextFilter(level) {
+    return this._state.textFilters[level];
+  },
+
+  setLevelState(level, key, value) {
+    this._levelState[level].set(key, value);
+  },
+
+  getLevelState(level, key) {
+    return this._levelState[level].get(key);
+  },
+
+  hasLevelState(level, key) {
+    return this._levelState[level].has(key);
+  },
+
+  renderL1: null,
+  updateArrows: null,
+  pruneExpiredExpansions: null,
+  saveRestoreExpansions: null,
+  refreshAllExpanded: null,
+
+  refreshExpanded() {
+    this.refreshAllExpanded();
+  },
+
+  get sortKey() { return this._state.l1Sort.key; },
+  get sortAsc() { return this._state.l1Sort.asc; },
+  get detailSort() { return this._state.detailSort; },
+  get expandedSections() { return this._state.expandedSections; },
+  get l2StateMap() { return this._levelState.l2; },
+  get l3StateMap() { return this._levelState.l3; },
+  get l4StateMap() { return this._levelState.l4; },
+  get _l1AuthorFilter() { return this._state.textFilters.l1Author; },
+  get _l2ModelFilter() { return this._state.textFilters.l2Model; },
+  get _l3AuthorFilter() { return this._state.textFilters.l3Author; },
+  get _l4ModelFilter() { return this._state.textFilters.l4Model; },
+};
+
 let sortKey = "totalDownloads";
 let sortAsc = false;
-const detailSort = {};
+
+const detailSort = new Proxy({}, {
+  get(target, prop) {
+    return RenderCoordinator._state.detailSort[prop];
+  },
+  set(target, prop, value) {
+    RenderCoordinator._state.detailSort[prop] = value;
+    return true;
+  },
+  has(target, prop) {
+    return prop in RenderCoordinator._state.detailSort;
+  },
+  deleteProperty(target, prop) {
+    delete RenderCoordinator._state.detailSort[prop];
+    return true;
+  }
+});
+
+function syncSortState() {
+  sortKey = RenderCoordinator._state.l1Sort.key;
+  sortAsc = RenderCoordinator._state.l1Sort.asc;
+}
+
 const cache = new Map();
 function cacheSet(key, value) {
   if (cache.has(key)) cache.delete(key);
@@ -794,11 +998,51 @@ function cacheAccess(key) {
   cache.set(key, v);
   return v;
 }
-const expandedSections = new Set();
+const expandedSections = new Proxy(new Set(), {
+  get(target, prop) {
+    if (prop === 'add' || prop === 'delete' || prop === 'has' || prop === 'clear' || prop === 'forEach' || prop === Symbol.iterator) {
+      return function(...args) {
+        return RenderCoordinator._state.expandedSections[prop](...args);
+      };
+    }
+    if (prop === 'size') return RenderCoordinator._state.expandedSections.size;
+    return target[prop];
+  }
+});
 const _inflightChildren = new Map();
-const l2StateMap = new Map();
-const l3StateMap = new Map();
-const l4StateMap = new Map();
+const l2StateMap = new Proxy(new Map(), {
+  get(target, prop) {
+    if (prop === 'get' || prop === 'set' || prop === 'has' || prop === 'delete' || prop === 'clear' || prop === 'forEach' || prop === 'keys' || prop === 'values' || prop === 'entries' || prop === Symbol.iterator) {
+      return function(...args) {
+        return RenderCoordinator._levelState.l2[prop](...args);
+      };
+    }
+    if (prop === 'size') return RenderCoordinator._levelState.l2.size;
+    return target[prop];
+  }
+});
+const l3StateMap = new Proxy(new Map(), {
+  get(target, prop) {
+    if (prop === 'get' || prop === 'set' || prop === 'has' || prop === 'delete' || prop === 'clear' || prop === 'forEach' || prop === 'keys' || prop === 'values' || prop === 'entries' || prop === Symbol.iterator) {
+      return function(...args) {
+        return RenderCoordinator._levelState.l3[prop](...args);
+      };
+    }
+    if (prop === 'size') return RenderCoordinator._levelState.l3.size;
+    return target[prop];
+  }
+});
+const l4StateMap = new Proxy(new Map(), {
+  get(target, prop) {
+    if (prop === 'get' || prop === 'set' || prop === 'has' || prop === 'delete' || prop === 'clear' || prop === 'forEach' || prop === 'keys' || prop === 'values' || prop === 'entries' || prop === Symbol.iterator) {
+      return function(...args) {
+        return RenderCoordinator._levelState.l4[prop](...args);
+      };
+    }
+    if (prop === 'size') return RenderCoordinator._levelState.l4.size;
+    return target[prop];
+  }
+});
 
 function pruneExpiredExpansions(renderedAuthors) {
   for (const key of [...expandedSections]) {
@@ -822,17 +1066,20 @@ function saveRestoreExpansions(saved) {
 }
 
 function recomputeAndRender(saved) {
-  recomputeAndRenderWithoutDerive(saved);
-  deriveVisibleUnknowns();
+  RenderCoordinator.requestRender(saved, false);
 }
 function recomputeAndRenderWithoutDerive(saved) {
-  _authorData = computeAuthorData();
-  renderMain(_authorData);
-  updateArrows();
-  pruneExpiredExpansions(new Set(_authorData.map(a => a.author)));
-  saveRestoreExpansions(saved);
-  refreshAllExpanded();
+  RenderCoordinator.requestRender(saved, true);
 }
+
+RenderCoordinator.renderL1 = renderMain;
+RenderCoordinator.updateArrows = function() {
+  syncSortState();
+  updateArrows();
+};
+RenderCoordinator.pruneExpiredExpansions = pruneExpiredExpansions;
+RenderCoordinator.saveRestoreExpansions = saveRestoreExpansions;
+RenderCoordinator.refreshAllExpanded = refreshAllExpanded;
 
 function matchesFilter(qMethod) {
   if (!qMethod) return true;
@@ -2216,9 +2463,9 @@ document.querySelector("#main-table").addEventListener("click", e => {
   const th = e.target.closest("#main-table > thead > tr > th");
   if (th) {
     const key = th.dataset.key;
-    if (sortKey === key) sortAsc = !sortAsc;
-    else { sortKey = key; sortAsc = false; }
-    const savedSort = new Set(expandedSections);
+    RenderCoordinator.setL1Sort(key);
+    syncSortState();
+    const savedSort = new Set(RenderCoordinator.getExpandedList());
     renderMain(_authorData);
     updateArrows();
     saveRestoreExpansions(savedSort);
@@ -2478,8 +2725,8 @@ async function injectBaseModels(all, onBatch) {
   document.getElementById("ds-to").max = CONFIG.DATE_SLIDER_MAX;
   document.getElementById("ps-from").max = CONFIG.PARAM_SLIDER_MAX;
   document.getElementById("ps-to").max = CONFIG.PARAM_SLIDER_MAX;
-  sortKey = "totalDownloads";
-  sortAsc = false;
+  RenderCoordinator._state.l1Sort = { key: "totalDownloads", asc: false };
+  syncSortState();
   updateArrows();
   buildFilterBar();
   buildFromToBars();
