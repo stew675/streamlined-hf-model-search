@@ -57,8 +57,8 @@ All render-related state is now managed by `RenderCoordinator` — a centralized
 For backward compatibility, these variables are proxied to `RenderCoordinator`:
 - `expandedSections` → `RenderCoordinator._state.expandedSections`
 - `detailSort[key]` → `RenderCoordinator._state.detailSort[key]`
-- `l2StateMap` / `l3StateMap` / `l4StateMap` → `RenderCoordinator._levelState.{l2,l3,l4}`
-- `_l1AuthorFilter` / `_l2ModelFilter` / etc. → `RenderCoordinator._state.textFilters.*`
+- `l2StateMap` / `l3StateMap` / `l4StateMap` → `RenderCoordinator._levelState.{l2,l3,l4}` (created via `createLevelStateProxy(level)`)
+- `_l1AuthorFilter` / `_l2ModelFilter` / etc. → `RenderCoordinator._state.textFilters.*` (defined via loop over `['l1Author', 'l2Model', 'l3Author', 'l4Model']`)
 
 #### Other State (Non-Render)
 - `_allFetched` — All base models fetched during init (trimmed to 16k, no date/param filter applied before storage)
@@ -158,6 +158,18 @@ Any State Change
 | `renderErrorWithRetry(container, message, retryFn)` | Renders error state with a one-shot Retry button into any detail container |
 | `fetchTasks(tasks)` | Concurrent fetch of top 500 models per task (downloads + lastModified), capped at `FETCH_CONCURRENCY` |
 | `injectBaseModels(all, onBatch)` | Two-pass base model injection: scan for missing parents → fetch in batches with incremental re-render callbacks |
+| `addKeyboardClick(el)` | Attaches Enter/Space → click keyboard handler to an element; used across all interactive elements |
+| `strictNameMatch(candidateId, modelName)` | Strips quant suffixes from `candidateId` and compares to `modelName`; deduplicates children matching for L3/L4 |
+| `hasBaseModel(cd, targetId)` | Checks if `cardData.base_model` (string or array form) matches `targetId` |
+| `toggleSet(option, options, activeSet)` | Tri-state toggle: off→on, all→solo, solo→all, otherwise→off. Used by filter/act-tag/bar logic |
+| `syncChipSet(selector, isActiveFn)` | Generic filter-chip UI sync: toggles active/inactive classes and aria-pressed |
+| `createFilterChip(config)` | Creates a filter chip `<span>` with dataset, text, class, aria-pressed, keyboard nav, and click handler |
+| `createTaskTag(tag, isActive)` | Creates an activated-type `<span>` tag with click handler for toggling active task filters |
+| `handleSortClick(th, level, sortKey, defaultKey, refreshAfter, renderFn)` | Unified sort handler for L2/L3/L4 table headers; updates `detailSort` and calls render |
+| `createLevelStateProxy(level)` | Factory for backward-compatible `l2StateMap`/`l3StateMap`/`l4StateMap` Proxies delegating to `RenderCoordinator._levelState` |
+| `enforceFromGap(fromEl, toEl, minGap, max)` | Pushes `to` forward when `from` knob violates minimum gap |
+| `enforceToGap(fromEl, toEl, minGap)` | Pushes `from` backward when `to` knob violates minimum gap |
+| `setupSliderEvents(from, to, minGap, max, read, updateUI, markDirty)` | Wires input/change events for both knobs of a dual range slider |
 
 ### Constants
 
