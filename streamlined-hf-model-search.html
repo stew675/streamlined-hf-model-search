@@ -1572,6 +1572,10 @@ async function resolveParamFromChildren(modelId) {
     if (!hasBaseModel && !strictNameMatch(raw.id)) continue;
     children.push(normalizeModel(raw));
   }
+  // Sort children by ascending modification date so the oldest (typically
+  // original GGUF quants) are prioritized over newer pruned variants (REAP)
+  // when DERIVED_BATCH_SIZE limits how many individual cards we fetch.
+  children.sort((a, b) => (a.lastModified || "").localeCompare(b.lastModified || ""));
   // Pass 1: scan child IDs for B/M patterns (free, no extra API calls)
   for (const child of children) {
     const p = getParamCount(child);
