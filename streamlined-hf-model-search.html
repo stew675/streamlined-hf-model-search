@@ -68,6 +68,7 @@
   tr.l2-row td { cursor: pointer; padding-left: 32px !important; }
   tr.l2-row:hover td { background: #1a2030; }
   tr.l2-row td:first-child { padding-left: 32px !important; }
+  tr.l2-row.inferring td { background: #d2992233; transition: background 0.15s; }
 
   tr.l3-row td { cursor: pointer; padding-left: 48px !important; font-weight: 500; }
   tr.l3-row:hover td { background: #1a2030; }
@@ -178,7 +179,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.03</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.06</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -235,9 +236,10 @@
 <div id="sort-announce" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></div>
 <div id="button-row">
   <span id="derived-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" tabindex="0" style="margin-right:auto; user-select:none" title="When enabled, models with unknown parameter counts will search their children (2 search API calls per model) and fetch individual child model cards (up to 4 per model) to try to infer the parent's parameter count.">Infer Missing Parameters</span>
+  <span id="hide-missing-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" tabindex="0" style="user-select:none" title="When enabled, models without a known parameter count are hidden from display.">Hide Missing Parameters</span>
   <div id="button-center">
-    <button id="get-quick-results-btn" class="action-btn">Get Quick Results</button>
-    <button id="get-deep-results-btn" class="action-btn">Get Deep Results</button>
+    <button id="get-quick-results-btn" class="action-btn" title="Fetch top models per pipeline tag (by downloads + lastModified) — no cross-author base model injection. Faster but may miss quantizations whose parent base model is from a different author.">Get Quick Results</button>
+    <button id="get-deep-results-btn" class="action-btn" title="Same as Quick, plus resolve cross-author base models referenced by quantizations via individual model API calls. Slower but surfaces more quantizations.">Get Deep Results</button>
   </div>
   <span id="api-counter" class="filter-label" style="margin-left:auto; font-variant-numeric: tabular-nums; min-width: 100px; text-align: right;">API Calls: 0</span>
 </div>
@@ -383,6 +385,7 @@ let _fetchGeneration = 0;
 const _injectedBaseIds = new Set();
 let needsUpdate = false;
 let _derivedParamEnabled = false;
+let _hideMissingParamEnabled = false;
 const _inferredParamIds = new Set();
 let apiCalls = 0;
 function incApiCalls(n) { apiCalls += n; document.getElementById("api-counter").textContent = "API Calls: " + String(apiCalls); }
@@ -736,7 +739,9 @@ function modelPassesAllFilters(m) {
   if (!_injectedBaseIds.has(m.id) && !isInDateRange(m.lastModified)) return false;
   const tag = m.pipeline_tag;
   if (!tag && !activeSpecialFilters.has("include untagged")) return false;
-  if (!isInParamRange(m.paramB)) return false;
+  const pb = getParamCount(m);
+  if (!isInParamRange(pb)) return false;
+  if (_hideMissingParamEnabled && pb === null) return false;
   if (!matchesTaskFilter(tag)) return false;
   if (tag && !activeTaskFilters.has(tag)) return false;
   return true;
@@ -814,13 +819,16 @@ function saveRestoreExpansions(saved) {
 }
 
 function recomputeAndRender(saved) {
+  recomputeAndRenderWithoutDerive(saved);
+  deriveVisibleUnknowns();
+}
+function recomputeAndRenderWithoutDerive(saved) {
   _authorData = computeAuthorData();
   renderMain(_authorData);
   updateArrows();
   pruneExpiredExpansions(new Set(_authorData.map(a => a.author)));
   saveRestoreExpansions(saved);
   refreshAllExpanded();
-  deriveVisibleUnknowns();
 }
 
 function matchesFilter(qMethod) {
@@ -1233,22 +1241,8 @@ async function loadAuthorModels(idx, author, container) {
       if (_derivedParamEnabled) {
         const stillUnknown = unknownModels.filter(m => m.paramB === null);
         for (const m of stillUnknown) {
-          statusEl.textContent = `Inferring params from children for ${m.id.split("/").slice(1).join("/")}…`;
-          const resolved = await resolveParamFromChildren(m.id);
-          if (resolved !== null) {
-            m.paramB = resolved;
-            _paramCache.set(m.id, resolved);
-            _inferredParamIds.add(m.id);
-          }
-        }
-        if (stillUnknown.some(m => m.paramB !== null)) {
           if (gen !== _fetchGeneration || !container.isConnected) return;
-          const derivedUpdated = filterApplied();
-          const dRow = document.getElementById(`d1-${idx}`);
-          if (dRow && dRow.style.display !== "none") {
-            renderL2(idx, author, derivedUpdated, container, nonQuantBase.length);
-            if (gen === _fetchGeneration) refreshAllExpanded();
-          }
+          await tryResolveModelParam(m, gen, idx, author, container, filterApplied, nonQuantBase.length);
         }
       }
       if (gen !== _fetchGeneration || !container.isConnected) return;
@@ -1843,6 +1837,25 @@ function applyTextFilters() {
 }
 const debouncedTextFilter = debounce(applyTextFilters, CONFIG.DEBOUNCE_MS);
 
+async function tryResolveModelParam(m, gen, idx, author, container, getFiltered, totalBeforeFilter) {
+  const rowEl = document.querySelector(`tr.l2-row[data-model="${CSS.escape(m.id)}"]`);
+  if (rowEl) rowEl.classList.add("inferring");
+  document.getElementById("status").textContent =
+    `Inferring params from children for ${m.id.split("/").slice(1).join("/")}…`;
+  const resolved = await resolveParamFromChildren(m.id);
+  if (rowEl) rowEl.classList.remove("inferring");
+  if (resolved === null) return false;
+  m.paramB = resolved;
+  _paramCache.set(m.id, resolved);
+  _inferredParamIds.add(m.id);
+  if (gen !== _fetchGeneration) return true;
+  if (!container || !container.isConnected) return true;
+  const filtered = getFiltered();
+  renderL2(idx, author, filtered, container, totalBeforeFilter);
+  if (gen === _fetchGeneration) refreshAllExpanded();
+  return true;
+}
+
 async function deriveVisibleUnknowns() {
   if (!_derivedParamEnabled) return;
   const gen = _fetchGeneration;
@@ -1854,31 +1867,16 @@ async function deriveVisibleUnknowns() {
     if (!models) continue;
     const unknown = models.filter(m => m.paramB === null && modelPassesAllFilters(m));
     if (unknown.length === 0) continue;
-    const statusEl = document.getElementById("status");
-    let anyResolved = false;
     for (const m of unknown) {
       if (gen !== _fetchGeneration) return;
-      statusEl.textContent = `Inferring params from children for ${m.id.split("/").slice(1).join("/")}…`;
-      const resolved = await resolveParamFromChildren(m.id);
-      if (resolved !== null) {
-        m.paramB = resolved;
-        _paramCache.set(m.id, resolved);
-        _inferredParamIds.add(m.id);
-        anyResolved = true;
-      }
-    }
-    if (anyResolved) {
-      if (gen !== _fetchGeneration) return;
-      const row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
-      if (!row) continue;
-      const idx = parseInt(row.dataset.l1Idx);
-      const nonQuantBase = models.filter(m => !m._orphanQuant && !m._nestedQuant);
-      const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
+      const l1Row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
+      if (!l1Row) continue;
+      const idx = parseInt(l1Row.dataset.l1Idx);
       const container = document.getElementById(`i1-${idx}`);
-      if (container) {
-        renderL2(idx, author, filtered, container, nonQuantBase.length);
-        if (gen === _fetchGeneration) refreshAllExpanded();
-      }
+      if (!container) continue;
+      const nonQuantBase = models.filter(m2 => !m2._orphanQuant && !m2._nestedQuant);
+      const getFiltered = () => nonQuantBase.filter(m2 => modelPassesAllFilters(m2));
+      await tryResolveModelParam(m, gen, idx, author, container, getFiltered, nonQuantBase.length);
     }
   }
   if (gen === _fetchGeneration) document.getElementById("status").textContent = "";
@@ -2229,6 +2227,20 @@ document.getElementById("derived-param-chip").addEventListener("click", async ()
 });
 document.getElementById("derived-param-chip").addEventListener("keydown", e => {
   if (e.key === "Enter" || e.key === " ") { e.preventDefault(); document.getElementById("derived-param-chip").click(); }
+});
+document.getElementById("hide-missing-param-chip").addEventListener("click", () => {
+  _hideMissingParamEnabled = !_hideMissingParamEnabled;
+  const chip = document.getElementById("hide-missing-param-chip");
+  chip.classList.toggle("active", _hideMissingParamEnabled);
+  chip.classList.toggle("inactive", !_hideMissingParamEnabled);
+  chip.setAttribute("aria-checked", String(_hideMissingParamEnabled));
+  // Cosmetic-only re-render: skip deriveVisibleUnknowns to avoid re-inferring
+  // already-resolved models.
+  const saved = new Set(expandedSections);
+  recomputeAndRenderWithoutDerive(saved);
+});
+document.getElementById("hide-missing-param-chip").addEventListener("keydown", e => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); document.getElementById("hide-missing-param-chip").click(); }
 });
 
 // ── Init ──

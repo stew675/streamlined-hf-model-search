@@ -33,6 +33,7 @@ IMPROVEMENTS.md          — Code review tracking
 - `_inflightChildren` — Map `{parentId → { promise, results }}` to deduplicate concurrent L3/L4 fetches (results stored directly in entry to survive cache eviction)
 - `_inflightFetches` — Map `{url → promise}` to deduplicate concurrent `fetchJson` calls for the same URL before they even reach the rate limiter
 - `_apiTimestamps` — Sliding window for API rate limiting (1 call per 250ms = 4 req/s, no burst)
+- `_hideMissingParamEnabled` — Boolean toggle for the "Hide Missing Parameters" chip; when true, models with `paramB === null` are filtered out in `modelPassesAllFilters()`, affecting L1, L2, and all expanded sections. Purely cosmetic — does not affect API fetches.
 - `_paramCache` — Global `Map<modelId, paramB>` caching resolved parameter counts across all levels; persists across renders within a session
 - `cache` — Global in-memory LRU cache (max `CACHE_MAX`=200 entries) keyed by:
   - `"{author}"` → L2 base models array
@@ -146,6 +147,9 @@ Open `streamlined-hf-model-search.html` in a browser. Validate:
 15. Same-author quants (e.g. `Qwen/Qwen2.5-7B-GGUF` alongside `Qwen/Qwen2.5-7B`) appear at L2 under their author, not silently suppressed
 16. Rapid double-clicking "Get Results" or rapidly expanding/collapsing L2 rows does not produce stale renders or duplicate API calls (generation guard and inflight dedup)
 17. `_allFetched` does not exceed 16,384 entries (oldest models dropped by `lastModified`)
+18. "Hide Missing Parameters" chip toggles on/off with proper active/inactive styling
+19. When "Hide Missing Parameters" is enabled, models with "—" in the Params column are hidden from L1 and L2
+20. When "Hide Missing Parameters" is enabled and all of an author's base models lack params, that author is removed from the L1 list entirely
 
 ## Common Pitfalls
 
