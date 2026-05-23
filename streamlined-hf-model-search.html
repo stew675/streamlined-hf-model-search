@@ -2173,12 +2173,23 @@ document.querySelector("#main-table").addEventListener("click", e => {
 });
 document.getElementById("get-quick-results-btn").addEventListener("click", () => applyFilters(true, false));
 document.getElementById("get-deep-results-btn").addEventListener("click", () => applyFilters(true, true));
-document.getElementById("derived-param-chip").addEventListener("click", () => {
+document.getElementById("derived-param-chip").addEventListener("click", async () => {
   _derivedParamEnabled = !_derivedParamEnabled;
   const chip = document.getElementById("derived-param-chip");
   chip.classList.toggle("active", _derivedParamEnabled);
   chip.classList.toggle("inactive", !_derivedParamEnabled);
   chip.setAttribute("aria-checked", String(_derivedParamEnabled));
+  if (_derivedParamEnabled) {
+    // Re-run derived pass for already-expanded L1 rows
+    const gen = _fetchGeneration;
+    for (const [author, state] of l2StateMap) {
+      if (gen !== _fetchGeneration) break;
+      if (!expandedSections.has(`a|${author}`)) continue;
+      if (!state.models.some(m => m.paramB === null)) continue;
+      const container = document.getElementById(`i1-${state.idx}`);
+      if (container) await loadAuthorModels(state.idx, author, container);
+    }
+  }
 });
 document.getElementById("derived-param-chip").addEventListener("keydown", e => {
   if (e.key === "Enter" || e.key === " ") { e.preventDefault(); document.getElementById("derived-param-chip").click(); }
