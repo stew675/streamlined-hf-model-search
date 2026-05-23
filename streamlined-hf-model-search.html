@@ -669,10 +669,12 @@ function getParamCount(m) {
     if (Q_METHODS.some(t => idLower.includes(t))) {
       result = null;
     } else {
-      const bMatch = m.id.match(/(\d+\.?\d*)[Bb]/);
+      // Negative lookbehind avoids MoE conventions like "A2B" (active params)
+      // and any future letter-prefixed annotation schemes.
+      const bMatch = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Bb]/);
       if (bMatch) result = parseFloat(bMatch[1]);
       else {
-        const mMatch = m.id.match(/(\d+\.?\d*)[Mm]/);
+        const mMatch = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Mm]/);
         result = mMatch ? parseFloat(mMatch[1]) / 1000 : null;
       }
     }
