@@ -106,16 +106,17 @@
       transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; color: #8b949e; }
    .task-bar-row .act-tag:hover { background: #1c2129; color: #c9d1d9; }
    .task-bar-row .act-tag.active { color: #58a6ff; border-color: #58a6ff; background: #1f6feb22; box-shadow: 0 0 6px #1f6feb33; }
-  #get-results-btn { display: flex; align-items: center; justify-content: center; width: fit-content;
-    padding: 6px 20px; font-size: 0.82rem; font-weight: 600; border-radius: 14px; cursor: pointer;
-    user-select: none; background: #21262d; color: #6e7681; border: 1px solid #30363d; font-family: inherit;
-    transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
-    margin: 8px auto 12px; }
-  #get-results-btn.ready { background: #238636; color: #fff; border-color: #2ea043; cursor: pointer; box-shadow: 0 0 8px #23863666; }
-  #get-results-btn.ready:hover { background: #2ea043; box-shadow: 0 0 12px #2ea04388; }
-  #get-results-btn:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
-  .filter-chip:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
-  #get-results-btn:disabled { pointer-events: none; opacity: 0.5; }
+   #button-row { display: flex; align-items: center; margin: 8px auto 12px; }
+   #button-center { display: flex; justify-content: center; gap: 12px; flex: 1; }
+   .action-btn { display: flex; align-items: center; justify-content: center; width: fit-content;
+     padding: 6px 20px; font-size: 0.82rem; font-weight: 600; border-radius: 14px; cursor: pointer;
+     user-select: none; background: #21262d; color: #6e7681; border: 1px solid #30363d; font-family: inherit;
+     transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; }
+   .action-btn.ready { background: #238636; color: #fff; border-color: #2ea043; cursor: pointer; box-shadow: 0 0 8px #23863666; }
+   .action-btn.ready:hover { background: #2ea043; box-shadow: 0 0 12px #2ea04388; }
+   .action-btn:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+   .filter-chip:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+   .action-btn:disabled { pointer-events: none; opacity: 0.5; }
 
   #text-filter-row { display: flex; gap: 10px; margin: 0 0 10px; align-items: center; flex-wrap: wrap; }
   #text-filter-row input { background: #161b22; border: 1px solid #30363d; border-radius: 6px;
@@ -175,7 +176,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260521.06</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.00</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -228,10 +229,15 @@
 <div id="filter-bar" role="group" aria-label="Quantization type filters">
   <span class="filter-label">Quant types:</span>
 </div>
-<span id="api-counter" class="filter-label" style="margin-left:auto; font-variant-numeric: tabular-nums; min-width: 100px; text-align: right;">API Calls: 0</span>
 </div>
 <div id="sort-announce" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></div>
-<button id="get-results-btn">Get Results</button>
+<div id="button-row">
+  <div id="button-center">
+    <button id="get-quick-results-btn" class="action-btn">Get Quick Results</button>
+    <button id="get-deep-results-btn" class="action-btn">Get Deep Results</button>
+  </div>
+  <span id="api-counter" class="filter-label" style="margin-left:auto; font-variant-numeric: tabular-nums; min-width: 100px; text-align: right;">API Calls: 0</span>
+</div>
 <div id="text-filter-row">
   <label>L1 Author:</label>
    <span class="fiw"><input type="text" id="l1-author-filter" placeholder="All authors (pinned top)" autocomplete="off"><span class="fic" data-for="l1-author-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
@@ -374,7 +380,7 @@ const _injectedBaseIds = new Set();
 let needsUpdate = false;
 let apiCalls = 0;
 function incApiCalls(n) { apiCalls += n; document.getElementById("api-counter").textContent = "API Calls: " + String(apiCalls); }
-function markDirty() { needsUpdate = true; document.getElementById("get-results-btn").classList.add("ready"); }
+function markDirty() { needsUpdate = true; document.getElementById("get-quick-results-btn").classList.add("ready"); document.getElementById("get-deep-results-btn").classList.add("ready"); }
 let sliderFrom = CONFIG.INIT_SLIDER_FROM;
 let sliderTo = CONFIG.INIT_SLIDER_TO;
 let paramSliderFrom = CONFIG.INIT_PARAM_SLIDER_FROM;
@@ -1757,65 +1763,81 @@ function buildDateSlider() {
 }
 
 // Main action: (1) increment generation to abort stale work, (2) fetch new pipeline tasks
-// and untagged models, (3) inject cross-author base models, (4) trim _allFetched to 16k,
-// (5) compute author data and render. If all tasks are already fetched, skips to (5).
-// The "Refresh" button on subsequent clicks re-checks — filters alone (no new task data)
-// just recompute from _allFetched via computeAuthorData.
-function applyFilters(force) {
+// and untagged models, (3) if deep, inject cross-author base models; if quick, skip injection,
+// (4) trim _allFetched to 16k, (5) compute author data and render. If all tasks are already
+// fetched, skips to (5). The deep parameter controls whether injectBaseModels runs.
+function applyFilters(force, deep) {
   if (!needsUpdate && !force) return;
   needsUpdate = false;
   const savedExpansions = new Set(expandedSections);
   _fetchGeneration++;
   const gen = _fetchGeneration;
-  const btn = document.getElementById("get-results-btn");
-  btn.classList.remove("ready");
-  btn.disabled = true;
+  const quickBtn = document.getElementById("get-quick-results-btn");
+  const deepBtn = document.getElementById("get-deep-results-btn");
+  // When deep is clicked both buttons disable (quick no longer makes sense after deep).
+  // When quick is clicked only the quick button disables — deep remains active so the
+  // user can upgrade to deep results without re-fetching.
+  // Only strip the ready indicator from buttons that get disabled.
+  quickBtn.classList.remove("ready");
+  quickBtn.disabled = true;
+  if (deep) { deepBtn.classList.remove("ready"); deepBtn.disabled = true; }
   const tasks = resolveTasks().filter(t => activeTaskFilters.has(t));
   const newTasks = tasks.filter(t => !fetchedTasks.has(t));
   const needUntagged = activeSpecialFilters.has("include untagged") && !fetchedUntagged;
-  if (newTasks.length > 0 || needUntagged) {
+  const reenable = () => { quickBtn.disabled = false; deepBtn.disabled = false; };
+  // Always enter the async path when deep=true (injection may be needed even if all
+  // tasks are already fetched — e.g. Quick was clicked first and now the user upgrades).
+  // Also enter when there are new tasks to fetch or untagged models needed.
+  if (newTasks.length > 0 || needUntagged || deep) {
     (async () => {
       document.getElementById("main-table").setAttribute("aria-busy", "true");
       try {
         const status = document.getElementById("status");
-        status.textContent = `Fetching models…`;
-        let fresh = [];
-        if (newTasks.length > 0) {
-          fresh = await fetchTasks(newTasks);
-        }
-        if (gen !== _fetchGeneration) return;
-        if (needUntagged) {
-          const raw = await fetchUntaggedModels();
-          fresh = fresh.concat(raw.filter(m => !m.pipeline_tag).map(normalizeModel));
-          fetchedUntagged = true;
-        }
-        if (gen !== _fetchGeneration) return;
-        const seen = new Set((_allFetched || []).map(m => m.id));
-        const all = [...(_allFetched || [])];
-        for (const m of fresh) {
-          if (!seen.has(m.id)) {
-            seen.add(m.id);
-            all.push(m);
+        let all;
+        if (newTasks.length > 0 || needUntagged) {
+          status.textContent = `Fetching models…`;
+          let fresh = [];
+          if (newTasks.length > 0) {
+            fresh = await fetchTasks(newTasks);
           }
+          if (gen !== _fetchGeneration) return;
+          if (needUntagged) {
+            const raw = await fetchUntaggedModels();
+            fresh = fresh.concat(raw.filter(m => !m.pipeline_tag).map(normalizeModel));
+            fetchedUntagged = true;
+          }
+          if (gen !== _fetchGeneration) return;
+          const seen = new Set((_allFetched || []).map(m => m.id));
+          all = [...(_allFetched || [])];
+          for (const m of fresh) {
+            if (!seen.has(m.id)) {
+              seen.add(m.id);
+              all.push(m);
+            }
+          }
+          _allFetched = all;
+          recomputeAndRender(savedExpansions);
+        } else {
+          all = _allFetched || [];
         }
-        _allFetched = all;
-        recomputeAndRender(savedExpansions);
-        status.textContent = `Rendered ${_authorData.length} authors, resolving base models…`;
-        let injectionBatches = 0;
-        try {
-          await injectBaseModels(all, (() => {
-            let renderCounter = 0;
-            return () => {
-              injectionBatches++;
-              renderCounter++;
-              if (gen !== _fetchGeneration) return;
-              if (renderCounter % 2 !== 0) return;
-              const saved = new Set(expandedSections);
-              recomputeAndRender(saved);
-            };
-          })());
-        } catch (e) {
-          console.warn("Base model injection error:", e);
+        if (deep) {
+          status.textContent = `Rendered ${_authorData.length} authors, resolving base models…`;
+          let injectionBatches = 0;
+          try {
+            await injectBaseModels(all, (() => {
+              let renderCounter = 0;
+              return () => {
+                injectionBatches++;
+                renderCounter++;
+                if (gen !== _fetchGeneration) return;
+                if (renderCounter % 2 !== 0) return;
+                const saved = new Set(expandedSections);
+                recomputeAndRender(saved);
+              };
+            })());
+          } catch (e) {
+            console.warn("Base model injection error:", e);
+          }
         }
         if (all.length > CONFIG.ALL_FETCHED_MAX) {
           if (gen !== _fetchGeneration) return;
@@ -1839,14 +1861,12 @@ function applyFilters(force) {
         console.warn("applyFilters error:", e);
         document.getElementById("status").textContent = "Error: " + e.message;
       } finally {
-        btn.disabled = false;
-        btn.textContent = "Refresh";
+        reenable();
         document.getElementById("main-table").setAttribute("aria-busy", "false");
       }
     })();
   } else {
-    document.getElementById("get-results-btn").textContent = "Refresh";
-    document.getElementById("get-results-btn").disabled = false;
+    reenable();
     recomputeAndRender(savedExpansions);
   }
 }
@@ -2006,7 +2026,8 @@ document.querySelector("#main-table").addEventListener("click", e => {
     }
   }
 });
-document.getElementById("get-results-btn").addEventListener("click", () => applyFilters(true));
+document.getElementById("get-quick-results-btn").addEventListener("click", () => applyFilters(true, false));
+document.getElementById("get-deep-results-btn").addEventListener("click", () => applyFilters(true, true));
 
 // ── Init ──
 // Fetch top models per pipeline tag (by downloads + by lastModified, merged + deduped).
@@ -2187,7 +2208,7 @@ async function injectBaseModels(all, onBatch) {
   });
   markDirty();
   document.getElementById("api-counter").textContent = "API Calls: 0";
-  status.textContent = "Select your filters, then click Get Results.";
+  status.textContent = "Select your filters, then click Get Quick Results or Get Deep Results.";
   renderMain([]);
 })();
 })();
