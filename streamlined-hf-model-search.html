@@ -1576,14 +1576,9 @@ async function resolveParamFromChildren(modelId) {
   // original GGUF quants) are prioritized over newer pruned variants (REAP)
   // when DERIVED_BATCH_SIZE limits how many individual cards we fetch.
   children.sort((a, b) => (a.lastModified || "").localeCompare(b.lastModified || ""));
-  // Pass 1: scan child IDs for B/M patterns (free, no extra API calls)
-  for (const child of children) {
-    const p = getParamCount(child);
-    if (p !== null) return p;
-  }
-  // Pass 2: fetch individual cards for top children (costs API calls).
-  // Bypass getParamCount cache — Pass 1 may have cached null for the child
-  // ID (search results lack metadata), which would shadow the full response.
+  // Fetch individual cards for top children (costs API calls).
+  // Bypass getParamCount cache — the search result may have cached null for
+  // the child ID (search results lack metadata), shadowing the full response.
   // Collect params from all fetched children and use the maximum — pruning
   // (REAP, distillation) only reduces parameter counts, never increases them.
   const paramCounts = [];
