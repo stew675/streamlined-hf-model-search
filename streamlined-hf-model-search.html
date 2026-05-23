@@ -93,12 +93,12 @@
   #main-table .model-id-cell a { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
   #filter-row { display: flex; flex-wrap: nowrap; align-items: center; }
   #filter-bar { flex: 1 1 auto; min-width: 0; }
-  #filter-bar .filter-chip, #from-bar .filter-chip, #to-bar .filter-chip, #special-bar .filter-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem;
+  #button-row .filter-chip, #filter-bar .filter-chip, #from-bar .filter-chip, #to-bar .filter-chip, #special-bar .filter-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem;
                         padding: 3px 10px; border-radius: 14px; cursor: pointer; user-select: none;
                         background: #161b22; border: 1px solid #30363d; transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; }
-  #filter-bar .filter-chip:hover, #from-bar .filter-chip:hover, #to-bar .filter-chip:hover, #special-bar .filter-chip:hover { background: #1c2129; color: #c9d1d9; }
-  #filter-bar .filter-chip.active, #from-bar .filter-chip.active, #to-bar .filter-chip.active, #special-bar .filter-chip.active { color: #58a6ff; border-color: #58a6ff; box-shadow: 0 0 6px #1f6feb33; }
-  #filter-bar .filter-chip.inactive, #from-bar .filter-chip.inactive, #to-bar .filter-chip.inactive, #special-bar .filter-chip.inactive { color: #8b949e; border-color: #21262d; }
+  #button-row .filter-chip:hover, #filter-bar .filter-chip:hover, #from-bar .filter-chip:hover, #to-bar .filter-chip:hover, #special-bar .filter-chip:hover { background: #1c2129; color: #c9d1d9; }
+  #button-row .filter-chip.active, #filter-bar .filter-chip.active, #from-bar .filter-chip.active, #to-bar .filter-chip.active, #special-bar .filter-chip.active { color: #58a6ff; border-color: #58a6ff; box-shadow: 0 0 6px #1f6feb33; }
+  #button-row .filter-chip.inactive, #filter-bar .filter-chip.inactive, #from-bar .filter-chip.inactive, #to-bar .filter-chip.inactive, #special-bar .filter-chip.inactive { color: #8b949e; border-color: #21262d; }
   #filter-bar .filter-label, #from-bar .filter-label, #to-bar .filter-label, #special-bar .filter-label { color: #8b949e; font-size: 0.78rem; margin-right: 4px; }
   .task-bar-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; align-items: center; }
    .task-bar-row .filter-label { color: #8b949e; font-size: 0.78rem; margin-right: 4px; }
@@ -233,6 +233,7 @@
 </div>
 <div id="sort-announce" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></div>
 <div id="button-row">
+  <span id="derived-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" tabindex="0" style="margin-right:auto; user-select:none">Infer Params from Children</span>
   <div id="button-center">
     <button id="get-quick-results-btn" class="action-btn">Get Quick Results</button>
     <button id="get-deep-results-btn" class="action-btn">Get Deep Results</button>
@@ -379,6 +380,7 @@ let fetchedUntagged = false;
 let _fetchGeneration = 0;
 const _injectedBaseIds = new Set();
 let needsUpdate = false;
+let _derivedParamEnabled = false;
 let apiCalls = 0;
 function incApiCalls(n) { apiCalls += n; document.getElementById("api-counter").textContent = "API Calls: " + String(apiCalls); }
 function markDirty() { needsUpdate = true; document.getElementById("get-quick-results-btn").classList.add("ready"); document.getElementById("get-deep-results-btn").classList.add("ready"); }
@@ -1222,6 +1224,26 @@ async function loadAuthorModels(idx, author, container) {
           if (parent) { m.paramB = parent.paramB; break; }
         }
       }
+      if (_derivedParamEnabled) {
+        const stillUnknown = unknownModels.filter(m => m.paramB === null);
+        for (const m of stillUnknown) {
+          statusEl.textContent = `Inferring params from children for ${m.id.split("/").slice(1).join("/")}…`;
+          const resolved = await resolveParamFromChildren(m.id);
+          if (resolved !== null) {
+            m.paramB = resolved;
+            _paramCache.set(m.id, resolved);
+          }
+        }
+        if (stillUnknown.some(m => m.paramB !== null)) {
+          if (gen !== _fetchGeneration || !container.isConnected) return;
+          const derivedUpdated = filterApplied();
+          const dRow = document.getElementById(`d1-${idx}`);
+          if (dRow && dRow.style.display !== "none") {
+            renderL2(idx, author, derivedUpdated, container, nonQuantBase.length);
+            if (gen === _fetchGeneration) refreshAllExpanded();
+          }
+        }
+      }
       if (gen !== _fetchGeneration || !container.isConnected) return;
       statusEl.textContent = "";
       const updated = filterApplied();
@@ -1494,6 +1516,45 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
   _inflightChildren.set(cacheKey, newEntry);
   await newEntry.promise;
   if (_inflightChildren.get(cacheKey) === newEntry) _inflightChildren.delete(cacheKey);
+}
+
+// Resolve an unknown parent's paramB by searching for its children and
+// scanning their IDs for B/M patterns (free) or fetching individual cards.
+async function resolveParamFromChildren(modelId) {
+  const bits = modelId.split('/');
+  const modelName = bits[1];
+  const lim = Math.min(CONFIG.CHILD_LIMIT, 20);
+  const nameUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${lim}&full=true&cardData=true`;
+  const idUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(modelId)}&sort=downloads&direction=-1&limit=${lim}&full=true&cardData=true`;
+  const [nameRes, idRes] = await Promise.all([
+    fetchJson(nameUrl).catch(() => []),
+    fetchJson(idUrl).catch(() => [])
+  ]);
+  const seen = new Set();
+  const children = [];
+  for (const raw of [...nameRes, ...idRes]) {
+    if (!raw || !raw.id || seen.has(raw.id)) continue;
+    seen.add(raw.id);
+    if (raw.id === modelId) continue;
+    if (!raw.cardData || !raw.cardData.base_model) continue;
+    const baseId = getBaseModelId(raw.cardData);
+    if (baseId !== modelId) continue;
+    children.push(normalizeModel(raw));
+  }
+  // Pass 1: scan child IDs for B/M patterns (free, no extra API calls)
+  for (const child of children) {
+    const p = getParamCount(child);
+    if (p !== null) return p;
+  }
+  // Pass 2: fetch individual cards for top children (costs API calls)
+  for (let i = 0; i < Math.min(children.length, CONFIG.PARAM_BATCH_SIZE); i++) {
+    try {
+      const full = await fetchJson(`https://huggingface.co/api/models/${children[i].id}?full=true`);
+      const p = getParamCount(full);
+      if (p !== null) return p;
+    } catch (e) { /* skip */ }
+  }
+  return null;
 }
 
 // ── Level 3: Quant Author Groups ──
@@ -2071,6 +2132,16 @@ document.querySelector("#main-table").addEventListener("click", e => {
 });
 document.getElementById("get-quick-results-btn").addEventListener("click", () => applyFilters(true, false));
 document.getElementById("get-deep-results-btn").addEventListener("click", () => applyFilters(true, true));
+document.getElementById("derived-param-chip").addEventListener("click", () => {
+  _derivedParamEnabled = !_derivedParamEnabled;
+  const chip = document.getElementById("derived-param-chip");
+  chip.classList.toggle("active", _derivedParamEnabled);
+  chip.classList.toggle("inactive", !_derivedParamEnabled);
+  chip.setAttribute("aria-checked", String(_derivedParamEnabled));
+});
+document.getElementById("derived-param-chip").addEventListener("keydown", e => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); document.getElementById("derived-param-chip").click(); }
+});
 
 // ── Init ──
 // Fetch top models per pipeline tag (by downloads + by lastModified, merged + deduped).
