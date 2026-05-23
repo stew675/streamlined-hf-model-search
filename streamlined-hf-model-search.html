@@ -661,11 +661,18 @@ function getParamCount(m) {
   if (m.safetensors && m.safetensors.total != null) result = m.safetensors.total / 1e9;
   else if (m.gguf && m.gguf.total != null) result = m.gguf.total / 1e9;
   else {
-    const bMatch = m.id.match(/(\d+\.?\d*)[Bb]/);
-    if (bMatch) result = parseFloat(bMatch[1]);
-    else {
-      const mMatch = m.id.match(/(\d+\.?\d*)[Mm]/);
-      result = mMatch ? parseFloat(mMatch[1]) / 1000 : null;
+    // Skip ID-based B/M parsing for quant models — suffixes like -4B often refer to
+    // bit width (4-bit) rather than parameter count, leading to incorrect values.
+    const idLower = m.id.toLowerCase();
+    if (Q_METHODS.some(t => idLower.includes(t))) {
+      result = null;
+    } else {
+      const bMatch = m.id.match(/(\d+\.?\d*)[Bb]/);
+      if (bMatch) result = parseFloat(bMatch[1]);
+      else {
+        const mMatch = m.id.match(/(\d+\.?\d*)[Mm]/);
+        result = mMatch ? parseFloat(mMatch[1]) / 1000 : null;
+      }
     }
   }
   _paramCache.set(m.id, result);
@@ -722,7 +729,8 @@ function modelPassesAllFilters(m) {
   if (!_injectedBaseIds.has(m.id) && !isInDateRange(m.lastModified)) return false;
   const tag = m.pipeline_tag;
   if (!tag && !activeSpecialFilters.has("include untagged")) return false;
-  if (!m._inferredParam && !isInParamRange(m.paramB)) return false;
+  if (!isInParamRange(m.paramB)) return false;
+//  if (!m._inferredParam && !isInParamRange(m.paramB)) return false;
   if (!matchesTaskFilter(tag)) return false;
   if (tag && !activeTaskFilters.has(tag)) return false;
   return true;
@@ -1159,6 +1167,12 @@ async function loadAuthorModels(idx, author, container) {
       const childParamMap = new Map();
       for (const cm of _allFetched) {
         if (cm.paramB == null) continue;
+        // Only trust children whose paramB came from safetensors/gguf metadata.
+        // Quants often have bit-width suffixes like -4B in their ID that the
+        // fallback parser misidentifies as parameter counts.
+        if (!(cm.safetensors && cm.safetensors.total) && !(cm.gguf && cm.gguf.total)) {
+          if (Q_METHODS.some(t => cm.id.toLowerCase().includes(t))) continue;
+        }
         let parentId = null;
         const cd = cm.cardData;
         const bm = cd && cd.base_model;
