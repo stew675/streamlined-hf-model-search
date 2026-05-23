@@ -180,7 +180,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.14</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.15</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -271,25 +271,12 @@
 (function() {
 let _allFetched, _authorData, _canonicalAuthor;
 
-Object.defineProperty(window, '_l1AuthorFilter', {
-  get: () => RenderCoordinator._state.textFilters.l1Author,
-  set: (v) => { RenderCoordinator._state.textFilters.l1Author = v; },
-  configurable: true
-});
-Object.defineProperty(window, '_l2ModelFilter', {
-  get: () => RenderCoordinator._state.textFilters.l2Model,
-  set: (v) => { RenderCoordinator._state.textFilters.l2Model = v; },
-  configurable: true
-});
-Object.defineProperty(window, '_l3AuthorFilter', {
-  get: () => RenderCoordinator._state.textFilters.l3Author,
-  set: (v) => { RenderCoordinator._state.textFilters.l3Author = v; },
-  configurable: true
-});
-Object.defineProperty(window, '_l4ModelFilter', {
-  get: () => RenderCoordinator._state.textFilters.l4Model,
-  set: (v) => { RenderCoordinator._state.textFilters.l4Model = v; },
-  configurable: true
+['l1Author', 'l2Model', 'l3Author', 'l4Model'].forEach(key => {
+  Object.defineProperty(window, '_' + key + 'Filter', {
+    get: () => RenderCoordinator._state.textFilters[key],
+    set: (v) => { RenderCoordinator._state.textFilters[key] = v; },
+    configurable: true
+  });
 });
 
 const TO_TAGS = [
@@ -640,6 +627,96 @@ function fmtAge(d) {
 const _htmlEsc = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(str) { return String(str).replace(/[&<>"']/g, c => _htmlEsc[c]); }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+// ── Extraction Helpers ──
+function addKeyboardClick(el) {
+  el.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.click(); }
+  });
+}
+function strictNameMatch(candidateId, modelName) {
+  let name = candidateId.split("/").slice(1).join("/");
+  let changed;
+  do {
+    changed = false;
+    for (const q of Q_METHODS) {
+      const suffix = '-' + q;
+      if (name.toLowerCase().endsWith(suffix)) {
+        name = name.slice(0, -suffix.length);
+        changed = true;
+        break;
+      }
+    }
+  } while (changed);
+  return name.toLowerCase() === modelName.toLowerCase();
+}
+function hasBaseModel(cd, targetId) {
+  if (!cd || !cd.base_model) return false;
+  const bm = cd.base_model;
+  if (typeof bm === "string") return bm === targetId;
+  if (Array.isArray(bm)) return bm.some(b => {
+    const bid = typeof b === "string" ? b : (b && b.id || "");
+    return bid === targetId;
+  });
+  return false;
+}
+function toggleSet(option, options, activeSet) {
+  const wasEnabled = activeSet.has(option);
+  const enabledCount = options.filter(o => activeSet.has(o)).length;
+  if (!wasEnabled) { activeSet.add(option); }
+  else if (enabledCount === options.length) {
+    options.forEach(o => activeSet.delete(o));
+    activeSet.add(option);
+  } else if (enabledCount === 1) {
+    options.forEach(o => activeSet.add(o));
+  } else { activeSet.delete(option); }
+}
+function syncChipSet(selector, isActiveFn) {
+  document.querySelectorAll(selector).forEach(chip => {
+    const on = isActiveFn(chip);
+    chip.classList.toggle("active", on);
+    chip.classList.toggle("inactive", !on);
+    chip.setAttribute("aria-pressed", String(on));
+  });
+}
+function createFilterChip({ container, dataset, text, className, ariaPressed, onClick }) {
+  const chip = document.createElement("span");
+  chip.className = className;
+  Object.entries(dataset).forEach(([k, v]) => chip.dataset[k] = v);
+  chip.textContent = text;
+  chip.tabIndex = 0;
+  chip.role = "button";
+  chip.setAttribute("aria-pressed", String(ariaPressed));
+  chip.addEventListener("click", onClick);
+  addKeyboardClick(chip);
+  container.appendChild(chip);
+  return chip;
+}
+function createTaskTag(tag, isActive) {
+  const desc = TO_TAGS.find(t => t.tag === tag)?.desc || "";
+  const el = document.createElement("span");
+  el.className = "act-tag" + (isActive ? " active" : "");
+  el.dataset.tag = tag;
+  el.textContent = tag;
+  if (desc) el.title = desc;
+  el.addEventListener("click", () => {
+    applyActTagLogic(tag);
+    syncFilterChips();
+    markDirty();
+  });
+  return el;
+}
+function handleSortClick(th, level, sortKey, defaultKey, refreshAfter, renderFn) {
+  if (th.dataset.level !== level) return;
+  const key = th.dataset.key;
+  if (!key) return;
+  const st = detailSort[sortKey] || { key: defaultKey, asc: false };
+  if (st.key === key) st.asc = !st.asc;
+  else { st.key = key; st.asc = false; }
+  detailSort[sortKey] = st;
+  renderFn();
+  if (refreshAfter) refreshAllExpanded();
+}
 
 function sliderValueToDate(val) {
   if (val === 0) return new Date("2020-01-01");
@@ -1010,39 +1087,23 @@ const expandedSections = new Proxy(new Set(), {
   }
 });
 const _inflightChildren = new Map();
-const l2StateMap = new Proxy(new Map(), {
-  get(target, prop) {
-    if (prop === 'get' || prop === 'set' || prop === 'has' || prop === 'delete' || prop === 'clear' || prop === 'forEach' || prop === 'keys' || prop === 'values' || prop === 'entries' || prop === Symbol.iterator) {
-      return function(...args) {
-        return RenderCoordinator._levelState.l2[prop](...args);
-      };
+function createLevelStateProxy(level) {
+  const mapApi = ['get', 'set', 'has', 'delete', 'clear', 'forEach', 'keys', 'values', 'entries'];
+  return new Proxy(new Map(), {
+    get(target, prop) {
+      if (mapApi.includes(prop) || prop === Symbol.iterator) {
+        return function(...args) {
+          return RenderCoordinator._levelState[level][prop](...args);
+        };
+      }
+      if (prop === 'size') return RenderCoordinator._levelState[level].size;
+      return target[prop];
     }
-    if (prop === 'size') return RenderCoordinator._levelState.l2.size;
-    return target[prop];
-  }
-});
-const l3StateMap = new Proxy(new Map(), {
-  get(target, prop) {
-    if (prop === 'get' || prop === 'set' || prop === 'has' || prop === 'delete' || prop === 'clear' || prop === 'forEach' || prop === 'keys' || prop === 'values' || prop === 'entries' || prop === Symbol.iterator) {
-      return function(...args) {
-        return RenderCoordinator._levelState.l3[prop](...args);
-      };
-    }
-    if (prop === 'size') return RenderCoordinator._levelState.l3.size;
-    return target[prop];
-  }
-});
-const l4StateMap = new Proxy(new Map(), {
-  get(target, prop) {
-    if (prop === 'get' || prop === 'set' || prop === 'has' || prop === 'delete' || prop === 'clear' || prop === 'forEach' || prop === 'keys' || prop === 'values' || prop === 'entries' || prop === Symbol.iterator) {
-      return function(...args) {
-        return RenderCoordinator._levelState.l4[prop](...args);
-      };
-    }
-    if (prop === 'size') return RenderCoordinator._levelState.l4.size;
-    return target[prop];
-  }
-});
+  });
+}
+const l2StateMap = createLevelStateProxy('l2');
+const l3StateMap = createLevelStateProxy('l3');
+const l4StateMap = createLevelStateProxy('l4');
 
 function pruneExpiredExpansions(renderedAuthors) {
   for (const key of [...expandedSections]) {
@@ -1096,34 +1157,16 @@ function qMethodToCategory(method) {
 }
 
 function syncFilterChips() {
-  document.querySelectorAll("#filter-bar .filter-chip").forEach(chip => {
-    const m = chip.dataset.method;
-    const on = activeFilters.has(m);
-    chip.classList.toggle("active", on);
-    chip.classList.toggle("inactive", !on);
-    chip.setAttribute("aria-pressed", String(on));
-  });
-  document.querySelectorAll("#from-bar .filter-chip").forEach(chip => {
+  syncChipSet("#filter-bar .filter-chip", chip => activeFilters.has(chip.dataset.method));
+  syncChipSet("#from-bar .filter-chip", chip => {
     const f = chip.dataset.option;
-    const on = f === "all" ? FROM_OPTIONS.every(o => o === "all" || activeFromFilters.has(o)) : activeFromFilters.has(f);
-    chip.classList.toggle("active", on);
-    chip.classList.toggle("inactive", !on);
-    chip.setAttribute("aria-pressed", String(on));
+    return f === "all" ? FROM_OPTIONS.every(o => o === "all" || activeFromFilters.has(o)) : activeFromFilters.has(f);
   });
-  document.querySelectorAll("#to-bar .filter-chip").forEach(chip => {
+  syncChipSet("#to-bar .filter-chip", chip => {
     const t = chip.dataset.option;
-    const on = t === "all" ? TO_OPTIONS.every(o => o === "all" || activeToFilters.has(o)) : activeToFilters.has(t);
-    chip.classList.toggle("active", on);
-    chip.classList.toggle("inactive", !on);
-    chip.setAttribute("aria-pressed", String(on));
+    return t === "all" ? TO_OPTIONS.every(o => o === "all" || activeToFilters.has(o)) : activeToFilters.has(t);
   });
-  document.querySelectorAll("#special-bar .filter-chip").forEach(chip => {
-    const s = chip.dataset.special;
-    const on = activeSpecialFilters.has(s);
-    chip.classList.toggle("active", on);
-    chip.classList.toggle("inactive", !on);
-    chip.setAttribute("aria-pressed", String(on));
-  });
+  syncChipSet("#special-bar .filter-chip", chip => activeSpecialFilters.has(chip.dataset.special));
   const tasks = resolveTasks().sort();
   const activeContainer = document.getElementById("activated-types");
   const availContainer = document.getElementById("available-types");
@@ -1137,34 +1180,6 @@ function syncFilterChips() {
   });
   const showUntagged = activeSpecialFilters.has("include untagged");
   if (showUntagged) activeTags.push("__untagged__");
-  const buildTag = (tag) => {
-    const desc = TO_TAGS.find(t => t.tag === tag)?.desc || "";
-    const el = document.createElement("span");
-    el.className = "act-tag active";
-    el.dataset.tag = tag;
-    el.textContent = tag;
-    if (desc) el.title = desc;
-    el.addEventListener("click", () => {
-      applyActTagLogic(tag);
-      syncFilterChips();
-      markDirty();
-    });
-    return el;
-  };
-  const buildAvailTag = (tag) => {
-    const desc = TO_TAGS.find(t => t.tag === tag)?.desc || "";
-    const el = document.createElement("span");
-    el.className = "act-tag";
-    el.dataset.tag = tag;
-    el.textContent = tag;
-    if (desc) el.title = desc;
-    el.addEventListener("click", () => {
-      applyActTagLogic(tag);
-      syncFilterChips();
-      markDirty();
-    });
-    return el;
-  };
   while (activeContainer.lastChild !== activeLabel) activeContainer.removeChild(activeContainer.lastChild);
   while (availContainer.lastChild !== availLabel) availContainer.removeChild(availContainer.lastChild);
   activeTags.forEach(tag => {
@@ -1174,59 +1189,25 @@ function syncFilterChips() {
       span.textContent = "(untagged)";
       activeContainer.appendChild(span);
     } else {
-      activeContainer.appendChild(buildTag(tag));
+      activeContainer.appendChild(createTaskTag(tag, true));
     }
   });
-  availTags.forEach(tag => availContainer.appendChild(buildAvailTag(tag)));
+  availTags.forEach(tag => availContainer.appendChild(createTaskTag(tag, false)));
 }
 function applyFilterLogic(method) {
-  const wasEnabled = activeFilters.has(method);
-  const enabledCount = FILTER_DISPLAY.filter(m => activeFilters.has(m)).length;
-  if (!wasEnabled) {
-    activeFilters.add(method);
-  } else if (enabledCount === FILTER_DISPLAY.length) {
-    FILTER_DISPLAY.forEach(m => activeFilters.delete(m));
-    activeFilters.add(method);
-  } else if (enabledCount === 1) {
-    FILTER_DISPLAY.forEach(m => activeFilters.add(m));
-  } else {
-    activeFilters.delete(method);
-  }
+  toggleSet(method, FILTER_DISPLAY, activeFilters);
 }
 function applyActTagLogic(tag) {
-  const tags = resolveTasks();
-  const wasEnabled = activeTaskFilters.has(tag);
-  const enabledCount = tags.filter(t => activeTaskFilters.has(t)).length;
-  if (!wasEnabled) {
-    activeTaskFilters.add(tag);
-  } else if (enabledCount === tags.length) {
-    tags.forEach(t => activeTaskFilters.delete(t));
-    activeTaskFilters.add(tag);
-  } else if (enabledCount === 1) {
-    tags.forEach(t => activeTaskFilters.add(t));
-  } else {
-    activeTaskFilters.delete(tag);
-  }
+  toggleSet(tag, resolveTasks(), activeTaskFilters);
 }
 function buildFilterBar() {
   const bar = document.getElementById("filter-bar");
   FILTER_DISPLAY.forEach(method => {
-    const chip = document.createElement("span");
-    chip.className = "filter-chip active";
-    chip.dataset.method = method;
-    chip.textContent = method.toUpperCase();
-    chip.tabIndex = 0;
-    chip.role = "button";
-    chip.setAttribute("aria-pressed", "true");
-    chip.addEventListener("click", () => {
-      applyFilterLogic(method);
-      syncFilterChips();
-      markDirty();
+    createFilterChip({
+      container: bar, dataset: { method }, text: method.toUpperCase(),
+      className: "filter-chip active", ariaPressed: true,
+      onClick: () => { applyFilterLogic(method); syncFilterChips(); markDirty(); }
     });
-    chip.addEventListener("keydown", e => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); chip.click(); }
-    });
-    bar.appendChild(chip);
   });
 }
 function buildFromToBars() {
@@ -1236,44 +1217,26 @@ function buildFromToBars() {
 function buildSpecialBar() {
   const bar = document.getElementById("special-bar");
   SPECIAL_DISPLAY.forEach(opt => {
-    const chip = document.createElement("span");
-    chip.className = "filter-chip inactive";
-    chip.dataset.special = opt;
-    chip.textContent = opt.replace(/ /g, "\u00A0");
-    chip.tabIndex = 0;
-    chip.role = "button";
-    chip.setAttribute("aria-pressed", "false");
-    chip.addEventListener("click", () => {
-      if (activeSpecialFilters.has(opt)) activeSpecialFilters.delete(opt);
-      else activeSpecialFilters.add(opt);
-      syncFilterChips();
-      markDirty();
+    createFilterChip({
+      container: bar, dataset: { special: opt }, text: opt.replace(/ /g, "\u00A0"),
+      className: "filter-chip inactive", ariaPressed: false,
+      onClick: () => {
+        if (activeSpecialFilters.has(opt)) activeSpecialFilters.delete(opt);
+        else activeSpecialFilters.add(opt);
+        syncFilterChips(); markDirty();
+      }
     });
-    chip.addEventListener("keydown", e => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); chip.click(); }
-    });
-    bar.appendChild(chip);
   });
 }
 function buildBar(barId, options, activeSet, clickHandler) {
   const bar = document.getElementById(barId);
   options.forEach(opt => {
-    const chip = document.createElement("span");
-    chip.className = "filter-chip " + (activeSet.has(opt) ? "active" : "inactive");
-    chip.dataset.option = opt;
-    chip.textContent = opt.charAt(0).toUpperCase() + opt.slice(1);
-    chip.tabIndex = 0;
-    chip.role = "button";
-    chip.setAttribute("aria-pressed", String(activeSet.has(opt)));
-    chip.addEventListener("click", () => {
-      clickHandler(opt);
-      syncFilterChips();
-      markDirty();
+    createFilterChip({
+      container: bar, dataset: { option: opt }, text: opt.charAt(0).toUpperCase() + opt.slice(1),
+      className: "filter-chip " + (activeSet.has(opt) ? "active" : "inactive"),
+      ariaPressed: activeSet.has(opt),
+      onClick: () => { clickHandler(opt); syncFilterChips(); markDirty(); }
     });
-    chip.addEventListener("keydown", e => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); chip.click(); }
-    });
-    bar.appendChild(chip);
   });
 }
 function reseedActiveTaskFilters() {
@@ -1298,25 +1261,11 @@ function applyBarLogic(option, options, activeSet) {
   const nonAllOptions = options.filter(o => o !== "all");
   if (option === "all") {
     const allActive = nonAllOptions.every(o => activeSet.has(o));
-    if (allActive) {
-      nonAllOptions.forEach(o => activeSet.delete(o));
-    } else {
-      nonAllOptions.forEach(o => activeSet.add(o));
-    }
+    if (allActive) nonAllOptions.forEach(o => activeSet.delete(o));
+    else nonAllOptions.forEach(o => activeSet.add(o));
     return;
   }
-  const wasEnabled = activeSet.has(option);
-  const enabledCount = nonAllOptions.filter(o => activeSet.has(o)).length;
-  if (!wasEnabled) {
-    activeSet.add(option);
-  } else if (enabledCount === nonAllOptions.length) {
-    nonAllOptions.forEach(o => activeSet.delete(o));
-    activeSet.add(option);
-  } else if (enabledCount === 1) {
-    nonAllOptions.forEach(o => activeSet.add(o));
-  } else {
-    activeSet.delete(option);
-  }
+  toggleSet(option, nonAllOptions, activeSet);
 }
 
 function sortCoerce(v, k) {
@@ -1375,9 +1324,7 @@ function renderMain(authorData) {
   }).join('');
 
   tbody.innerHTML = html;
-  document.querySelectorAll("#main-table .toggle").forEach(btn => {
-    btn.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); btn.click(); } });
-  });
+  document.querySelectorAll("#main-table .toggle").forEach(addKeyboardClick);
   document.getElementById("count").textContent =
     `${sorted.length} authors with base models in selected range. Click to expand.`;
 }
@@ -1412,14 +1359,7 @@ async function loadAuthorModels(idx, author, container) {
       paramB: getParamCount(m),
       pipeline_tag: m.pipeline_tag || "",
       _orphanQuant: isOrphanQuant(m, authorKnownIds),
-      _nestedQuant: m.cardData && m.cardData.base_model ? (() => {
-          const idLower = m.id.toLowerCase();
-          if (!Q_METHODS.some(t => idLower.includes(t))) return false;
-          const baseId = getBaseModelId(m.cardData);
-          if (!baseId || !authorKnownIds.has(baseId)) return false;
-          const parent = models.find(f => f.id === baseId);
-          return parent ? !isBase(parent) : false;
-        })() : false
+      _nestedQuant: isNestedQuant(m, authorKnownIds, models)
     }));
 
     cacheSet(author, baseModels);
@@ -1587,9 +1527,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
   const hidden = (totalBeforeFilter != null && totalBeforeFilter > models.length) ? totalBeforeFilter - models.length : 0;
   html += `</tbody></table><div class="detail-count">${models.length} model(s)` + (hidden > 0 ? `, <span style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by search settings</span>` : '') + `</div>`;
   container.innerHTML = html;
-  container.querySelectorAll(".toggle").forEach(btn => {
-    btn.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); btn.click(); } });
-  });
+  container.querySelectorAll(".toggle").forEach(addKeyboardClick);
   container.dataset.l2Author = author;
   l2StateMap.set(author, { idx, author, models, totalBeforeFilter });
 
@@ -1602,14 +1540,9 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
       if (!s) return;
       const th = e.target.closest("thead th");
       if (th) {
-        if (th.dataset.level !== "2") return;
-        const key = th.dataset.key;
-        const st = detailSort[`l2-${s.author}`] || { key: "downloads", asc: false };
-        if (st.key === key) st.asc = !st.asc;
-        else { st.key = key; st.asc = false; }
-        detailSort[`l2-${s.author}`] = st;
-        renderL2(s.idx, s.author, s.models, this, s.totalBeforeFilter);
-        refreshAllExpanded();
+        handleSortClick(th, "2", `l2-${s.author}`, "downloads", true, () => {
+          renderL2(s.idx, s.author, s.models, this, s.totalBeforeFilter);
+        });
         return;
       }
       const tr = e.target.closest("tr.l2-row");
@@ -1679,23 +1612,6 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       const seen = new Set();
       const _allFetchedIds = _allFetched ? new Set(_allFetched.map(m => m.id)) : new Set();
 
-      const strictNameMatch = (candidateId) => {
-        let name = candidateId.split("/").slice(1).join("/");
-        let changed;
-        do {
-          changed = false;
-          for (const q of Q_METHODS) {
-            const suffix = '-' + q;
-            if (name.toLowerCase().endsWith(suffix)) {
-              name = name.slice(0, -suffix.length);
-              changed = true;
-              break;
-            }
-          }
-        } while (changed);
-        return name.toLowerCase() === modelName.toLowerCase();
-      };
-
       const processChildren = (models) => {
         let count = 0;
         for (const m of models) {
@@ -1703,27 +1619,22 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
           seen.add(m.id);
 
           const cd = m.cardData || {};
-          const baseModel = cd.base_model;
           const idLower = m.id.toLowerCase();
           const tagsStr = (m.tags || []).join(" ").toLowerCase();
           const isQuant = Q_METHODS.some(t => idLower.includes(t) || tagsStr.includes(t));
-          const hasBaseModel = typeof baseModel === "string" ? baseModel === parentId :
-                               Array.isArray(baseModel) ? baseModel.some(b => {
-                                 const bid = typeof b === "string" ? b : (b && b.id || "");
-                                 return bid === parentId;
-                               }) : false;
+          const childHasBase = hasBaseModel(cd, parentId);
           const childAuthor = m.id.split("/")[0];
           const parentAuthor = parentId.split("/")[0];
           if (childAuthor === parentAuthor) continue;
 
-          if (hasBaseModel || (strictNameMatch(m.id) && isQuant)) {
-              if (!hasBaseModel) {
+          if (childHasBase || (strictNameMatch(m.id, modelName) && isQuant)) {
+              if (!childHasBase) {
                 if (m.pipeline_tag && !activeTaskFilters.has(m.pipeline_tag)) continue;
                 if (_allFetchedIds.has(m.id)) continue;
               }
               const qMethods = Q_METHODS.filter(t => idLower.includes(t) || tagsStr.includes(t));
               let qMethod;
-              if (hasBaseModel) {
+              if (childHasBase) {
                 qMethod = qMethods.length ? "finetune, " + qMethods.join(", ") : "finetune";
               } else {
                 qMethod = qMethods.length ? qMethods.join(", ") : (tagsStr.includes("safetensors") ? "safetensors" : "derivative");
@@ -1810,25 +1721,6 @@ async function resolveParamFromChildren(modelId) {
     fetchJson(nameUrl).catch(() => []),
     fetchJson(idUrl).catch(() => [])
   ]);
-  // Same matching logic as loadChildren's processChildren: accept if
-  // cardData.base_model points to parent OR name matches after stripping
-  // quant suffixes (covers children without explicit base_model annotation).
-  const strictNameMatch = (candidateId) => {
-    let name = candidateId.split("/").slice(1).join("/");
-    let changed;
-    do {
-      changed = false;
-      for (const q of Q_METHODS) {
-        const suffix = '-' + q;
-        if (name.toLowerCase().endsWith(suffix)) {
-          name = name.slice(0, -suffix.length);
-          changed = true;
-          break;
-        }
-      }
-    } while (changed);
-    return name.toLowerCase() === modelName.toLowerCase();
-  };
   const seen = new Set();
   const children = [];
   for (const raw of [...nameRes, ...idRes]) {
@@ -1836,13 +1728,8 @@ async function resolveParamFromChildren(modelId) {
     seen.add(raw.id);
     if (raw.id === modelId) continue;
     const cd = raw.cardData || {};
-    const baseModel = cd.base_model;
-    const hasBaseModel = typeof baseModel === "string" ? baseModel === modelId :
-      Array.isArray(baseModel) ? baseModel.some(b => {
-        const bid = typeof b === "string" ? b : (b && b.id || "");
-        return bid === modelId;
-      }) : false;
-    if (!hasBaseModel && !strictNameMatch(raw.id)) continue;
+    const childHasBase = hasBaseModel(cd, modelId);
+    if (!childHasBase && !strictNameMatch(raw.id, modelName)) continue;
     children.push(normalizeModel(raw));
   }
   // Sort children by ascending modification date so the oldest (typically
@@ -1911,9 +1798,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   html += `</tbody></table>`;
   html += `<div class="detail-count">${filtered.length} child model(s) from ${groupEntries.length} author(s)${filtered.length !== children.length ? ` (filtered from ${children.length})` : ''}</div>`;
   container.innerHTML = html;
-  container.querySelectorAll(".toggle").forEach(btn => {
-    btn.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); btn.click(); } });
-  });
+  container.querySelectorAll(".toggle").forEach(addKeyboardClick);
   container.dataset.l3Parent = parentId;
   l3StateMap.set(parentId, { l2Idx, modelIdx, parentId, children });
 
@@ -1927,15 +1812,9 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
       if (!s) return;
       const th = e.target.closest("thead th");
       if (th) {
-        if (th.dataset.level !== "3") return;
-        const key = th.dataset.key;
-        if (!key) return;
-        const st = detailSort[`l3-${s.parentId}`] || { key: "totalDownloads", asc: false };
-        if (st.key === key) st.asc = !st.asc;
-        else { st.key = key; st.asc = false; }
-        detailSort[`l3-${s.parentId}`] = st;
-        renderL3(s.l2Idx, s.modelIdx, s.parentId, s.children, this);
-        refreshAllExpanded();
+        handleSortClick(th, "3", `l3-${s.parentId}`, "totalDownloads", true, () => {
+          renderL3(s.l2Idx, s.modelIdx, s.parentId, s.children, this);
+        });
         return;
       }
       const tr = e.target.closest("tr.l3-row");
@@ -2010,12 +1889,9 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
       if (!th || th.dataset.level !== "4") return;
       const s = l4StateMap.get(this.dataset.l4Key);
       if (!s) return;
-      const key = th.dataset.key;
-      const st = detailSort[`l4-${s.parentId}-${s.author}`] || { key: "downloads", asc: false };
-      if (st.key === key) st.asc = !st.asc;
-      else { st.key = key; st.asc = false; }
-      detailSort[`l4-${s.parentId}-${s.author}`] = st;
-      renderL4(s.l2Idx, s.modelIdx, s.gIdx, s.parentId, s.author, s.quants, this);
+      handleSortClick(th, "4", `l4-${s.parentId}-${s.author}`, "downloads", false, () => {
+        renderL4(s.l2Idx, s.modelIdx, s.gIdx, s.parentId, s.author, s.quants, this);
+      });
     });
   }
 }
@@ -2176,8 +2052,10 @@ async function deriveVisibleUnknowns() {
 }
 
 // Min-gap enforcement helpers shared by both sliders.
-// Prevent the "from" knob from getting within minGap of the "to" knob.
-function enforceFromMinGap(fromEl, toEl, minGap, max) {
+// Enforce in both directions: when from moves too close, push to forward;
+// when to moves too close, push from backward. Two separate callbacks are
+// passed to setupSliderEvents so the correct direction applies.
+function enforceFromGap(fromEl, toEl, minGap, max) {
   const nv = parseInt(fromEl.value);
   const tv = parseInt(toEl.value);
   if (nv >= tv - (minGap - 1)) {
@@ -2189,7 +2067,7 @@ function enforceFromMinGap(fromEl, toEl, minGap, max) {
     }
   }
 }
-function enforceToMinGap(fromEl, toEl, minGap) {
+function enforceToGap(fromEl, toEl, minGap) {
   const nv = parseInt(toEl.value);
   const fv = parseInt(fromEl.value);
   if (nv <= fv + (minGap - 1)) {
@@ -2201,39 +2079,21 @@ function enforceToMinGap(fromEl, toEl, minGap) {
     }
   }
 }
+function setupSliderEvents(from, to, minGap, max, read, updateUI, markDirty) {
+  from.addEventListener("input", () => { enforceFromGap(from, to, minGap, max); read(); updateUI(); });
+  from.addEventListener("change", () => { enforceFromGap(from, to, minGap, max); read(); markDirty(); });
+  to.addEventListener("input", () => { enforceToGap(from, to, minGap); read(); updateUI(); });
+  to.addEventListener("change", () => { enforceToGap(from, to, minGap); read(); markDirty(); });
+}
 
 // ── Date slider ──
 function buildDateSlider() {
   const from = document.getElementById("ds-from");
   const to = document.getElementById("ds-to");
-
   from.value = sliderFrom;
   to.value = sliderTo;
-
   const read = () => { sliderFrom = parseInt(from.value); sliderTo = parseInt(to.value); };
-
-  const sliderMarkDirty = debounce(markDirty, CONFIG.DEBOUNCE_MS);
-  from.addEventListener("input", () => {
-    enforceFromMinGap(from, to, 1, CONFIG.DATE_SLIDER_MAX);
-    read();
-    updateDateUI();
-  });
-  from.addEventListener("change", () => {
-    enforceFromMinGap(from, to, 1, CONFIG.DATE_SLIDER_MAX);
-    read();
-    sliderMarkDirty();
-  });
-  to.addEventListener("input", () => {
-    enforceToMinGap(from, to, 1);
-    read();
-    updateDateUI();
-  });
-  to.addEventListener("change", () => {
-    enforceToMinGap(from, to, 1);
-    read();
-    sliderMarkDirty();
-  });
-
+  setupSliderEvents(from, to, 1, CONFIG.DATE_SLIDER_MAX, read, updateDateUI, debounce(markDirty, CONFIG.DEBOUNCE_MS));
   updateDateUI();
 }
 
@@ -2385,36 +2245,10 @@ function buildParamLegend() {
 function buildParamSlider() {
   const from = document.getElementById("ps-from");
   const to = document.getElementById("ps-to");
-
   from.value = paramSliderFrom;
   to.value = paramSliderTo;
-
   const read = () => { paramSliderFrom = parseInt(from.value); paramSliderTo = parseInt(to.value); };
-  const max = CONFIG.PARAM_SLIDER_MAX;
-  const gap = CONFIG.PARAM_MIN_GAP;
-
-  const sliderMarkDirty = debounce(markDirty, CONFIG.DEBOUNCE_MS);
-  from.addEventListener("input", () => {
-    enforceFromMinGap(from, to, gap, max);
-    read();
-    updateParamUI();
-  });
-  from.addEventListener("change", () => {
-    enforceFromMinGap(from, to, gap, max);
-    read();
-    sliderMarkDirty();
-  });
-  to.addEventListener("input", () => {
-    enforceToMinGap(from, to, gap);
-    read();
-    updateParamUI();
-  });
-  to.addEventListener("change", () => {
-    enforceToMinGap(from, to, gap);
-    read();
-    sliderMarkDirty();
-  });
-
+  setupSliderEvents(from, to, CONFIG.PARAM_MIN_GAP, CONFIG.PARAM_SLIDER_MAX, read, updateParamUI, debounce(markDirty, CONFIG.DEBOUNCE_MS));
   updateParamUI();
 }
 
@@ -2518,9 +2352,7 @@ document.getElementById("derived-param-chip").addEventListener("click", async ()
   chip.setAttribute("aria-checked", String(_derivedParamEnabled));
   if (_derivedParamEnabled) await deriveVisibleUnknowns();
 });
-document.getElementById("derived-param-chip").addEventListener("keydown", e => {
-  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); document.getElementById("derived-param-chip").click(); }
-});
+addKeyboardClick(document.getElementById("derived-param-chip"));
 document.getElementById("hide-missing-param-chip").addEventListener("click", () => {
   _hideMissingParamEnabled = !_hideMissingParamEnabled;
   const chip = document.getElementById("hide-missing-param-chip");
@@ -2532,9 +2364,7 @@ document.getElementById("hide-missing-param-chip").addEventListener("click", () 
   const saved = new Set(expandedSections);
   recomputeAndRenderWithoutDerive(saved);
 });
-document.getElementById("hide-missing-param-chip").addEventListener("keydown", e => {
-  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); document.getElementById("hide-missing-param-chip").click(); }
-});
+addKeyboardClick(document.getElementById("hide-missing-param-chip"));
 
 // ── Init ──
 // Fetch top models per pipeline tag (by downloads + by lastModified, merged + deduped).
