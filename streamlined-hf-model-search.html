@@ -179,7 +179,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.07</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.08</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -387,6 +387,7 @@ let needsUpdate = false;
 let _derivedParamEnabled = false;
 let _hideMissingParamEnabled = false;
 const _inferredParamIds = new Set();
+const _inferredFromNameIds = new Set();
 const _inferredAttemptedIds = new Set();
 let apiCalls = 0;
 function incApiCalls(n) { apiCalls += n; document.getElementById("api-counter").textContent = "API Calls: " + String(apiCalls); }
@@ -1303,7 +1304,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
     const orphanBadge = qMethods.length ? qMethods.map(q => `<span class="badge orphan" title="Parent base model filtered out">${escapeHtml(q.toUpperCase())}</span>`).join(' ') + ' ' : '';
     return `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}">
       <td class="model-id-cell"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
-      <td class="center" style="font-size:0.78rem">${m.paramB != null ? (_inferredParamIds.has(m.id) ? `<span class="inferred-param" title="Inferred from child model metadata">${paramValueToLabel(m.paramB)}</span>` : paramValueToLabel(m.paramB)) : "—"}</td>
+      <td class="center" style="font-size:0.78rem">${m.paramB != null ? (_inferredParamIds.has(m.id) ? `<span class="inferred-param" title="Inferred from child model metadata">${paramValueToLabel(m.paramB)}</span>` : _inferredFromNameIds.has(m.id) ? `<span class="inferred-param" title="Inferred from model ID name">${paramValueToLabel(m.paramB)}</span>` : paramValueToLabel(m.paramB)) : "—"}</td>
       <td class="right">${fmt(m.downloads)}</td>
       <td class="right">${fmt(m.likes)}<span class="likes-icon">♥</span></td>
       <td class="updated-cell">${fmtDate(m.lastModified)} <span style="color:#6e7681;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
@@ -1846,6 +1847,7 @@ async function tryResolveModelParam(m, gen, idx, author, container, getFiltered,
   let resolved = await resolveParamFromChildren(m.id);
   if (rowEl) rowEl.classList.remove("inferring");
   _inferredAttemptedIds.add(m.id);
+  let fromName = false;
   if (resolved === null) {
     // Last resort for quant models: extract B/M from model ID.
     // The normal getParamCount skips ID-based parsing for quant models because
@@ -1854,16 +1856,19 @@ async function tryResolveModelParam(m, gen, idx, author, container, getFiltered,
     // inheritance, and children inference — so any remaining B/M in the name is
     // almost certainly the parameter count.
     const idB = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Bb]/);
-    if (idB) resolved = parseFloat(idB[1]);
+    if (idB) { resolved = parseFloat(idB[1]); fromName = true; }
     else {
       const idM = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Mm]/);
-      if (idM) resolved = parseFloat(idM[1]) / 1000;
+      if (idM) { resolved = parseFloat(idM[1]) / 1000; fromName = true; }
     }
     if (resolved === null) return false;
   }
   m.paramB = resolved;
   _paramCache.set(m.id, resolved);
-  _inferredParamIds.add(m.id);
+  (fromName ? _inferredFromNameIds : _inferredParamIds).add(m.id);
+  // Sync _allFetched so modelPassesAllFilters sees the resolved value directly.
+  const af = _allFetched && _allFetched.find(x => x.id === m.id);
+  if (af) af.paramB = resolved;
   if (gen !== _fetchGeneration) return true;
   if (!container || !container.isConnected) return true;
   const filtered = getFiltered();
