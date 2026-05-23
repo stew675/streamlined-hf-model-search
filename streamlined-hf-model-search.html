@@ -178,7 +178,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.02</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.03</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -1454,7 +1454,12 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
                 if (_allFetchedIds.has(m.id)) continue;
               }
               const qMethods = Q_METHODS.filter(t => idLower.includes(t) || tagsStr.includes(t));
-              let qMethod = qMethods.length ? qMethods.join(", ") : (hasBaseModel ? "finetune" : (tagsStr.includes("safetensors") ? "safetensors" : "derivative"));
+              let qMethod;
+              if (hasBaseModel) {
+                qMethod = qMethods.length ? "finetune, " + qMethods.join(", ") : "finetune";
+              } else {
+                qMethod = qMethods.length ? qMethods.join(", ") : (tagsStr.includes("safetensors") ? "safetensors" : "derivative");
+              }
               results.push({
               id: m.id,
               author: m.id.split("/")[0],
