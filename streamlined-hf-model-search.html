@@ -1838,6 +1838,11 @@ function applyFilters(force, deep) {
           } catch (e) {
             console.warn("Base model injection error:", e);
           }
+        } else {
+          // Quick mode: mark parents already in _allFetched so quants outside the date
+          // range still keep their parent visible (the data is already in hand — no API
+          // calls needed, just a local scan).
+          markLocalParents(all);
         }
         if (all.length > CONFIG.ALL_FETCHED_MAX) {
           if (gen !== _fetchGeneration) return;
@@ -1866,6 +1871,7 @@ function applyFilters(force, deep) {
       }
     })();
   } else {
+    markLocalParents(_allFetched || []);
     reenable();
     recomputeAndRender(savedExpansions);
   }
@@ -2070,24 +2076,13 @@ async function fetchTasks(tasks) {
   return allFetched;
 }
 
-// Two-pass base model injection.
-// Pass 1: scan all date-range models, identify parent IDs that aren't yet in _allFetched.
-//   Marks existing parents as _injected so they bypass the date filter (a parent outside
-//   the date range still needs to remain visible so its child quant models are reachable).
-// Pass 2: fetch unknown parents in batches (INJECTION_BATCH_SIZE), call onBatch() after
-//   each batch for incremental re-render. all.push(...injected) only after all batches
-//   complete — the initial for-loop iterates all.length which is never mutated during
-//   the scan, so there is no infinite loop risk.
-async function injectBaseModels(all, onBatch) {
+// Local-only parent marking: scan all date-range models and mark any parent that
+// already exists in `all` as `_injected` (bypassing the date filter). No API calls.
+// Used by Quick mode to surface parents of visible quants without fetching new models.
+function markLocalParents(all) {
   const gen = _fetchGeneration;
   if (gen !== _fetchGeneration) return;
-  _injectedBaseIds.clear();
   const seen = new Set(all.map(m => m.id));
-  const seenAuthors = new Set(all.map(m => m.id.split("/")[0]));
-  const status = document.getElementById("status");
-  const injected = [];
-  const fetchQueue = new Map();
-
   for (let i = 0; i < all.length; i++) {
     if (gen !== _fetchGeneration) return;
     const m = all[i];
@@ -2122,7 +2117,59 @@ async function injectBaseModels(all, onBatch) {
         parent._injected = true;
         if (gen === _fetchGeneration) _injectedBaseIds.add(baseId);
       }
-    } else if (bm && !isBase(m)) {
+    }
+  }
+}
+
+// Two-pass base model injection.
+// Pass 1: scan all date-range models, identify parent IDs that aren't yet in _allFetched.
+//   Marks existing parents as _injected so they bypass the date filter (a parent outside
+//   the date range still needs to remain visible so its child quant models are reachable).
+// Pass 2: fetch unknown parents in batches (INJECTION_BATCH_SIZE), call onBatch() after
+//   each batch for incremental re-render. all.push(...injected) only after all batches
+//   complete — the initial for-loop iterates all.length which is never mutated during
+//   the scan, so there is no infinite loop risk.
+async function injectBaseModels(all, onBatch) {
+  const gen = _fetchGeneration;
+  if (gen !== _fetchGeneration) return;
+  _injectedBaseIds.clear();
+  markLocalParents(all);
+  if (gen !== _fetchGeneration) return;
+  const seenAuthors = new Set(all.map(m => m.id.split("/")[0]));
+  const status = document.getElementById("status");
+  const injected = [];
+  const fetchQueue = new Map();
+  const seen = new Set(all.map(m => m.id));
+
+  for (let i = 0; i < all.length; i++) {
+    if (gen !== _fetchGeneration) return;
+    const m = all[i];
+    if (!isInDateRange(m.lastModified)) continue;
+
+    let baseId = null;
+    const cd = m.cardData;
+    const bm = cd && cd.base_model;
+
+    if (bm) {
+      baseId = getBaseModelId(cd);
+      if (!baseId) continue;
+    } else {
+      const idLower = m.id.toLowerCase();
+      if (!Q_METHODS.some(t => idLower.includes(t))) continue;
+      const bits = m.id.split('/');
+      let name = bits[1];
+      while (name.length > 0) {
+        const dash = name.lastIndexOf('-');
+        if (dash <= 0) break;
+        name = name.substring(0, dash);
+        const candId = bits[0] + '/' + name;
+        if (seen.has(candId)) { baseId = candId; break; }
+        if (name.match(/\d+\.?\d*[Bb]/) || name.match(/\d+[Mm]/)) { baseId = candId; break; }
+      }
+      if (!baseId) continue;
+    }
+
+    if (!seen.has(baseId) && bm && !isBase(m)) {
       const baseAuthor = baseId.split("/")[0];
       if (!seenAuthors.has(baseAuthor)) {
         if (!fetchQueue.has(baseId)) {
