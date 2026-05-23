@@ -1576,8 +1576,8 @@ async function resolveParamFromChildren(modelId) {
   // Pass 2: fetch individual cards for top children (costs API calls).
   // Bypass getParamCount cache — Pass 1 may have cached null for the child
   // ID (search results lack metadata), which would shadow the full response.
-  // Collect params from all fetched children and use the mode (most common
-  // value) so pruned variants (e.g. REAP) don't skew the result downward.
+  // Collect params from all fetched children and use the maximum — pruning
+  // (REAP, distillation) only reduces parameter counts, never increases them.
   const paramCounts = [];
   for (let i = 0; i < Math.min(children.length, CONFIG.DERIVED_BATCH_SIZE); i++) {
     try {
@@ -1590,16 +1590,7 @@ async function resolveParamFromChildren(modelId) {
       }
     } catch (e) { /* skip */ }
   }
-  if (paramCounts.length > 0) {
-    const freq = {};
-    let maxFreq = 0, mode = paramCounts[0];
-    for (const v of paramCounts) {
-      freq[v] = (freq[v] || 0) + 1;
-      if (freq[v] > maxFreq) { maxFreq = freq[v]; mode = v; }
-      else if (freq[v] === maxFreq && v > mode) mode = v;
-    }
-    return mode;
-  }
+  if (paramCounts.length > 0) return Math.max(...paramCounts);
   return null;
 }
 
