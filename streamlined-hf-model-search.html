@@ -180,7 +180,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.10</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.11</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -1213,13 +1213,19 @@ async function loadAuthorModels(idx, author, container) {
         await Promise.all(batch.map(async (m) => {
           try {
             const full = await fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`);
-            // Check fresh data directly — _paramCache may have a stale null from the
-            // initial task fetch (which excluded safetensors/gguf), so getParamCount
-            // would return the cached null without looking at the full response.
+            // For quant models, skip safetensors/gguf from the full response —
+            // their element counts can differ slightly from the actual parameter
+            // count (e.g. extra scaling tensors), leading to rounded display
+            // values that don't match the model name. Parent inheritance and the
+            // B/M regex fallback in tryResolveModelParam give clean integers.
+            const idLower = (m.id || "").toLowerCase();
+            const isQuant = Q_METHODS.some(t => idLower.includes(t));
             let p = null;
-            if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
-            else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
-            else p = getParamCount(full);
+            if (!isQuant) {
+              if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
+              else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
+            }
+            if (p === null) p = getParamCount(full);
             if (p !== null) { m.paramB = p; _paramCache.set(m.id, p); }
           } catch (e) {
             console.warn("Failed to fetch param for", m.id, e);
