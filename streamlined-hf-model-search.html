@@ -1572,12 +1572,18 @@ async function resolveParamFromChildren(modelId) {
     const p = getParamCount(child);
     if (p !== null) return p;
   }
-  // Pass 2: fetch individual cards for top children (costs API calls)
+  // Pass 2: fetch individual cards for top children (costs API calls).
+  // Bypass getParamCount cache — Pass 1 may have cached null for the child
+  // ID (search results lack metadata), which would shadow the full response.
   for (let i = 0; i < Math.min(children.length, CONFIG.PARAM_BATCH_SIZE); i++) {
     try {
       const full = await fetchJson(`https://huggingface.co/api/models/${children[i].id}?full=true`);
-      const p = getParamCount(full);
-      if (p !== null) return p;
+      const childP = (full.safetensors && full.safetensors.total != null) ? full.safetensors.total / 1e9 :
+                     (full.gguf && full.gguf.total != null) ? full.gguf.total / 1e9 : null;
+      if (childP !== null) {
+        _paramCache.set(children[i].id, childP);
+        return childP;
+      }
     } catch (e) { /* skip */ }
   }
   return null;
