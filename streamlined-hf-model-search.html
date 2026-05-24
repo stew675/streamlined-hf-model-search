@@ -97,12 +97,12 @@
   #main-table .model-id-cell a { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
   #filter-row { display: flex; flex-wrap: nowrap; align-items: center; }
   #filter-bar { flex: 1 1 auto; min-width: 0; }
-  #button-row .filter-chip, #filter-bar .filter-chip, #from-bar .filter-chip, #to-bar .filter-chip, #special-bar .filter-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem;
+  #debug-bar .filter-chip, #button-row .filter-chip, #filter-bar .filter-chip, #from-bar .filter-chip, #to-bar .filter-chip, #special-bar .filter-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem;
                         padding: 3px 10px; border-radius: 14px; cursor: pointer; user-select: none;
                         background: #161b22; border: 1px solid #30363d; transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; }
-  #button-row .filter-chip:hover, #filter-bar .filter-chip:hover, #from-bar .filter-chip:hover, #to-bar .filter-chip:hover, #special-bar .filter-chip:hover { background: #1c2129; color: #c9d1d9; }
-  #button-row .filter-chip.active, #filter-bar .filter-chip.active, #from-bar .filter-chip.active, #to-bar .filter-chip.active, #special-bar .filter-chip.active { color: #58a6ff; border-color: #58a6ff; box-shadow: 0 0 6px #1f6feb33; }
-  #button-row .filter-chip.inactive, #filter-bar .filter-chip.inactive, #from-bar .filter-chip.inactive, #to-bar .filter-chip.inactive, #special-bar .filter-chip.inactive { color: #8b949e; border-color: #21262d; }
+  #debug-bar .filter-chip:hover, #button-row .filter-chip:hover, #filter-bar .filter-chip:hover, #from-bar .filter-chip:hover, #to-bar .filter-chip:hover, #special-bar .filter-chip:hover { background: #1c2129; color: #c9d1d9; }
+  #debug-bar .filter-chip.active, #button-row .filter-chip.active, #filter-bar .filter-chip.active, #from-bar .filter-chip.active, #to-bar .filter-chip.active, #special-bar .filter-chip.active { color: #58a6ff; border-color: #58a6ff; box-shadow: 0 0 6px #1f6feb33; }
+  #debug-bar .filter-chip.inactive, #button-row .filter-chip.inactive, #filter-bar .filter-chip.inactive, #from-bar .filter-chip.inactive, #to-bar .filter-chip.inactive, #special-bar .filter-chip.inactive { color: #8b949e; border-color: #21262d; }
   #filter-bar .filter-label, #from-bar .filter-label, #to-bar .filter-label, #special-bar .filter-label { color: #8b949e; font-size: 0.78rem; margin-right: 4px; }
   .task-bar-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; align-items: center; }
    .task-bar-row .filter-label { color: #8b949e; font-size: 0.78rem; margin-right: 4px; }
@@ -202,6 +202,10 @@
   #clear-cache-btn:active { background: #5a2020; }
   .skip-link { position: absolute; top: -100%; left: 8px; padding: 8px 16px; background: #58a6ff; color: #0d1117; z-index: 100; font-weight: 600; border-radius: 6px; }
   .skip-link:focus { top: 8px; }
+  #debug-bar { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 6px 0; border-top: 1px solid #21262d; }
+  #debug-dump-container { margin-top: 4px; max-height: 80vh; overflow: auto; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 8px; }
+  #debug-dump-content { width: 100%; min-height: 100px; background: transparent; border: none; color: #8b949e; font-family: 'Courier New', monospace; font-size: 0.7rem; line-height: 1.5; resize: none; outline: none; padding: 0; margin: 0; }
+  #debug-dump-content:focus { outline: 1px solid #58a6ff; outline-offset: 2px; border-radius: 2px; }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { transition-duration: 0s !important; }
   }
@@ -211,7 +215,7 @@
 <a href="#main-table" class="skip-link">Skip to main content</a>
 <h1><span aria-hidden="true">🔍</span> A Streamlined Hugging Face Model Search</h1>
 <main>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.06</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.07</span></div>
 <div id="date-slider">
   <h2 class="ds-title">Date Range</h2>
   <div class="ds-track-wrap" role="group" aria-label="Date range filter">
@@ -303,6 +307,12 @@
   <tbody id="body"></tbody>
 </table>
 <div id="count"></div>
+<div id="debug-bar">
+  <span class="filter-label">Debug:</span>
+  <span id="debug-dump-chip" class="filter-chip inactive" role="button" tabindex="0" aria-pressed="false" title="Show raw _allFetched data — check if a model was fetched before filter/suppression logic hides it">Show _allFetched Dump</span>
+  <span id="debug-count" style="color:#6e7681;font-size:0.78rem;margin-left:auto"></span>
+</div>
+<div id="debug-dump-container" style="display:none"><textarea id="debug-dump-content" readonly spellcheck="false" wrap="off"></textarea></div>
 </main>
 
 <script>
@@ -2447,6 +2457,61 @@ document.getElementById("hide-missing-param-chip").addEventListener("click", () 
   recomputeAndRenderWithoutDerive(saved);
 });
 addKeyboardClick(document.getElementById("hide-missing-param-chip"));
+
+// ── Debug Dump ──
+let _debugDumpSerialized = null;
+let _debugDumpGeneration = -1;
+
+function serializeAllFetched() {
+  const all = _allFetched || [];
+  if (all.length === 0) return "(empty)";
+  const padId = 60, padDl = 10, padLk = 8, padTag = 25, padParam = 8;
+  const hId = "Model ID".padEnd(padId);
+  const hDl = "Downloads".padStart(padDl);
+  const hLk = "Likes".padStart(padLk);
+  const hDate = "Updated".padEnd(10);
+  const hTag = "Pipeline".padEnd(padTag);
+  const hParam = "Params".padStart(padParam);
+  const hTags = "Tags";
+  const header = `${hId} ${hDl} ${hLk} ${hDate} ${hTag} ${hParam} ${hTags}`;
+  const lines = all.map(m => {
+    const id = m.id.padEnd(padId);
+    const dl = String(m.downloads || 0).padStart(padDl);
+    const lk = String(m.likes || 0).padStart(padLk);
+    const date = (m.lastModified || "").slice(0, 10).padEnd(10);
+    const tag = (m.pipeline_tag || "—").padEnd(padTag);
+    const param = (m.paramB != null ? paramValueToLabel(m.paramB) : "—").padStart(padParam);
+    const tags = (m.tags || []).slice(0, 3).join(", ");
+    return `${id} ${dl} ${lk} ${date} ${tag} ${param} ${tags}`;
+  });
+  return header + "\n" + lines.join("\n");
+}
+
+document.getElementById("debug-dump-chip").addEventListener("click", () => {
+  const chip = document.getElementById("debug-dump-chip");
+  const container = document.getElementById("debug-dump-container");
+  const textarea = document.getElementById("debug-dump-content");
+  if (container.style.display !== "none") {
+    container.style.display = "none";
+    chip.textContent = "Show _allFetched Dump";
+    chip.classList.remove("active");
+    chip.classList.add("inactive");
+    chip.setAttribute("aria-pressed", "false");
+    return;
+  }
+  if (_debugDumpGeneration !== _fetchGeneration || _debugDumpSerialized === null) {
+    _debugDumpSerialized = serializeAllFetched();
+    _debugDumpGeneration = _fetchGeneration;
+    textarea.value = _debugDumpSerialized;
+    document.getElementById("debug-count").textContent = "(" + ((_allFetched || []).length) + " entries)";
+  }
+  container.style.display = "";
+  chip.textContent = "Hide _allFetched Dump";
+  chip.classList.remove("inactive");
+  chip.classList.add("active");
+  chip.setAttribute("aria-pressed", "true");
+});
+addKeyboardClick(document.getElementById("debug-dump-chip"));
 
 // ── Init ──
 // Fetch top models per pipeline tag (by downloads + by lastModified, merged + deduped).
