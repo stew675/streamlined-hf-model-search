@@ -205,7 +205,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.21</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.22</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -261,13 +261,13 @@
 </div>
 <div id="sort-announce" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></div>
 <div id="button-row">
-  <span id="derived-param-chip" class="filter-chip active" role="checkbox" aria-checked="true" tabindex="0" style="margin-right:auto; user-select:none" title="When enabled, models with unknown parameter counts will search their children (2 search API calls per model) and fetch individual child model cards (up to 4 per model) to try to infer the parent's parameter count.">Infer Missing Parameters</span>
+  <span id="derived-param-chip" class="filter-chip active" role="checkbox" aria-checked="true" tabindex="0" style="margin-right:auto; user-select:none" title="When enabled, models with unknown parameter counts will first try a B/M regex from the model name, then search their children (2 search API calls per model) and fetch individual child model cards (up to 10 per model) to try to infer the parent's parameter count.">Infer Missing Parameters</span>
   <span id="hide-missing-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" tabindex="0" style="user-select:none" title="When enabled, models without a known parameter count are hidden from display.">Hide Missing Parameters</span>
   <div id="button-center">
     <button id="get-quick-results-btn" class="action-btn" title="Fetch top models per pipeline tag (by downloads + lastModified) — no cross-author base model injection. Faster but may miss quantizations whose parent base model is from a different author.">Get Quick Results</button>
     <button id="get-deep-results-btn" class="action-btn" title="Same as Quick, plus resolve cross-author base models referenced by quantizations via individual model API calls. Slower but surfaces more quantizations.">Get Deep Results</button>
   </div>
-  <span id="clear-cache-btn" role="button" tabindex="0" title="Clears: in-memory param cache, LRU model cache, inflight fetch state, canonical dedup cache, and inference tracking. Preserves all filters, sliders, and expanded sections.">Clear Cache</span>
+  <span id="clear-cache-btn" role="button" tabindex="0" title="Clears: in-memory param cache, LRU model cache, inflight fetch state, canonical dedup cache, and inference tracking. Collapses expanded sections (re-expand to reload). Preserves all filters and sliders.">Clear Cache</span>
   <span id="api-counter-wrap" style="margin-left:auto; min-width: 100px; text-align: right;">
     <span id="api-counter" class="filter-label" style="font-variant-numeric: tabular-nums;">API Calls: 0</span>
     <div class="api-counter-tooltip" role="tooltip">Anonymous API calls are rate-limited by Hugging Face (~100 req/min). When the counter glows amber, rate limiting is actively throttling requests. Exponential backoff is applied automatically.</div>
@@ -2402,6 +2402,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
 document.getElementById("get-quick-results-btn").addEventListener("click", () => applyFilters(true, false));
 document.getElementById("get-deep-results-btn").addEventListener("click", () => applyFilters(true, true));
 document.getElementById("clear-cache-btn").addEventListener("click", () => {
+  _fetchGeneration++;
   const el = document.getElementById("clear-cache-btn");
   el.textContent = "Cleared!";
   setTimeout(() => { el.textContent = "Clear Cache"; }, 1500);
@@ -2415,8 +2416,8 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   _canonicalCache = null;
   _consecutive429s = 0;
   document.getElementById("api-counter").classList.remove("rate-limited");
-  const saved = new Set(expandedSections);
-  recomputeAndRender(saved);
+  expandedSections.clear();
+  recomputeAndRenderWithoutDerive();
 });
 addKeyboardClick(document.getElementById("clear-cache-btn"));
 document.getElementById("derived-param-chip").addEventListener("click", async () => {

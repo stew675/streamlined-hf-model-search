@@ -64,7 +64,7 @@ For backward compatibility, these variables are proxied to `RenderCoordinator`:
 - `_allFetched` — All base models fetched during init (trimmed to 16k, no date/param filter applied before storage)
 - `_authorData` — L1 author records (mutable, updated on L1 expand, slider changes)
 - `_canonicalAuthor` — Map of model name → canonical author; computed lazily and cached via `_canonicalCache`
-- `_fetchGeneration` — Monotonically increasing counter; all async operations capture it at entry and bail early if stale
+- `_fetchGeneration` — Monotonically increasing counter; all async operations capture it at entry and bail early if stale. Incremented by `applyFilters()` (Get Results) and by the Clear Cache handler to abort in-flight async operations.
 - `_injectedBaseIds` — Set of model IDs marked as injected (bypass date filter to keep recently-updated quants reachable via their parent)
 - `_inflightChildren` — Map `{parentId → { promise, results }}` to deduplicate concurrent L3/L4 fetches (results stored directly in entry to survive cache eviction)
 - `_inflightFetches` — Map `{url → promise}` to deduplicate concurrent `fetchJson` calls for the same URL before they even reach the rate limiter
@@ -233,7 +233,7 @@ Open `streamlined-hf-model-search.html` in a browser. Validate:
 20. When "Hide Missing Parameters" is enabled and all of an author's base models lack params, that author is removed from the L1 list entirely
 21. API counter tooltip appears on hover over `#api-counter-wrap` with rate-limit info
 22. API counter text flashes amber when 3+ consecutive 429 responses are detected; returns to normal on next successful call
-23. "Clear Cache" button clears all caches and re-renders; filter/slider/expansion state is preserved; button shows "Cleared!" feedback briefly
+23. "Clear Cache" button clears all caches, collapses expanded sections, and re-renders L1; filter/slider state preserved; button shows "Cleared!" feedback briefly
 
 ## Common Pitfalls
 
@@ -253,4 +253,5 @@ Open `streamlined-hf-model-search.html` in a browser. Validate:
 - **Inflight dedup**: `_inflightChildren` map stores `{ promise, results }` entries keyed by `children-{parentId}` to prevent duplicate L3/L4 fetches. The entry is set synchronously before the first `await`; concurrent callers await the same promise and read results directly from the entry (bypassing the evictable LRU cache).
 - **Cache eviction fallback**: The LRU cache (`cache`) is capped at 200 entries. `children-{parentId}` entries can be evicted if many L2 models are expanded. When this happens, L3 expansion falls back to `s.children` from `l3StateMap` (which stores the full children array and survives eviction).
 - **CSS.escape in selectors**: `refreshAllExpanded` uses `CSS.escape(author)` in query selectors — any new dynamic selector that interpolates user-controlled strings (author names, model IDs) should follow suit to prevent broken queries or injection.
-- **_paramCache intentionally never cleared**: Model parameter counts are immutable (they don't change between sessions). Keeping the cache avoids redundant individual API fetches for already-resolved model IDs. The Map grows only with unique model IDs encountered, which is bounded by the number of models the user has expanded — worst case memory impact at 16384 entries estimated at 1.4MB.
+- **Clear Cache + generation guard**: The Clear Cache handler increments `_fetchGeneration` to abort stale async operations (`loadAuthorModels`, `deriveVisibleUnknowns`, `tryResolveModelParam`). Unlike `applyFilters`, it collapses all expanded sections instead of saving/restoring them — the LRU cache is cleared so there is no data to re-render from. Users re-expand authors to trigger fresh API fetches and param deepening.
+- **_paramCache cleared by Clear Cache**: Model parameter counts are immutable (they don't change between sessions), so the cache persists across renders within a session. However, Clear Cache explicitly clears it along with all other caches. The Map grows only with unique model IDs encountered, bounded by the number of models the user has expanded — worst case memory impact at 16384 entries estimated at 1.4MB.
