@@ -1391,25 +1391,19 @@ async function loadAuthorModels(idx, author, container) {
     if (!cacheAccess(author + "_models")) cacheSet(author + "_models", models);
 
     const authorKnownIds = new Set(models.map(x => x.id));
-    const baseModels = models.filter(m => isBase(m)).map(m => {
-      const pb = getParamCount(m);
-      if (pb !== null && !m.safetensors?.total && !m.gguf?.total) {
-        _inferredFromNameIds.add(m.id);
-      }
-      return {
-        id: m.id,
-        downloads: m.downloads || 0,
-        likes: m.likes || 0,
-        created_at: m.createdAt || "",
-        updated_at: m.lastModified || "",
-        lastModified: m.lastModified || "",
-        tags: m.tags || [],
-        paramB: pb,
-        pipeline_tag: m.pipeline_tag || "",
-        _orphanQuant: isOrphanQuant(m, authorKnownIds),
-        _nestedQuant: isNestedQuant(m, authorKnownIds, models)
-      };
-    });
+    const baseModels = models.filter(m => isBase(m)).map(m => ({
+      id: m.id,
+      downloads: m.downloads || 0,
+      likes: m.likes || 0,
+      created_at: m.createdAt || "",
+      updated_at: m.lastModified || "",
+      lastModified: m.lastModified || "",
+      tags: m.tags || [],
+      paramB: getParamCount(m),
+      pipeline_tag: m.pipeline_tag || "",
+      _orphanQuant: isOrphanQuant(m, authorKnownIds),
+      _nestedQuant: isNestedQuant(m, authorKnownIds, models)
+    }));
 
     cacheSet(author, baseModels);
 
