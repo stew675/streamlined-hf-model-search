@@ -211,7 +211,7 @@
 <a href="#main-table" class="skip-link">Skip to main content</a>
 <h1><span aria-hidden="true">🔍</span> A Streamlined Hugging Face Model Search</h1>
 <main>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.04</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.05</span></div>
 <div id="date-slider">
   <h2 class="ds-title">Date Range</h2>
   <div class="ds-track-wrap">
@@ -456,6 +456,21 @@ const RE_Q_MATCH = /(?:awq|gptq|bitsandbytes|eetq|aqlm|gguf|exl2|marlin|mlx|bnb|
 const RE_Q_STRIP = /-(?:awq|gptq|bitsandbytes|eetq|aqlm|gguf|exl2|marlin|mlx|bnb|fp4|fp8|nf4|int8|int4|q8|q4)$/i;
 const RE_B_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Bb]/;
 const RE_M_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Mm]/;
+// Sanity-range: no real model has <1M or >2T params. Rejects version-number
+// false positives like "v005B" or "r2M" that the negative lookbehind misses.
+function extractParamFromId(id) {
+  const bMatch = id.match(RE_B_PARAM);
+  if (bMatch) {
+    const v = parseFloat(bMatch[1]);
+    if (v >= 0.001 && v <= 2000) return v;
+  }
+  const mMatch = id.match(RE_M_PARAM);
+  if (mMatch) {
+    const v = parseFloat(mMatch[1]) / 1000;
+    if (v >= 0.001 && v <= 2000) return v;
+  }
+  return null;
+}
 const FILTER_DISPLAY = ["awq", "fp4", "fp8", "finetune", "gguf", "mlx", "safetensors", "others"];
 const activeFilters = new Set(["finetune", "gguf", "safetensors"]);
 const activeTaskFilters = new Set();
@@ -825,17 +840,7 @@ function getParamCount(m) {
   if (m.safetensors && m.safetensors.total != null) result = m.safetensors.total / 1e9;
   else if (m.gguf && m.gguf.total != null) result = m.gguf.total / 1e9;
   else {
-    // Try B/M suffix in model ID even for quant models — the negative lookbehind
-    // already guards against MoE false positives (A2B, 8x22B). Quant suffixes like
-    // -GGUF or -AWQ are not numeric, so they won't interfere with B/M extraction.
-    // The rare case of -4B meaning 4-bit rather than 4B params is acceptable given
-    // how infrequent it is vs the API calls saved for every quant model with a clean ID.
-    const bMatch = m.id.match(RE_B_PARAM);
-    if (bMatch) result = parseFloat(bMatch[1]);
-    else {
-      const mMatch = m.id.match(RE_M_PARAM);
-      result = mMatch ? parseFloat(mMatch[1]) / 1000 : null;
-    }
+    result = extractParamFromId(m.id);
   }
   _paramCache.set(m.id, result);
   return result;
@@ -1459,12 +1464,7 @@ async function loadAuthorModels(idx, author, container) {
             const isQuant = RE_Q_EXISTS.test(idLower);
             let p = null;
             if (isQuant) {
-              const idB = m.id.match(RE_B_PARAM);
-              if (idB) p = parseFloat(idB[1]);
-              else {
-                const idM = m.id.match(RE_M_PARAM);
-                if (idM) p = parseFloat(idM[1]) / 1000;
-              }
+              p = extractParamFromId(m.id);
             } else {
               if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
               else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
@@ -2050,14 +2050,8 @@ async function tryResolveModelParam(m, gen, idx, author, container, getFiltered,
   document.getElementById("status").textContent =
     `Resolving params for ${m.id.split("/").slice(1).join("/")}…`;
   let resolved = null, fromName = false;
-  // Try name heuristic first — fast, no API call. Many quant models embed
-  // the parameter count in their ID (e.g. "Qwen3.6-27B-FP8").
-  const idB = m.id.match(RE_B_PARAM);
-  if (idB) { resolved = parseFloat(idB[1]); fromName = true; }
-  else {
-    const idM = m.id.match(RE_M_PARAM);
-    if (idM) { resolved = parseFloat(idM[1]) / 1000; fromName = true; }
-  }
+  resolved = extractParamFromId(m.id);
+  if (resolved !== null) fromName = true;
   if (resolved === null) {
     // Fall through to children-based inference when nothing is in the name.
     resolved = await resolveParamFromChildren(m.id);
