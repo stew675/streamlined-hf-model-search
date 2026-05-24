@@ -48,15 +48,18 @@ Selection knobs have a minimum gap with bi-directional pushing.
 ### Filter Bars
 
 Three *Type* filter bars control which pipeline tags are active.
-**From**, **To**, and **Special** are used to quickly activate broad categories of pipeline tags.
-The user may then selectively activate/deactivate individual tags to refine their choices.
+**From PipeLine Classes**, **To PipeLine Classes**, and **Untagged PipeLines** are used to quickly activate broad categories of pipeline tags.
+The user may then selectively activate/deactivate individual tags in the **Activated Pipeline Tags** bar to refine their choices.
+Tags not yet activated appear in the **Available Pipeline Tags** bar below for quick selection.
 
 It should be noted that *Any* refers to the specific modality with the name *any* and is not intended to activate all modalities.
 The *All* activation chip is used for quickly activating all modalities.
 
-- **From:** input modality (text, image, audio, video, any, all)
-- **To:** output modality (text, speech, audio, image, video, 3d, any, all)
-- **Special:** toggles like "include untagged" (models with no pipeline tag)
+- **From PipeLine Classes:** input modality (text, image, audio, video, any, all)
+- **To PipeLine Classes:** output modality (text, speech, audio, image, video, 3d, any, all)
+- **Untagged PipeLines:** toggles like "include untagged" (models with no pipeline tag)
+
+Below the filter bars is a scope notice explaining coverage limits and linking to HF Search for full model discovery.
 
 
 ### Quantization Filter Selection
@@ -69,31 +72,48 @@ The **Quant Types** chip bar lets you toggle popular quant type categories on/of
 - GGUF
 - MLX
 - Safe Tensors
-- Others - whatever doesn't match the above
+- Others — whatever doesn't match the above (GPTQ, EETQ, AQLM, EXL2, Marlin, BNB, INT8, INT4, Q8, Q4)
 
-Quant method detection checks both model name and tags for known keywords (awq, fp4, fp8, gguf, mlx, etc.).
-Fine-tunes (cross-author models derived from a base) are labeled "finetune" with a green badge.
-All detected quant methods are displayed when a model ID contains multiple keywords.
+Quant method detection checks both model name and tags for known keywords. When a model ID contains multiple quant keywords, all are displayed in the badge. Fine-tunes (cross-author models derived from a base) are labeled "finetune" with a green badge.
 
 ### Output Display Filters
 
-Above the displayed results are 4 text boxes which may be used to selectively filter the output.
+Above the displayed results are 4 text boxes which may be used to selectively filter the output. Each has a clear button (✕) for quick reset.
 
 The *L1 Author* box pins matching Base Model Authors to the top of the hierarchical tree rather than hiding non-matching authors.
 
 The *L2 Model ID*, *L3 Author*, and *L4 Model ID* filters act as global search terms that cascade through the hierarchy. For example, typing a model name in the *L2 Model ID* box will narrow base models across all authors, which in turn updates L1 author counts to reflect only matching models. This intentional behavior lets you quickly find specific models regardless of which author hosts them. The L3 and L4 filters apply at their respective expansion levels within already-expanded sections.
 
+### Hidden Models Preview Popups
+
+When the *L2 Model ID* or *L4 Model ID* filter hides models, a hidden count link appears below each affected table (e.g., "+12 hidden by search settings"). Hovering over this link opens a **Hidden Models Preview** popup showing all filtered-out models in a scrollable table.
+
+The popup displays:
+- **Model ID** — clickable link to the HuggingFace model page
+- **Params** — parameter count (resolved from cache; em-dash if unknown)
+- **Quant** — detected quant method, or "SAFE TENSOR" when no quant keyword is found in the name
+- **Tag** — pipeline tag for the model
+- **Updated** — last modification date (YYYY-MM-DD format)
+
+Models are sorted by Updated date descending (most recent first). The popup features:
+- Sticky header ("Hidden Models Preview"), sticky column headers, and a persistent footer showing total hidden count
+- Center-positioned over the trigger link with viewport boundary clamping
+- 200ms hover delay to prevent flicker on accidental mouse passes
+- Stays visible when hovering into the popup so links are clickable
+- Resets scroll position to top each time it opens
+
 ### Additional Result Table Features
 
 - **Column sorting** - Available at every level by clicking the column headers
-- **Expandable rows** - Click on any row (excluding the link) to expand 
+- **Expandable rows** - Click on any row (excluding the link) to expand
 - **Cached results** - Re-expanding is instant; task fetches are skipped once complete; stale-generation renders are discarded
 - **Parameter deepening** - Models with unknown parameter counts are fetched when rows are opened and results are updated in real time (if available)
-- **Infer Missing Parameters chip** — When enabled (default), models with unknown params search their children to deduce the parent's parameter count via API
-- **Hide Missing Parameters chip** — When enabled, models without a known parameter count are hidden from L1 and L2 entirely
+- **Infer Missing Params chip** — When enabled (default), models with unknown params search their children to deduce the parent's parameter count via API. Uses name-based B/M regex first, then searches children (2 API calls per model), then fetches individual child cards (up to 10; stops early after 3 agreeing results)
+- **Hide Missing Params chip** — When enabled, models without a known parameter count are hidden from L1 and L2 entirely
 - **API call counter** — displays total requests made in the session; hover for rate-limit info; flashes amber during active rate limiting (3+ consecutive 429s)
-- **Clear Cache button** — empties all in-memory caches (param cache, LRU model cache, inflight state, inference tracking) while preserving filters, sliders, and expanded sections
+- **Clear Cache button** — empties all in-memory caches (param cache, LRU model cache, inflight state, inference tracking) while preserving filters, sliders. Collapses expanded sections — re-expand to reload from API
 - **Quant badges** — color-coded by method (FP4, FP8, AWQ, GGUF, MLX, etc.); all detected methods shown; orphan quants get a yellow badge
+- **Debug bar** - "Dump of all Fetched Models" chip shows raw `_allFetched` data to verify if a model was fetched before filter/suppression logic hides it
 
 ## Caveats
 

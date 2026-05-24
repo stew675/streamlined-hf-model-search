@@ -35,7 +35,7 @@ All render-related state is now managed by `RenderCoordinator` — a centralized
 | Detail sort | `_state.detailSort` | Per-section sort keyed by `"l2-{author}"`, `"l3-{parentId}"`, `"l4-{parentId}-{author}"` |
 | Expanded rows | `_state.expandedSections` | Set of `"a|{author}"`, `"m|{modelId}"`, `"g|{parentId}|{author}"` keys |
 | Text filters | `_state.textFilters` | `{l1Author, l2Model, l3Author, l4Model}` |
-| L2 render state | `_levelState.l2` | Map `author → {idx, author, models, totalBeforeFilter}` |
+| L2 render state | `_levelState.l2` | Map `author → {idx, author, models, totalBeforeFilter, allBaseModels}` — `allBaseModels` is the popup source for hidden models (same set `totalBeforeFilter` was computed from) |
 | L3 render state | `_levelState.l3` | Map `parentId → {l2Idx, modelIdx, parentId, children}` |
 | L4 render state | `_levelState.l4` | Map `key → {l2Idx, modelIdx, gIdx, parentId, author, quants}` |
 
@@ -128,9 +128,9 @@ Any State Change
 | Function | Purpose |
 |----------|---------|
 | `renderMain(authorData)` | Renders L1 author table |
-| `renderL2(idx, models, container)` | Renders L2 base models |
+| `renderL2(idx, author, models, container, totalBeforeFilter, popupSource)` | Renders L2 base models with hidden count link and popup wiring; `popupSource` must match the set used to compute `totalBeforeFilter` |
 | `renderL3(l2Idx, modelIdx, parentId, children, container)` | Renders L3 quant author groups |
-| `renderL4(l2Idx, modelIdx, gIdx, quants, container)` | Renders L4 individual quants |
+| `renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container)` | Renders L4 individual quants with hidden count link and popup wiring for text-filtered models |
 | `loadAuthorModels(idx, author, container)` | Async fetch for L2, deepens unknown `paramB` in batches of 4; post-deepening parent lookup for quant models without B/M suffix |
 | `loadChildren(l2Idx, modelIdx, parentId, container)` | Async fetch for L3/L4 (two search queries, deduplicated via `_inflightChildren`) |
 | `refreshAllExpanded()` | Re-renders all open sections (filter/slider changes) — three phases: L1 → L2 → L3 to ensure parent rows exist before re-expanding children |
@@ -173,6 +173,19 @@ Any State Change
 | `enforceFromGap(fromEl, toEl, minGap, max)` | Pushes `to` forward when `from` knob violates minimum gap |
 | `enforceToGap(fromEl, toEl, minGap)` | Pushes `from` backward when `to` knob violates minimum gap |
 | `setupSliderEvents(from, to, minGap, max, read, updateUI, markDirty)` | Wires input/change events for both knobs of a dual range slider |
+
+#### Hidden Models Popup Functions
+| Function | Purpose |
+|----------|---------|
+| `getFilteredOutModels(source, displayedIds, maxSamples?)` | Given a source array and displayed IDs, returns `{ samples, totalHidden }` — scans once per hover (lazy), no API calls. Returns all models by default (no `maxSamples` cap). Sorted by Updated date descending. |
+| `renderFilteredPopup(container, result)` | Renders popup table with sticky header ("Hidden Models Preview"), sticky column headers, scrollable body, and persistent footer showing total hidden count. Columns: Model ID (link), Params, Quant (SAFE TENSOR fallback), Tag, Updated. |
+| `positionPopupCenter(trigger, popup)` | Measures trigger position within `.detail-count` parent, centers popup over trigger text, clamps to parent bounds (5px margin). Called before each show. |
+| `schedulePopupShow(popupEl, delay)` | Shows popup after 200ms debounce; resets `scrollTop = 0` on each show so list starts at top. Uses `_popupTimers` Map for cancellation. |
+| `schedulePopupHide(popupEl, delay)` | Hides popup after 300ms delay (allows time to move mouse into popup area). Cancelled immediately when entering popup. |
+| `wirePopupHover(trigger, popup, makeContent)` | Wires shared hover events on trigger and popup so popup stays alive when moving between them. Content is lazily rendered on first show only (`contentReady` flag). |
+
+#### Popup State
+- `_popupTimers` — Map `<popupEl → timeout handle>` for debounced show/hide; cleared on hide, cancelled on mouseenter into popup
 
 ### Constants
 
@@ -232,12 +245,17 @@ Open `streamlined-hf-model-search.html` in a browser. Validate:
 15. Same-author quants (e.g. `Qwen/Qwen2.5-7B-GGUF` alongside `Qwen/Qwen2.5-7B`) appear at L2 under their author, not silently suppressed
 16. Rapid double-clicking "Get Results" or rapidly expanding/collapsing L2 rows does not produce stale renders or duplicate API calls (generation guard and inflight dedup)
 17. `_allFetched` does not exceed 16,384 entries (oldest models dropped by `lastModified`)
-18. "Hide Missing Parameters" chip toggles on/off with proper active/inactive styling
-19. When "Hide Missing Parameters" is enabled, models with "—" in the Params column are hidden from L1 and L2
-20. When "Hide Missing Parameters" is enabled and all of an author's base models lack params, that author is removed from the L1 list entirely
-21. API counter tooltip appears on hover over `#api-counter-wrap` with rate-limit info
-22. API counter text flashes amber when 3+ consecutive 429 responses are detected; returns to normal on next successful call
-23. "Clear Cache" button clears all caches, collapses expanded sections, and re-renders L1; filter/slider state preserved; button shows "Cleared!" feedback briefly
+18. Hidden Models Preview popups appear at L2 and L4 when filters hide models; hover triggers show all hidden models in a scrollable table with sticky header/columns/footer
+19. Popup centers over trigger text with boundary clamping (5px margin); 200ms delay prevents flicker; stays visible when hovering into popup so links are clickable
+20. Popup resets scroll to top on each show; models sorted by Updated date descending
+21. Popup quant column shows "SAFE TENSOR" for unknown quant methods (not em-dash)
+22. Popup hidden count matches the L2/L4 trigger count exactly (same source set, no orphan/nested inflation)
+23. "Hide Missing Params" chip toggles on/off with proper active/inactive styling
+24. When "Hide Missing Params" is enabled, models with "—" in the Params column are hidden from L1 and L2
+25. When "Hide Missing Params" is enabled and all of an author's base models lack params, that author is removed from the L1 list entirely
+26. API counter tooltip appears on hover over `#api-counter-wrap` with rate-limit info
+27. API counter text flashes amber when 3+ consecutive 429 responses are detected; returns to normal on next successful call
+28. "Clear Cache" button clears all caches, collapses expanded sections, and re-renders L1; filter/slider state preserved; button shows "Cleared!" feedback briefly
 
 ## Common Pitfalls
 
@@ -260,3 +278,6 @@ Open `streamlined-hf-model-search.html` in a browser. Validate:
 - **CSS.escape in selectors**: `refreshAllExpanded` uses `CSS.escape(author)` in query selectors — any new dynamic selector that interpolates user-controlled strings (author names, model IDs) should follow suit to prevent broken queries or injection.
 - **Clear Cache + generation guard**: The Clear Cache handler increments `_fetchGeneration` to abort stale async operations (`loadAuthorModels`, `deriveVisibleUnknowns`, `tryResolveModelParam`). Unlike `applyFilters`, it collapses all expanded sections instead of saving/restoring them — the LRU cache is cleared so there is no data to re-render from. Users re-expand authors to trigger fresh API fetches and param deepening.
 - **_paramCache cleared by Clear Cache**: Model parameter counts are immutable (they don't change between sessions), so the cache persists across renders within a session. However, Clear Cache explicitly clears it along with all other caches. The Map grows only with unique model IDs encountered, bounded by the number of models the user has expanded — worst case memory impact at 16384 entries estimated at 1.4MB.
+- `renderL2` signature: Takes 6 parameters `(idx, author, models, container, totalBeforeFilter, popupSource)`. The `popupSource` must be the same array that `totalBeforeFilter` was computed from — typically `nonQuantBase` (orphan/nested quants already removed). Passing raw cached base models will inflate the popup count.
+- **Popup source consistency**: The L2 hidden count and popup hidden count must match exactly. This is ensured by passing `popupSource` through all `renderL2` callers. If they don't match, check that the caller passes the same source for both `totalBeforeFilter` (count) and `popupSource` (array).
+- **Popup ID sanitization**: L4 popup IDs replace `/` with `__` in parentId (`l4SafeId`) to produce valid HTML IDs. The trigger and popup must use the same sanitized key.
