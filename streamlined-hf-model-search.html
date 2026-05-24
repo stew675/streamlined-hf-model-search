@@ -2069,6 +2069,14 @@ function applyTextFilters() {
 }
 const debouncedTextFilter = debounce(applyTextFilters, CONFIG.DEBOUNCE_MS);
 
+// Re-render using existing in-memory data — no API calls, no generation bump.
+function applyLocalFilters() {
+  if (!_allFetched || _allFetched.length === 0) return;
+  const saved = new Set(expandedSections);
+  recomputeAndRender(saved);
+}
+const debouncedSliderUpdate = debounce(applyLocalFilters, CONFIG.DEBOUNCE_MS);
+
 async function tryResolveModelParam(m, gen, idx, author, container, getFiltered, totalBeforeFilter) {
   const rowEl = document.querySelector(`tr.l2-row[data-model="${CSS.escape(m.id)}"]`);
   if (rowEl) rowEl.classList.add("inferring");
@@ -2166,7 +2174,7 @@ function buildDateSlider() {
   from.value = sliderFrom;
   to.value = sliderTo;
   const read = () => { sliderFrom = parseInt(from.value); sliderTo = parseInt(to.value); };
-  setupSliderEvents(from, to, 1, CONFIG.DATE_SLIDER_MAX, read, updateDateUI, debounce(markDirty, CONFIG.DEBOUNCE_MS));
+  setupSliderEvents(from, to, 1, CONFIG.DATE_SLIDER_MAX, read, updateDateUI, debouncedSliderUpdate);
   updateDateUI();
 }
 
@@ -2344,7 +2352,7 @@ function buildParamSlider() {
   from.value = paramSliderFrom;
   to.value = paramSliderTo;
   const read = () => { paramSliderFrom = parseInt(from.value); paramSliderTo = parseInt(to.value); };
-  setupSliderEvents(from, to, CONFIG.PARAM_MIN_GAP, CONFIG.PARAM_SLIDER_MAX, read, updateParamUI, debounce(markDirty, CONFIG.DEBOUNCE_MS));
+  setupSliderEvents(from, to, CONFIG.PARAM_MIN_GAP, CONFIG.PARAM_SLIDER_MAX, read, updateParamUI, debouncedSliderUpdate);
   updateParamUI();
 }
 
