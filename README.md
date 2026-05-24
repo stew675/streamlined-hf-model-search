@@ -79,9 +79,9 @@ All detected quant methods are displayed when a model ID contains multiple keywo
 
 Above the displayed results are 4 text boxes which may be used to selectively filter the output.
 
-The *L1 Author* box will move all Base Model Authors that match the text to the top of the displayed hierarchical tree.
+The *L1 Author* box pins matching Base Model Authors to the top of the hierarchical tree rather than hiding non-matching authors.
 
-The other text filters control which models and derivative authors will be displayed at the L2, L3, and L4 expansion levels.
+The *L2 Model ID*, *L3 Author*, and *L4 Model ID* filters act as global search terms that cascade through the hierarchy. For example, typing a model name in the *L2 Model ID* box will narrow base models across all authors, which in turn updates L1 author counts to reflect only matching models. This intentional behavior lets you quickly find specific models regardless of which author hosts them. The L3 and L4 filters apply at their respective expansion levels within already-expanded sections.
 
 ### Additional Result Table Features
 

@@ -218,7 +218,7 @@
 <a href="#main-table" class="skip-link">Skip to main content</a>
 <h1><span aria-hidden="true">🔍</span> A Streamlined Hugging Face Model Search</h1>
 <main>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.09</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.10</span></div>
 <div id="date-slider">
   <h2 class="ds-title">Date Range</h2>
   <div class="ds-track-wrap" role="group" aria-label="Date range filter">
@@ -290,13 +290,13 @@
 </div>
 <div id="text-filter-row">
   <label for="l1-author-filter">L1 Author:</label>
-   <span class="fiw"><input type="text" id="l1-author-filter" placeholder="All authors (pinned top)" autocomplete="off"><span class="fic" data-for="l1-author-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
-  <label for="l2-model-filter">L2 Model ID:</label>
-  <span class="fiw"><input type="text" id="l2-model-filter" placeholder="Any base model" autocomplete="off"><span class="fic" data-for="l2-model-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
-  <label for="l3-author-filter">L3 Author:</label>
-  <span class="fiw"><input type="text" id="l3-author-filter" placeholder="Any quant author" autocomplete="off"><span class="fic" data-for="l3-author-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
-  <label for="l4-model-filter">L4 Model ID:</label>
-  <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" autocomplete="off"><span class="fic" data-for="l4-model-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
+    <span class="fiw"><input type="text" id="l1-author-filter" placeholder="All authors (pinned top)" title="Pins matching authors to the top of L1; does not hide non-matching authors." autocomplete="off"><span class="fic" data-for="l1-author-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
+   <label for="l2-model-filter">L2 Model ID:</label>
+   <span class="fiw"><input type="text" id="l2-model-filter" placeholder="Any base model" title="Filters base models across all authors. L1 counts will update to reflect only matching models." autocomplete="off"><span class="fic" data-for="l2-model-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
+   <label for="l3-author-filter">L3 Author:</label>
+   <span class="fiw"><input type="text" id="l3-author-filter" placeholder="Any quant author" title="Filters quant authors within already-expanded L2 sections." autocomplete="off"><span class="fic" data-for="l3-author-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
+   <label for="l4-model-filter">L4 Model ID:</label>
+   <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" title="Filters individual quant models within already-expanded L3 sections." autocomplete="off"><span class="fic" data-for="l4-model-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
 </div>
 <div id="scope-notice">Top 500 by downloads + top 500 by recent updates per pipeline tag, plus 1000 trending models — broader coverage of popular and recently active models. Older or niche models may not appear; use <a href="https://huggingface.co/models" target="_blank" rel="noopener noreferrer">HF Search</a> for full coverage.</div>
 <table id="main-table" aria-label="Authors and base model counts">
@@ -930,10 +930,14 @@ function modelPassesAllFilters(m) {
 // Filter pipeline: compute L1 authors from _allFetched. knownIds is the full set (not date-filtered)
 // so isOrphanQuant and isNestedQuant can correctly suppress quants whose parent is in our dataset
 // even if the parent is hidden by the date/param sliders.
-// Text filters (_l1AuthorFilter, _l2ModelFilter, _l3AuthorFilter, _l4ModelFilter) are each
-// scoped to their respective tree level — L1 filters authors at the top level, L2 filters base
-// model names, etc. _l1AuthorFilter pins matching authors to the top rather than hiding
-// non-matches (see renderMain), while L2-L4 filters are strict substring matches.
+// Text filters (_l1AuthorFilter, _l2ModelFilter, _l3AuthorFilter, _l4ModelFilter) act as
+// global search terms that cascade upward through the hierarchy. _l1AuthorFilter pins matching
+// authors to the top of L1 rather than hiding non-matches (see renderMain). _l2ModelFilter is a
+// strict substring match applied in modelPassesAllFilters() before author grouping, so typing
+// in the L2 filter narrows base models across all authors and alters L1 counts. This global
+// behavior is intentional: it lets users quickly narrow down to specific models of interest
+// regardless of which author hosts them. The L3 and L4 filters only take effect at their
+// respective render phases (renderL3, renderL4), not in computeAuthorData().
 function computeAuthorData() {
   buildCanonicalAuthors();
   const all = _allFetched || [];

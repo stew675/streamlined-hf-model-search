@@ -22,7 +22,7 @@ IMPROVEMENTS.md          — Code review tracking
 4. **Render**: `computeAuthorData()` applies date + param slider ranges, From/To/Special/Quant filters, canonical dedup, and orphan/nested suppression → groups surviving models by author → renders L1.
 5. **L1 expand**: Fetch full author model list (1000) → filter base models (including same-author fine-tunes) → cache full list → apply date + param slider filters → render L2 → deepen unknown `paramB` in batches of 4 via individual model API (only for models that pass the date/param filters). After deepening, a second pass strips quant suffixes from still-unknown model IDs and inherits `paramB` from the parent (looked up in the locally-resolved `baseModels` or `_allFetched`).
 6. **L2 expand**: Search HF API for children by parent ID and model name → match on `cardData.base_model` or quant tags. Same-author fine-tunes are excluded (already shown at L2). Cross-author fine-tunes are labeled "finetune". Deduplicated via `_inflightChildren`.
-7. **L3/L4**: Group children by quant author, apply active quant filters, render sortable table. Text filters (`_l3AuthorFilter`, `_l4ModelFilter`) apply at their respective render levels, not in `modelPassesAllFilters`.
+7. **L3/L4**: Group children by quant author, apply active quant filters, render sortable table. Text filters (`_l3AuthorFilter`, `_l4ModelFilter`) apply at their respective render levels, not in `modelPassesAllFilters`. In contrast, `_l2ModelFilter` is applied globally within `modelPassesAllFilters()` before author grouping, so it narrows base models across all authors and cascades upward to affect L1 counts. This global behavior is intentional — it lets users quickly find specific models regardless of hosting author.
 
 ### State Management
 
