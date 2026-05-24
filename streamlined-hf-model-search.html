@@ -818,20 +818,16 @@ function getParamCount(m) {
   if (m.safetensors && m.safetensors.total != null) result = m.safetensors.total / 1e9;
   else if (m.gguf && m.gguf.total != null) result = m.gguf.total / 1e9;
   else {
-    // Skip ID-based B/M parsing for quant models — suffixes like -4B often refer to
-    // bit width (4-bit) rather than parameter count, leading to incorrect values.
-    const idLower = m.id.toLowerCase();
-    if (RE_Q_EXISTS.test(idLower)) {
-      result = null;
-    } else {
-      // Negative lookbehind avoids MoE conventions like "A2B" (active params)
-      // and any future letter-prefixed annotation schemes.
-      const bMatch = m.id.match(RE_B_PARAM);
-      if (bMatch) result = parseFloat(bMatch[1]);
-      else {
-        const mMatch = m.id.match(RE_M_PARAM);
-        result = mMatch ? parseFloat(mMatch[1]) / 1000 : null;
-      }
+    // Try B/M suffix in model ID even for quant models — the negative lookbehind
+    // already guards against MoE false positives (A2B, 8x22B). Quant suffixes like
+    // -GGUF or -AWQ are not numeric, so they won't interfere with B/M extraction.
+    // The rare case of -4B meaning 4-bit rather than 4B params is acceptable given
+    // how infrequent it is vs the API calls saved for every quant model with a clean ID.
+    const bMatch = m.id.match(RE_B_PARAM);
+    if (bMatch) result = parseFloat(bMatch[1]);
+    else {
+      const mMatch = m.id.match(RE_M_PARAM);
+      result = mMatch ? parseFloat(mMatch[1]) / 1000 : null;
     }
   }
   _paramCache.set(m.id, result);
@@ -1395,19 +1391,25 @@ async function loadAuthorModels(idx, author, container) {
     if (!cacheAccess(author + "_models")) cacheSet(author + "_models", models);
 
     const authorKnownIds = new Set(models.map(x => x.id));
-    const baseModels = models.filter(m => isBase(m)).map(m => ({
-      id: m.id,
-      downloads: m.downloads || 0,
-      likes: m.likes || 0,
-      created_at: m.createdAt || "",
-      updated_at: m.lastModified || "",
-      lastModified: m.lastModified || "",
-      tags: m.tags || [],
-      paramB: getParamCount(m),
-      pipeline_tag: m.pipeline_tag || "",
-      _orphanQuant: isOrphanQuant(m, authorKnownIds),
-      _nestedQuant: isNestedQuant(m, authorKnownIds, models)
-    }));
+    const baseModels = models.filter(m => isBase(m)).map(m => {
+      const pb = getParamCount(m);
+      if (pb !== null && !m.safetensors?.total && !m.gguf?.total) {
+        _inferredFromNameIds.add(m.id);
+      }
+      return {
+        id: m.id,
+        downloads: m.downloads || 0,
+        likes: m.likes || 0,
+        created_at: m.createdAt || "",
+        updated_at: m.lastModified || "",
+        lastModified: m.lastModified || "",
+        tags: m.tags || [],
+        paramB: pb,
+        pipeline_tag: m.pipeline_tag || "",
+        _orphanQuant: isOrphanQuant(m, authorKnownIds),
+        _nestedQuant: isNestedQuant(m, authorKnownIds, models)
+      };
+    });
 
     cacheSet(author, baseModels);
 

@@ -144,7 +144,7 @@ Any State Change
 | `normalizeModel(m)` | Strips API response to minimal fields: id, downloads, likes, dates, tags, safetensors, gguf, cardData.base_model only |
 | `isInDateRange(createdAt)` | Date slider range check (null dates pass through) |
 | `isInParamRange(paramB)` | Param slider range check |
-| `getParamCount(model)` | Extracts param count from `safetensors.total`, `gguf.total`, or B/M suffix in model ID. Returns null for quant models without a B/M in the name, which are resolved via individual API fetch or parent lookup |
+| `getParamCount(model)` | Extracts param count from `safetensors.total`, `gguf.total`, or B/M suffix in model ID. Tries B/M regex even for quant models — only returns null when no B/M pattern is found |
 | `paramValueToLabel(val)` | Formats param count for display (int ≥5B, 1 decimal ≥1B, int M <1B) |
 | `buildDateSlider()` | Builds the date dual-range slider with min-gap enforcement and live tooltip updates |
 | `buildParamSlider()` | Builds the param size dual-range slider with piecewise-linear mapping |
