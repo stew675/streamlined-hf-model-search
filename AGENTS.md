@@ -157,9 +157,9 @@ Any State Change
 | `cacheAccess(key)` | Retrieves entry and promotes it to most-recently-used |
 | `escapeHtml(str)` | Single-pass HTML entity encoding via `_htmlEsc` lookup map |
 | `renderErrorWithRetry(container, message, retryFn)` | Renders error state with a one-shot Retry button into any detail container |
-| `fetchTasks(tasks)` | Concurrent fetch of top 500 models per task (downloads + lastModified), capped at `FETCH_CONCURRENCY` |
+| `resolveParamFromChildren(modelId)` | Fetches children via API (name + ID queries), fetches individual cards up to `DERIVED_BATCH_SIZE`; returns max param count. Early-exit: stops after 3 non-null results agreeing on the current max |
 | `injectBaseModels(all, onBatch)` | Two-pass base model injection: scan for missing parents → fetch in batches with incremental re-render callbacks |
-| `addKeyboardClick(el)` | Attaches Enter/Space → click keyboard handler to an element; used across all interactive elements |
+| `addKeyboardClick(el)` | Attaches Enter/Space → click handler to non-button elements; `<button>` elements use native keyboard activation |
 | `strictNameMatch(candidateId, modelName)` | Strips quant suffixes from `candidateId` and compares to `modelName`; deduplicates children matching for L3/L4 |
 | `hasBaseModel(cd, targetId)` | Checks if `cardData.base_model` (string or array form) matches `targetId` |
 | `toggleSet(option, options, activeSet)` | Tri-state toggle: off→on, all→solo, solo→all, otherwise→off. Used by filter/act-tag/bar logic |
@@ -193,6 +193,8 @@ Any State Change
   - `ALL_FETCHED_MAX: 16384` — Max `_allFetched` entries (oldest dropped by date)
   - `FETCH_CONCURRENCY: 5` — Max concurrent task fetches during init
   - `THUMB_SIZE: 18` — Slider thumb diameter in px (used for center-position calculation)
+- `RE_Q_EXISTS` / `RE_Q_MATCH` / `RE_Q_STRIP` — Precompiled regexes for quant method detection (existence check, global match, trailing-strip)
+- `RE_B_PARAM` / `RE_M_PARAM` — Precompiled regexes for B/M parameter suffixes in model IDs
 - `Q_METHODS` — All quantization keywords for detection (awq, gptq, bitsandbytes, eetq, aqlm, gguf, exl2, marlin, mlx, bnb, fp4, fp8, nf4, int8, int4, q8, q4)
 - `FILTER_DISPLAY` — Subset shown in filter bar (awq, fp4, fp8, finetune, gguf, mlx, safetensors, others)
 - `DEFAULT_ACTIVE_TAGS` — Pipeline tags enabled by default on initial load
@@ -203,7 +205,7 @@ Any State Change
 - **Minimal comments in code** — compact by default, but multi-line explanatory comments are used for non-obvious design decisions (rate limiter rationale, generation guard vs AbortController, memory tradeoffs)
 - **Dark theme** — GitHub/HF color palette (`#0d1117`, `#161b22`, `#58a6ff`, etc.)
 - **Indentation** — 2 spaces
-- **Event delegation** — attach one listener per container after first `innerHTML` injection (`_delegatedL2` / `_delegatedL3` / `_delegatedL4` flag); state stored in `_lXState` on the container
+- **Event delegation** — attach one listener per container after first `innerHTML` injection (`_delegatedL2` / `_delegatedL3` / `_delegatedL4` flag); state stored in `_lXState` on the container. `<button type="button">` toggles use native keyboard activation (Enter/Space → click); no explicit keyboard handler needed
 - **ID scheme** — `t{level}-{idx}` for toggles, `d{level}-{idx}` for detail rows, `i{level}-{idx}` for inner containers
 - **Level discrimination** — `<th>` elements carry `data-level="2|3|4"` so sort handlers can reject events from nested levels even after `innerHTML` detaches the target from the DOM
 - **Generation guard** — All async functions that mutate shared state capture `const gen = _fetchGeneration` at entry and check `if (gen !== _fetchGeneration) return;` before any side-effect. Applied in `applyFilters`, `injectBaseModels`, `loadAuthorModels`, and the `onBatch` callback.
@@ -250,6 +252,7 @@ Open `streamlined-hf-model-search.html` in a browser. Validate:
 - **Detached event target**: Sort handlers capture `const inner = e.target.closest(".detail-inner")` in a variable before any `innerHTML` replacement (which detaches the event target, making `closest()` return null). Combined with `data-level` attribute on `<th>`, both toggle and sort paths are correctly guarded even after DOM detachment.
 - **Same-author fine-tunes**: `isBase()` treats same-author fine-tunes as base models (e.g., `Qwen/Qwen3.5-9B` is a fine-tune of `Qwen/Qwen3.5-9B-Base` but both author = "Qwen", so both appear at L2). `loadChildren()` skips same-author fine-tunes at L3 (already at L2) and labels cross-author fine-tunes as "finetune".
 - **Parent param inheritance**: GGUF/AWQ/GPTQ quant models without B/M in their name (e.g. `Qwen/Qwen3-Coder-Next-GGUF`) get `paramB` from their parent via the post-deepening pass. The parent must be in the same `baseModels` array (same author) or `_allFetched`. Stripping is iterative — removes trailing `-segment` one at a time until a known parent is found.
+- **Early-exit in param resolution**: `resolveParamFromChildren` fetches individual child cards (up to `DERIVED_BATCH_SIZE`=10) but stops early after 3 non-null results that agree on the current maximum. This prevents redundant API calls for well-known models while still scanning varied children for obscure ones.
 - **Inflight dedup**: `_inflightChildren` map stores `{ promise, results }` entries keyed by `children-{parentId}` to prevent duplicate L3/L4 fetches. The entry is set synchronously before the first `await`; concurrent callers await the same promise and read results directly from the entry (bypassing the evictable LRU cache).
 - **Cache eviction fallback**: The LRU cache (`cache`) is capped at 200 entries. `children-{parentId}` entries can be evicted if many L2 models are expanded. When this happens, L3 expansion falls back to `s.children` from `l3StateMap` (which stores the full children array and survives eviction).
 - **CSS.escape in selectors**: `refreshAllExpanded` uses `CSS.escape(author)` in query selectors — any new dynamic selector that interpolates user-controlled strings (author names, model IDs) should follow suit to prevent broken queries or injection.

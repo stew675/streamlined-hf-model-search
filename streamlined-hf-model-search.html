@@ -205,7 +205,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.22</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.01</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -261,7 +261,7 @@
 </div>
 <div id="sort-announce" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></div>
 <div id="button-row">
-  <span id="derived-param-chip" class="filter-chip active" role="checkbox" aria-checked="true" tabindex="0" style="margin-right:auto; user-select:none" title="When enabled, models with unknown parameter counts will first try a B/M regex from the model name, then search their children (2 search API calls per model) and fetch individual child model cards (up to 10 per model) to try to infer the parent's parameter count.">Infer Missing Parameters</span>
+  <span id="derived-param-chip" class="filter-chip active" role="checkbox" aria-checked="true" tabindex="0" style="margin-right:auto; user-select:none" title="When enabled, models with unknown parameter counts will first try a Base Model regex from the model name, then search their children (2 search API calls per model) and fetch individual child model cards (up to 10 per model; stops early after 3 agreeing results) to infer the parent's parameter count.">Infer Missing Parameters</span>
   <span id="hide-missing-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" tabindex="0" style="user-select:none" title="When enabled, models without a known parameter count are hidden from display.">Hide Missing Parameters</span>
   <div id="button-center">
     <button id="get-quick-results-btn" class="action-btn" title="Fetch top models per pipeline tag (by downloads + lastModified) — no cross-author base model injection. Faster but may miss quantizations whose parent base model is from a different author.">Get Quick Results</button>
@@ -444,6 +444,11 @@ let sliderTo = CONFIG.INIT_SLIDER_TO;
 let paramSliderFrom = CONFIG.INIT_PARAM_SLIDER_FROM;
 let paramSliderTo = CONFIG.INIT_PARAM_SLIDER_TO;
 const Q_METHODS = ["awq", "gptq", "bitsandbytes", "eetq", "aqlm", "gguf", "exl2", "marlin", "mlx", "bnb", "fp4", "fp8", "nf4", "int8", "int4", "q8", "q4"];
+const RE_Q_EXISTS = /(?:awq|gptq|bitsandbytes|eetq|aqlm|gguf|exl2|marlin|mlx|bnb|fp4|fp8|nf4|int8|int4|q8|q4)/i;
+const RE_Q_MATCH = /(?:awq|gptq|bitsandbytes|eetq|aqlm|gguf|exl2|marlin|mlx|bnb|fp4|fp8|nf4|int8|int4|q8|q4)/gi;
+const RE_Q_STRIP = /-(?:awq|gptq|bitsandbytes|eetq|aqlm|gguf|exl2|marlin|mlx|bnb|fp4|fp8|nf4|int8|int4|q8|q4)$/i;
+const RE_B_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Bb]/;
+const RE_M_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Mm]/;
 const FILTER_DISPLAY = ["awq", "fp4", "fp8", "finetune", "gguf", "mlx", "safetensors", "others"];
 const activeFilters = new Set(["finetune", "gguf", "safetensors"]);
 const activeTaskFilters = new Set();
@@ -611,13 +616,13 @@ function isOrphanQuant(model, knownIds) {
   const cd = model.cardData;
   if (cd && cd.base_model) return false;
   const idLower = model.id.toLowerCase();
-  if (!Q_METHODS.some(t => idLower.includes(t))) return false;
+  if (!RE_Q_EXISTS.test(idLower)) return false;
   return inferParent(model.id, knownIds) !== null;
 }
 
 function getOrphanQuantMethod(modelId) {
   const idLower = modelId.toLowerCase();
-  return Q_METHODS.filter(t => idLower.includes(t));
+  return idLower.match(RE_Q_MATCH) || [];
 }
 
 function isNestedQuant(m, knownIds, allFetched) {
@@ -626,7 +631,7 @@ function isNestedQuant(m, knownIds, allFetched) {
   const baseId = getBaseModelId(cd);
   if (!baseId) return false;
   const idLower = m.id.toLowerCase();
-  if (!Q_METHODS.some(t => idLower.includes(t))) return false;
+  if (!RE_Q_EXISTS.test(idLower)) return false;
   if (!knownIds.has(baseId)) return false;
   // Only suppress if the parent is itself a non-base (quant/derivative).
   // Same-author quants whose parent is a true base model should appear at L2.
@@ -686,18 +691,11 @@ function addKeyboardClick(el) {
 }
 function strictNameMatch(candidateId, modelName) {
   let name = candidateId.split("/").slice(1).join("/");
-  let changed;
   do {
-    changed = false;
-    for (const q of Q_METHODS) {
-      const suffix = '-' + q;
-      if (name.toLowerCase().endsWith(suffix)) {
-        name = name.slice(0, -suffix.length);
-        changed = true;
-        break;
-      }
-    }
-  } while (changed);
+    const m = name.match(RE_Q_STRIP);
+    if (!m) break;
+    name = name.slice(0, -m[0].length);
+  } while (true);
   return name.toLowerCase() === modelName.toLowerCase();
 }
 function hasBaseModel(cd, targetId) {
@@ -823,15 +821,15 @@ function getParamCount(m) {
     // Skip ID-based B/M parsing for quant models — suffixes like -4B often refer to
     // bit width (4-bit) rather than parameter count, leading to incorrect values.
     const idLower = m.id.toLowerCase();
-    if (Q_METHODS.some(t => idLower.includes(t))) {
+    if (RE_Q_EXISTS.test(idLower)) {
       result = null;
     } else {
       // Negative lookbehind avoids MoE conventions like "A2B" (active params)
       // and any future letter-prefixed annotation schemes.
-      const bMatch = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Bb]/);
+      const bMatch = m.id.match(RE_B_PARAM);
       if (bMatch) result = parseFloat(bMatch[1]);
       else {
-        const mMatch = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Mm]/);
+        const mMatch = m.id.match(RE_M_PARAM);
         result = mMatch ? parseFloat(mMatch[1]) / 1000 : null;
       }
     }
@@ -1374,7 +1372,6 @@ function renderMain(authorData) {
   }).join('');
 
   tbody.innerHTML = html;
-  document.querySelectorAll("#main-table .toggle").forEach(addKeyboardClick);
   document.getElementById("count").textContent =
     `${sorted.length} authors with base models in selected range. Click to expand.`;
 }
@@ -1456,13 +1453,13 @@ async function loadAuthorModels(idx, author, container) {
             // cause rounding mismatches vs the model name.  Fall back to
             // safetensors/gguf only when the ID has no B/M suffix at all.
             const idLower = (m.id || "").toLowerCase();
-            const isQuant = Q_METHODS.some(t => idLower.includes(t));
+            const isQuant = RE_Q_EXISTS.test(idLower);
             let p = null;
             if (isQuant) {
-              const idB = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Bb]/);
+              const idB = m.id.match(RE_B_PARAM);
               if (idB) p = parseFloat(idB[1]);
               else {
-                const idM = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Mm]/);
+                const idM = m.id.match(RE_M_PARAM);
                 if (idM) p = parseFloat(idM[1]) / 1000;
               }
             } else {
@@ -1577,7 +1574,6 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
   const hidden = (totalBeforeFilter != null && totalBeforeFilter > models.length) ? totalBeforeFilter - models.length : 0;
   html += `</tbody></table><div class="detail-count">${models.length} model(s)` + (hidden > 0 ? `, <span style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by search settings</span>` : '') + `</div>`;
   container.innerHTML = html;
-  container.querySelectorAll(".toggle").forEach(addKeyboardClick);
   container.dataset.l2Author = author;
   l2StateMap.set(author, { idx, author, models, totalBeforeFilter });
 
@@ -1617,6 +1613,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
             inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
             loadChildren(l2Idx, modelIdx, modelId, inner);
           }
+          tog?.focus();
         } else {
           detailRow.style.display = "none";
           tog.classList.remove("open");
@@ -1625,6 +1622,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
           for (const k of [...expandedSections]) {
             if (k.startsWith(`g|${modelId}|`)) expandedSections.delete(k);
           }
+          tog?.focus();
         }
       }
     });
@@ -1671,7 +1669,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
           const cd = m.cardData || {};
           const idLower = m.id.toLowerCase();
           const tagsStr = (m.tags || []).join(" ").toLowerCase();
-          const isQuant = Q_METHODS.some(t => idLower.includes(t) || tagsStr.includes(t));
+          const isQuant = RE_Q_EXISTS.test(idLower) || RE_Q_EXISTS.test(tagsStr);
           const childHasBase = hasBaseModel(cd, parentId);
           const childAuthor = m.id.split("/")[0];
           const parentAuthor = parentId.split("/")[0];
@@ -1682,7 +1680,10 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
                 if (m.pipeline_tag && !activeTaskFilters.has(m.pipeline_tag)) continue;
                 if (_allFetchedIds.has(m.id)) continue;
               }
-              const qMethods = Q_METHODS.filter(t => idLower.includes(t) || tagsStr.includes(t));
+              const qSet = new Set();
+              (idLower.match(RE_Q_MATCH) || []).forEach(m => qSet.add(m));
+              (tagsStr.match(RE_Q_MATCH) || []).forEach(m => qSet.add(m));
+              const qMethods = [...qSet];
               let qMethod;
               if (childHasBase) {
                 qMethod = qMethods.length ? "finetune, " + qMethods.join(", ") : "finetune";
@@ -1791,7 +1792,8 @@ async function resolveParamFromChildren(modelId) {
   // the child ID (search results lack metadata), shadowing the full response.
   // Collect params from all fetched children and use the maximum — pruning
   // (REAP, distillation) only reduces parameter counts, never increases them.
-  const paramCounts = [];
+  // Early exit: if 3 non-null results agree on the current maximum, stop.
+  let runningMax = null, maxConfidence = 0;
   for (let i = 0; i < Math.min(children.length, CONFIG.DERIVED_BATCH_SIZE); i++) {
     try {
       const full = await fetchJson(`https://huggingface.co/api/models/${children[i].id}?full=true`);
@@ -1799,12 +1801,13 @@ async function resolveParamFromChildren(modelId) {
                      (full.gguf && full.gguf.total != null) ? full.gguf.total / 1e9 : null;
       if (childP !== null) {
         _paramCache.set(children[i].id, childP);
-        paramCounts.push(childP);
+        if (childP > runningMax) { runningMax = childP; maxConfidence = 1; }
+        else if (childP === runningMax) { maxConfidence++; }
+        if (maxConfidence >= 3) break;
       }
     } catch (e) { /* skip */ }
   }
-  if (paramCounts.length > 0) return Math.max(...paramCounts);
-  return null;
+  return runningMax;
 }
 
 // ── Level 3: Quant Author Groups ──
@@ -1848,7 +1851,6 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   html += `</tbody></table>`;
   html += `<div class="detail-count">${filtered.length} child model(s) from ${groupEntries.length} author(s)${filtered.length !== children.length ? ` (filtered from ${children.length})` : ''}</div>`;
   container.innerHTML = html;
-  container.querySelectorAll(".toggle").forEach(addKeyboardClick);
   container.dataset.l3Parent = parentId;
   l3StateMap.set(parentId, { l2Idx, modelIdx, parentId, children });
 
@@ -1886,11 +1888,13 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
           const allChildren = cacheAccess(`children-${parentId}`) || s.children || [];
           const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
           renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, inner);
+          tog?.focus();
         } else {
           detailRow.style.display = "none";
           tog.classList.remove("open");
           tog.setAttribute("aria-expanded", "false");
           expandedSections.delete(groupKey);
+          tog?.focus();
         }
       }
     });
@@ -2045,10 +2049,10 @@ async function tryResolveModelParam(m, gen, idx, author, container, getFiltered,
   let resolved = null, fromName = false;
   // Try name heuristic first — fast, no API call. Many quant models embed
   // the parameter count in their ID (e.g. "Qwen3.6-27B-FP8").
-  const idB = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Bb]/);
+  const idB = m.id.match(RE_B_PARAM);
   if (idB) { resolved = parseFloat(idB[1]); fromName = true; }
   else {
-    const idM = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Mm]/);
+    const idM = m.id.match(RE_M_PARAM);
     if (idM) { resolved = parseFloat(idM[1]) / 1000; fromName = true; }
   }
   if (resolved === null) {
@@ -2386,6 +2390,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
         renderL2(idx, author, filtered, inner, nonQuantBase.length);
         deriveVisibleUnknowns();
       }
+      tog?.focus();
     } else {
       detailRow.style.display = "none";
       tog.classList.remove("open");
@@ -2396,6 +2401,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
           expandedSections.delete(key);
         }
       }
+      tog?.focus();
     }
   }
 });
@@ -2503,7 +2509,7 @@ function markLocalParents(all) {
       if (!baseId) continue;
     } else {
       const idLower = m.id.toLowerCase();
-      if (!Q_METHODS.some(t => idLower.includes(t))) continue;
+      if (!RE_Q_EXISTS.test(idLower)) continue;
       const bits = m.id.split('/');
       let name = bits[1];
       while (name.length > 0) {
@@ -2561,7 +2567,7 @@ async function injectBaseModels(all, onBatch) {
       if (!baseId) continue;
     } else {
       const idLower = m.id.toLowerCase();
-      if (!Q_METHODS.some(t => idLower.includes(t))) continue;
+      if (!RE_Q_EXISTS.test(idLower)) continue;
       const bits = m.id.split('/');
       let name = bits[1];
       while (name.length > 0) {
