@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" dir="ltr">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -182,7 +182,8 @@
     white-space: nowrap; z-index: 10; pointer-events: none;
     box-shadow: 0 4px 12px rgba(0,0,0,0.5); line-height: 1.4; text-align: left;
   }
-  #api-counter-wrap:hover .api-counter-tooltip { display: block; }
+  #api-counter-wrap:hover .api-counter-tooltip,
+  #api-counter-wrap:focus-within .api-counter-tooltip { display: block; }
   .api-counter-tooltip::after {
     content: ""; position: absolute; top: 100%; right: 16px;
     border: 6px solid transparent; border-top-color: #d2992266;
@@ -199,21 +200,25 @@
   #clear-cache-btn:hover { background: #4a2020; border-color: #f8717166; }
   #clear-cache-btn:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
   #clear-cache-btn:active { background: #5a2020; }
+  .skip-link { position: absolute; top: -100%; left: 8px; padding: 8px 16px; background: #58a6ff; color: #0d1117; z-index: 100; font-weight: 600; border-radius: 6px; }
+  .skip-link:focus { top: 8px; }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { transition-duration: 0s !important; }
   }
 </style>
 </head>
 <body>
-<h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.03</span></div>
+<a href="#main-table" class="skip-link">Skip to main content</a>
+<h1><span aria-hidden="true">🔍</span> A Streamlined Hugging Face Model Search</h1>
+<main>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.04</span></div>
 <div id="date-slider">
-  <div class="ds-title">Date Range</div>
+  <h2 class="ds-title">Date Range</h2>
   <div class="ds-track-wrap">
     <div class="ds-track-bg"></div>
     <div class="ds-track-fill" id="ds-fill"></div>
-    <input type="range" id="ds-from" min="0" max="80" value="68" step="1" role="slider" aria-label="Date range start" aria-valuemin="0" aria-valuemax="80" aria-valuenow="68" aria-describedby="ds-tooltip-from">
-    <input type="range" id="ds-to" min="0" max="80" value="80" step="1" role="slider" aria-label="Date range end" aria-valuemin="0" aria-valuemax="80" aria-valuenow="80" aria-describedby="ds-tooltip-to">
+    <input type="range" id="ds-from" min="0" max="80" value="68" step="1" aria-label="Date range start" aria-valuemin="0" aria-valuemax="80" aria-valuenow="68" aria-describedby="ds-tooltip-from">
+    <input type="range" id="ds-to" min="0" max="80" value="80" step="1" aria-label="Date range end" aria-valuemin="0" aria-valuemax="80" aria-valuenow="80" aria-describedby="ds-tooltip-to">
     <div class="ps-tooltip align-right" id="ds-tooltip-from" aria-hidden="true"></div>
     <div class="ps-tooltip align-left" id="ds-tooltip-to" aria-hidden="true">Now</div>
   </div>
@@ -223,12 +228,12 @@
   </div>
 </div>
 <div id="param-slider">
-  <div class="ds-title">Parameter Size</div>
+  <h2 class="ds-title">Parameter Size</h2>
   <div class="ds-track-wrap">
     <div class="ds-track-bg"></div>
     <div class="ds-track-fill" id="ps-fill"></div>
-    <input type="range" id="ps-from" min="0" max="220" value="100" step="1" role="slider" aria-label="Parameter size start" aria-valuemin="0" aria-valuemax="220" aria-valuenow="100" aria-describedby="ps-tooltip-from">
-    <input type="range" id="ps-to" min="0" max="220" value="130" step="1" role="slider" aria-label="Parameter size end" aria-valuemin="0" aria-valuemax="220" aria-valuenow="130" aria-describedby="ps-tooltip-to">
+    <input type="range" id="ps-from" min="0" max="220" value="100" step="1" aria-label="Parameter size start" aria-valuemin="0" aria-valuemax="220" aria-valuenow="100" aria-describedby="ps-tooltip-from">
+    <input type="range" id="ps-to" min="0" max="220" value="130" step="1" aria-label="Parameter size end" aria-valuemin="0" aria-valuemax="220" aria-valuenow="130" aria-describedby="ps-tooltip-to">
     <div class="ps-tooltip" id="ps-tooltip-from" style="left:0%" aria-hidden="true">10B</div>
     <div class="ps-tooltip" id="ps-tooltip-to" style="left:100%" aria-hidden="true">40B</div>
   </div>
@@ -275,13 +280,13 @@
   </span>
 </div>
 <div id="text-filter-row">
-  <label>L1 Author:</label>
+  <label for="l1-author-filter">L1 Author:</label>
    <span class="fiw"><input type="text" id="l1-author-filter" placeholder="All authors (pinned top)" autocomplete="off"><span class="fic" data-for="l1-author-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
-  <label>L2 Model ID:</label>
+  <label for="l2-model-filter">L2 Model ID:</label>
   <span class="fiw"><input type="text" id="l2-model-filter" placeholder="Any base model" autocomplete="off"><span class="fic" data-for="l2-model-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
-  <label>L3 Author:</label>
+  <label for="l3-author-filter">L3 Author:</label>
   <span class="fiw"><input type="text" id="l3-author-filter" placeholder="Any quant author" autocomplete="off"><span class="fic" data-for="l3-author-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
-  <label>L4 Model ID:</label>
+  <label for="l4-model-filter">L4 Model ID:</label>
   <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" autocomplete="off"><span class="fic" data-for="l4-model-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
 </div>
 <table id="main-table" aria-label="Authors and base model counts">
@@ -296,6 +301,7 @@
   <tbody id="body"></tbody>
 </table>
 <div id="count"></div>
+</main>
 
 <script>
 (function() {
@@ -1360,7 +1366,7 @@ function renderMain(authorData) {
   const html = sorted.map((a, idx) => {
     const zebra = idx % 2 === 0 ? "row-even" : "row-odd";
     return `<tr class="l1-row ${zebra}" data-l1-idx="${idx}" data-author="${escapeHtml(a.author)}">
-      <td><button type="button" class="toggle" id="t1-${idx}" aria-expanded="false">▶</button><a href="https://huggingface.co/${escapeHtml(a.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(a.author)}</a></td>
+      <td><button type="button" class="toggle" id="t1-${idx}" aria-expanded="false" aria-label="Expand ${escapeHtml(a.author)} models">▶</button><a href="https://huggingface.co/${escapeHtml(a.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(a.author)}</a></td>
       <td class="right">${a.count}</td>
       <td class="right">${fmt(a.totalDownloads)}</td>
       <td class="right">${fmt(a.totalLikes)}</td>
@@ -1525,7 +1531,7 @@ function thHtml(c, state, level) {
   const allCls = (c.headerCls || "") + " " + (c.cls || "");
   const cls = allCls.trim() + (isSorted ? " sorted" : "");
   const arrow = isSorted ? (state.asc ? "▲" : "▼") : "";
-  const ariaSort = isSorted ? ` aria-sort="${state.asc ? "ascending" : "descending"}"` : ' aria-sort="none"';
+  const ariaSort = isSorted ? ` aria-sort="${state.asc ? "ascending" : "descending"}"` : '';
   if (allCls.includes("right") || allCls.includes("center") || allCls.includes("updated-header")) {
     return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}><span class="arrow-left">${arrow}</span>${escapeHtml(c.label)}</th>`;
   }
@@ -1559,7 +1565,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
     const qMethods = getOrphanQuantMethod(m.id);
     const orphanBadge = qMethods.length ? qMethods.map(q => `<span class="badge orphan" title="Parent base model filtered out">${escapeHtml(q.toUpperCase())}</span>`).join(' ') + ' ' : '';
     return `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}">
-      <td class="model-id-cell"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
+      <td class="model-id-cell"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(m.id)}">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
       <td class="center" style="font-size:0.78rem">${m.paramB != null ? (_deepeningParamIds.has(m.id) ? `<span class="deepening-param" title="Resolved via direct API fetch">${paramValueToLabel(m.paramB)}</span>` : _inferredParamIds.has(m.id) || _inferredFromNameIds.has(m.id) ? `<span class="derived-param" title="Derived from parent or children metadata">${paramValueToLabel(m.paramB)}</span>` : paramValueToLabel(m.paramB)) : `<span class="no-param" title="No resolvable parameter count data found">—</span>`}</td>
       <td class="right">${fmt(m.downloads)}</td>
       <td class="right">${fmt(m.likes)}<span class="likes-icon">♥</span></td>
@@ -1839,7 +1845,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   // Optimized: Use map + join for table rows instead of forEach + +=
   html += sorted.map((g, gIdx) => {
     return `<tr class="l3-row" data-l3-l2="${l2Idx}" data-l3-model-idx="${modelIdx}" data-l3-parent="${escapeHtml(parentId)}" data-l3-idx="${gIdx}" data-l3-author="${escapeHtml(g.author)}">
-      <td><button type="button" class="toggle" id="t3-${l2Idx}-${modelIdx}-${gIdx}" aria-expanded="false">▶</button><a href="https://huggingface.co/${escapeHtml(g.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(g.author)}</a></td>
+      <td><button type="button" class="toggle" id="t3-${l2Idx}-${modelIdx}-${gIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(g.author)} quants">▶</button><a href="https://huggingface.co/${escapeHtml(g.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(g.author)}</a></td>
       <td class="models-cell">${g.count}</td>
       <td class="right">${fmt(g.totalDownloads)}</td>
     </tr>
