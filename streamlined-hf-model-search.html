@@ -86,6 +86,7 @@
   .deepening-param { color: #58a6ff; cursor: help; border-bottom: 1px dotted #58a6ff66; }
   .no-param { color: #f85149; cursor: help; }
   .derived-param { color: #c084fc; cursor: help; border-bottom: 1px dotted #c084fc66; }
+  .name-infer-param { color: #e3b341; cursor: help; border-bottom: 1px dotted #d2992266; }
   .likes-icon { color: #f85149; margin-left: 2px; }
   .cell-flex { display: flex; align-items: center; }
 
@@ -1591,7 +1592,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter) {
     const orphanBadge = qMethods.length ? qMethods.map(q => `<span class="badge orphan" title="Parent base model filtered out">${escapeHtml(q.toUpperCase())}</span>`).join(' ') + ' ' : '';
     return `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}">
       <td class="model-id-cell"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(m.id)}">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
-      <td class="center" style="font-size:0.78rem">${m.paramB != null ? (_deepeningParamIds.has(m.id) ? `<span class="deepening-param" title="Resolved via direct API fetch">${paramValueToLabel(m.paramB)}</span>` : _inferredParamIds.has(m.id) || _inferredFromNameIds.has(m.id) ? `<span class="derived-param" title="Derived from parent or children metadata">${paramValueToLabel(m.paramB)}</span>` : paramValueToLabel(m.paramB)) : `<span class="no-param" title="No resolvable parameter count data found">—</span>`}</td>
+      <td class="center" style="font-size:0.78rem">${m.paramB != null ? (_deepeningParamIds.has(m.id) ? `<span class="deepening-param" title="Resolved via direct API fetch">${paramValueToLabel(m.paramB)}</span>` : _inferredFromNameIds.has(m.id) ? `<span class="name-infer-param" title="Inferred from model name pattern">${paramValueToLabel(m.paramB)}</span>` : _inferredParamIds.has(m.id) ? `<span class="derived-param" title="Derived from parent or children metadata">${paramValueToLabel(m.paramB)}</span>` : paramValueToLabel(m.paramB)) : `<span class="no-param" title="No resolvable parameter count data found">—</span>`}</td>
       <td class="right">${fmt(m.downloads)}</td>
       <td class="right">${fmt(m.likes)}<span class="likes-icon">♥</span></td>
       <td class="updated-cell">${fmtDate(m.lastModified)} <span style="color:#6e7681;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
