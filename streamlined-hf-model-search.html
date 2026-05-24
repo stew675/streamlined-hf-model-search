@@ -140,7 +140,7 @@
   /* Range sliders */
   #date-slider, #param-slider { margin: 8px 0 6px; padding: 8px 14px 10px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; }
   #date-slider .ds-title, #param-slider .ds-title { font-size: 0.78rem; color: #8b949e; margin-bottom: 4px; font-weight: 600; }
-  .ds-track-wrap { position: relative; height: 28px; }
+  .ds-track-wrap { position: relative; height: 28px; overflow: visible; }
   .ds-track-bg, .ds-track-fill { position: absolute; top: 11px; height: 6px; border-radius: 3px; pointer-events: none; }
   .ds-track-bg { left: 0; right: 0; background: #30363d; }
   .ds-track-fill { background: #b8860b; z-index: 1; }
@@ -206,7 +206,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.02</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.03</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
