@@ -211,14 +211,15 @@
 <a href="#main-table" class="skip-link">Skip to main content</a>
 <h1><span aria-hidden="true">🔍</span> A Streamlined Hugging Face Model Search</h1>
 <main>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.05</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.06</span></div>
 <div id="date-slider">
   <h2 class="ds-title">Date Range</h2>
-  <div class="ds-track-wrap">
+  <div class="ds-track-wrap" role="group" aria-label="Date range filter">
+    <span id="ds-slider-desc" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)">Drag left knob for start date, right knob for end date. Knobs cannot cross.</span>
     <div class="ds-track-bg"></div>
     <div class="ds-track-fill" id="ds-fill"></div>
-    <input type="range" id="ds-from" min="0" max="80" value="68" step="1" aria-label="Date range start" aria-valuemin="0" aria-valuemax="80" aria-valuenow="68" aria-describedby="ds-tooltip-from">
-    <input type="range" id="ds-to" min="0" max="80" value="80" step="1" aria-label="Date range end" aria-valuemin="0" aria-valuemax="80" aria-valuenow="80" aria-describedby="ds-tooltip-to">
+    <input type="range" id="ds-from" min="0" max="80" value="68" step="1" aria-label="Date range start" aria-valuemin="0" aria-valuemax="80" aria-valuenow="68" aria-describedby="ds-slider-desc ds-tooltip-from">
+    <input type="range" id="ds-to" min="0" max="80" value="80" step="1" aria-label="Date range end" aria-valuemin="0" aria-valuemax="80" aria-valuenow="80" aria-describedby="ds-slider-desc ds-tooltip-to">
     <div class="ps-tooltip align-right" id="ds-tooltip-from" aria-hidden="true"></div>
     <div class="ps-tooltip align-left" id="ds-tooltip-to" aria-hidden="true">Now</div>
   </div>
@@ -229,11 +230,12 @@
 </div>
 <div id="param-slider">
   <h2 class="ds-title">Parameter Size</h2>
-  <div class="ds-track-wrap">
+  <div class="ds-track-wrap" role="group" aria-label="Parameter size range filter">
+    <span id="ps-slider-desc" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)">Drag left knob for minimum parameters, right knob for maximum. Knobs cannot cross.</span>
     <div class="ds-track-bg"></div>
     <div class="ds-track-fill" id="ps-fill"></div>
-    <input type="range" id="ps-from" min="0" max="220" value="100" step="1" aria-label="Parameter size start" aria-valuemin="0" aria-valuemax="220" aria-valuenow="100" aria-describedby="ps-tooltip-from">
-    <input type="range" id="ps-to" min="0" max="220" value="130" step="1" aria-label="Parameter size end" aria-valuemin="0" aria-valuemax="220" aria-valuenow="130" aria-describedby="ps-tooltip-to">
+    <input type="range" id="ps-from" min="0" max="220" value="100" step="1" aria-label="Parameter size start" aria-valuemin="0" aria-valuemax="220" aria-valuenow="100" aria-describedby="ps-slider-desc ps-tooltip-from">
+    <input type="range" id="ps-to" min="0" max="220" value="130" step="1" aria-label="Parameter size end" aria-valuemin="0" aria-valuemax="220" aria-valuenow="130" aria-describedby="ps-slider-desc ps-tooltip-to">
     <div class="ps-tooltip" id="ps-tooltip-from" style="left:0%" aria-hidden="true">10B</div>
     <div class="ps-tooltip" id="ps-tooltip-to" style="left:100%" aria-hidden="true">40B</div>
   </div>
@@ -451,13 +453,14 @@ let sliderTo = CONFIG.INIT_SLIDER_TO;
 let paramSliderFrom = CONFIG.INIT_PARAM_SLIDER_FROM;
 let paramSliderTo = CONFIG.INIT_PARAM_SLIDER_TO;
 const Q_METHODS = ["awq", "gptq", "bitsandbytes", "eetq", "aqlm", "gguf", "exl2", "marlin", "mlx", "bnb", "fp4", "fp8", "nf4", "int8", "int4", "q8", "q4"];
-const RE_Q_EXISTS = /(?:awq|gptq|bitsandbytes|eetq|aqlm|gguf|exl2|marlin|mlx|bnb|fp4|fp8|nf4|int8|int4|q8|q4)/i;
-const RE_Q_MATCH = /(?:awq|gptq|bitsandbytes|eetq|aqlm|gguf|exl2|marlin|mlx|bnb|fp4|fp8|nf4|int8|int4|q8|q4)/gi;
+const RE_Q_EXISTS = /\b(?:awq|gptq|bitsandbytes|eetq|aqlm|gguf|exl2|marlin|mlx|bnb|fp4|fp8|nf4|int8|int4|q8|q4)\b/i;
+const RE_Q_MATCH = /\b(?:awq|gptq|bitsandbytes|eetq|aqlm|gguf|exl2|marlin|mlx|bnb|fp4|fp8|nf4|int8|int4|q8|q4)\b/gi;
 const RE_Q_STRIP = /-(?:awq|gptq|bitsandbytes|eetq|aqlm|gguf|exl2|marlin|mlx|bnb|fp4|fp8|nf4|int8|int4|q8|q4)$/i;
 const RE_B_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Bb]/;
 const RE_M_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Mm]/;
-// Sanity-range: no real model has <1M or >2T params. Rejects version-number
-// false positives like "v005B" or "r2M" that the negative lookbehind misses.
+// Sanity-range guard: no real model has <1M or >2T params. The B/M regex
+// already has a negative lookbehind guard; this extra check catches anything
+// that passes the regex but is still clearly wrong (e.g. 0.0005B or 5000B).
 function extractParamFromId(id) {
   const bMatch = id.match(RE_B_PARAM);
   if (bMatch) {
