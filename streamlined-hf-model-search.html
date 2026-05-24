@@ -217,7 +217,7 @@
 <a href="#main-table" class="skip-link">Skip to main content</a>
 <h1><span aria-hidden="true">🔍</span> A Streamlined Hugging Face Model Search</h1>
 <main>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.08</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.09</span></div>
 <div id="date-slider">
   <h2 class="ds-title">Date Range</h2>
   <div class="ds-track-wrap" role="group" aria-label="Date range filter">
@@ -297,7 +297,7 @@
   <label for="l4-model-filter">L4 Model ID:</label>
   <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" autocomplete="off"><span class="fic" data-for="l4-model-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
 </div>
-<div id="scope-notice">Top 500 by downloads + top 500 by recent updates per pipeline tag — popular/recent models shown. Older or niche models may not appear; use <a href="https://huggingface.co/models" target="_blank" rel="noopener noreferrer">HF Search</a> for full coverage.</div>
+<div id="scope-notice">Top 500 by downloads + top 500 by recent updates per pipeline tag, plus 1000 trending models — broader coverage of popular and recently active models. Older or niche models may not appear; use <a href="https://huggingface.co/models" target="_blank" rel="noopener noreferrer">HF Search</a> for full coverage.</div>
 <table id="main-table" aria-label="Authors and base model counts">
   <thead>
     <tr>
@@ -444,6 +444,8 @@ const CONFIG = {
 };
 const fetchedTasks = new Set();
 let fetchedUntagged = false;
+let fetchedTrending = false;
+let _trendingAdded = 0;
 // Generation counter: monotonic tick on every "Get Results" click.
 // All async functions capture gen at entry and bail if stale before touching shared state.
 // Chosen over AbortController because it guards post-fetch side effects (render, cache write)
@@ -605,6 +607,10 @@ async function fetchRecentModels(task) {
 
 async function fetchUntaggedModels() {
   return fetchJson(`https://huggingface.co/api/models?sort=downloads&direction=-1&limit=${CONFIG.LIMIT}&full=true&cardData=true`);
+}
+
+async function fetchTrendingModels() {
+  return fetchJson(`https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=1000&full=true&cardData=true`);
 }
 
 function getBaseModelId(cd) {
@@ -1396,8 +1402,11 @@ function renderMain(authorData) {
   }).join('');
 
   tbody.innerHTML = html;
-  document.getElementById("count").textContent =
-    `${sorted.length} authors with base models in selected range. Click to expand.`;
+  let countText = `${sorted.length} authors with base models in selected range`;
+  if (_trendingAdded > 0) {
+    countText += ` (+${_trendingAdded} from trending)`;
+  }
+  document.getElementById("count").textContent = countText + ". Click to expand.";
 }
 
 function renderErrorWithRetry(container, message, retryFn) {
@@ -2187,33 +2196,46 @@ function applyFilters(force, deep) {
   // Always enter the async path when deep=true (injection may be needed even if all
   // tasks are already fetched — e.g. Quick was clicked first and now the user upgrades).
   // Also enter when there are new tasks to fetch or untagged models needed.
-  if (newTasks.length > 0 || needUntagged || deep) {
+  if (newTasks.length > 0 || needUntagged || !fetchedTrending || deep) {
     (async () => {
       document.getElementById("main-table").setAttribute("aria-busy", "true");
       try {
         const status = document.getElementById("status");
         let all;
-        if (newTasks.length > 0 || needUntagged) {
+        if (newTasks.length > 0 || needUntagged || !fetchedTrending) {
           status.textContent = `Fetching models…`;
-          let fresh = [];
+          _trendingAdded = 0;
+          const seen = new Set((_allFetched || []).map(m => m.id));
+          all = [...(_allFetched || [])];
           if (newTasks.length > 0) {
-            fresh = await fetchTasks(newTasks);
+            const fresh = await fetchTasks(newTasks);
+            for (const m of fresh) {
+              if (!seen.has(m.id)) { seen.add(m.id); all.push(m); }
+            }
           }
           if (gen !== _fetchGeneration) return;
           if (needUntagged) {
             const raw = await fetchUntaggedModels();
-            fresh = fresh.concat(raw.filter(m => !m.pipeline_tag).map(normalizeModel));
+            for (const m of raw.filter(x => !x.pipeline_tag).map(normalizeModel)) {
+              if (!seen.has(m.id)) { seen.add(m.id); all.push(m); }
+            }
             fetchedUntagged = true;
           }
           if (gen !== _fetchGeneration) return;
-          const seen = new Set((_allFetched || []).map(m => m.id));
-          all = [...(_allFetched || [])];
-          for (const m of fresh) {
-            if (!seen.has(m.id)) {
-              seen.add(m.id);
-              all.push(m);
+          if (!fetchedTrending) {
+            try {
+              const beforeSeen = seen.size;
+              const trendRaw = await fetchTrendingModels();
+              for (const m of trendRaw.map(normalizeModel)) {
+                if (!seen.has(m.id)) { seen.add(m.id); all.push(m); }
+              }
+              _trendingAdded = seen.size - beforeSeen;
+              fetchedTrending = true;
+            } catch (e) {
+              console.warn("fetchTrendingModels error:", e);
             }
           }
+          if (gen !== _fetchGeneration) return;
           _allFetched = all;
           recomputeAndRender(savedExpansions);
         } else {
@@ -2435,6 +2457,9 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   _canonicalCache = null;
   _consecutive429s = 0;
   document.getElementById("api-counter").classList.remove("rate-limited");
+  fetchedUntagged = false;
+  fetchedTrending = false;
+  _trendingAdded = 0;
   expandedSections.clear();
   recomputeAndRenderWithoutDerive();
 });

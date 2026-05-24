@@ -16,7 +16,7 @@ IMPROVEMENTS.md          — Code review tracking
 ## Architecture
 
 ### Data Flow
-1. **Init**: Wait for user to click "Get Results". Compute active pipeline tags from From/To filter bars → fetch top 500 models per pipeline task (both `sort=downloads` and `sort=lastModified`, merged, concurrency-capped at `FETCH_CONCURRENCY`=5) → deduplicate by model ID → inject cross-author base models referenced by `cardData.base_model` → store all in `_allFetched` (trimmed to `ALL_FETCHED_MAX`=16,384 entries by `lastModified` descending).
+1. **Init**: Wait for user to click "Get Results". Compute active pipeline tags from From/To filter bars → fetch top 500 models per pipeline task (both `sort=downloads` and `sort=lastModified`, merged, concurrency-capped at `FETCH_CONCURRENCY`=5) → deduplicate by model ID → also fetch top 1000 trending models (`sort=trendingScore`) and untagged models → all sources deduplicated against a shared `seen` Set; `_trendingAdded` tracks net-new from trending for status line display → inject cross-author base models referenced by `cardData.base_model` → store all in `_allFetched` (trimmed to `ALL_FETCHED_MAX`=16,384 entries by `lastModified` descending).
 2. **Canonical dedup**: `buildCanonicalAuthors()` scans `_allFetched` for model names that appear under multiple authors. When duplicates exist, only the variant with the highest download count is kept; others are suppressed by `isCanonicalCopy()`. Cached via `_canonicalCache` and invalidated on next `_allFetched` replacement.
 3. **Orphan/nested quant suppression**: Quants whose parent exists in `_allFetched` but has no explicit `cardData.base_model` are detected by `isOrphanQuant()` (name-based inference) and suppressed from L1 so they don't appear as standalone base models. Nested quants (`cardData.base_model` points to a known quant rather than a true base) are suppressed by `isNestedQuant()`.
 4. **Render**: `computeAuthorData()` applies date + param slider ranges, From/To/Special/Quant filters, canonical dedup, and orphan/nested suppression → groups surviving models by author → renders L1.
@@ -84,7 +84,9 @@ For backward compatibility, these variables are proxied to `RenderCoordinator`:
 - `sliderFrom` / `sliderTo` — Date slider positions (0..80, where 0=Anytime, 1-79=YYYY/MM/DD with 14-day increments, 80=Now)
 - `paramSliderFrom` / `paramSliderTo` — Param size slider positions (0..220, mapped via piecewise linear 7-segment mapping)
 - `fetchedTasks` — Set of pipeline tags already fetched during init (persists across "Get Results" clicks)
-- `fetchedUntagged` — Boolean flag tracking whether untagged models have been fetched
+- `fetchedUntagged` — Boolean flag tracking whether untagged models have been fetched; reset by Clear Cache
+- `fetchedTrending` — Boolean flag tracking whether trending models (`sort=trendingScore`) have been fetched; reset by Clear Cache
+- `_trendingAdded` — Net-new model count from the last trending fetch (after dedup against existing `_allFetched`); displayed in L1 count line as "+N from trending"; resets to 0 on each "Get Results" click
 
 ### Render Pipeline (Unified)
 
