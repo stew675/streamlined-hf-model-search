@@ -202,6 +202,8 @@
   #clear-cache-btn:active { background: #5a2020; }
   .skip-link { position: absolute; top: -100%; left: 8px; padding: 8px 16px; background: #58a6ff; color: #0d1117; z-index: 100; font-weight: 600; border-radius: 6px; }
   .skip-link:focus { top: 8px; }
+  #scope-notice { font-size: 0.75rem; color: #8b949e; padding: 6px 10px; margin: 6px 0; background: #161b22; border: 1px solid #30363d; border-radius: 6px; text-align: center; }
+  #scope-notice a { color: #58a6ff; }
   #debug-bar { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 6px 0; border-top: 1px solid #21262d; }
   #debug-dump-container { margin-top: 4px; max-height: 80vh; overflow: auto; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 8px; }
   #debug-dump-content { width: 100%; min-height: 100px; background: transparent; border: none; color: #8b949e; font-family: 'Courier New', monospace; font-size: 0.7rem; line-height: 1.5; resize: none; outline: none; padding: 0; margin: 0; }
@@ -215,7 +217,7 @@
 <a href="#main-table" class="skip-link">Skip to main content</a>
 <h1><span aria-hidden="true">🔍</span> A Streamlined Hugging Face Model Search</h1>
 <main>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.07</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.08</span></div>
 <div id="date-slider">
   <h2 class="ds-title">Date Range</h2>
   <div class="ds-track-wrap" role="group" aria-label="Date range filter">
@@ -295,6 +297,7 @@
   <label for="l4-model-filter">L4 Model ID:</label>
   <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" autocomplete="off"><span class="fic" data-for="l4-model-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
 </div>
+<div id="scope-notice">Top 500 by downloads + top 500 by recent updates per pipeline tag — popular/recent models shown. Older or niche models may not appear; use <a href="https://huggingface.co/models" target="_blank" rel="noopener noreferrer">HF Search</a> for full coverage.</div>
 <table id="main-table" aria-label="Authors and base model counts">
   <thead>
     <tr>
