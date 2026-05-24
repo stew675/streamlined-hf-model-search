@@ -180,7 +180,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.17</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.19</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -236,7 +236,7 @@
 </div>
 <div id="sort-announce" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></div>
 <div id="button-row">
-  <span id="derived-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" tabindex="0" style="margin-right:auto; user-select:none" title="When enabled, models with unknown parameter counts will search their children (2 search API calls per model) and fetch individual child model cards (up to 4 per model) to try to infer the parent's parameter count.">Infer Missing Parameters</span>
+  <span id="derived-param-chip" class="filter-chip active" role="checkbox" aria-checked="true" tabindex="0" style="margin-right:auto; user-select:none" title="When enabled, models with unknown parameter counts will search their children (2 search API calls per model) and fetch individual child model cards (up to 4 per model) to try to infer the parent's parameter count.">Infer Missing Parameters</span>
   <span id="hide-missing-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" tabindex="0" style="user-select:none" title="When enabled, models without a known parameter count are hidden from display.">Hide Missing Parameters</span>
   <div id="button-center">
     <button id="get-quick-results-btn" class="action-btn" title="Fetch top models per pipeline tag (by downloads + lastModified) — no cross-author base model injection. Faster but may miss quantizations whose parent base model is from a different author.">Get Quick Results</button>
@@ -393,7 +393,7 @@ let fetchedUntagged = false;
 let _fetchGeneration = 0;
 const _injectedBaseIds = new Set();
 let needsUpdate = false;
-let _derivedParamEnabled = false;
+let _derivedParamEnabled = true;
 let _hideMissingParamEnabled = false;
 const _inferredParamIds = new Set();
 const _inferredFromNameIds = new Set();
@@ -1484,9 +1484,9 @@ function thHtml(c, state, level) {
   const arrow = isSorted ? (state.asc ? "▲" : "▼") : "";
   const ariaSort = isSorted ? ` aria-sort="${state.asc ? "ascending" : "descending"}"` : ' aria-sort="none"';
   if (allCls.includes("right") || allCls.includes("center") || allCls.includes("updated-header")) {
-    return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}><span class="arrow-left">${arrow}</span>${c.label}</th>`;
+    return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}><span class="arrow-left">${arrow}</span>${escapeHtml(c.label)}</th>`;
   }
-  return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}>${c.label}<span class="arrow">${arrow}</span></th>`;
+  return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}>${escapeHtml(c.label)}<span class="arrow">${arrow}</span></th>`;
 }
 
 function renderL2(idx, author, models, container, totalBeforeFilter) {
@@ -2179,15 +2179,25 @@ function applyFilters(force, deep) {
         }
         if (all.length > CONFIG.ALL_FETCHED_MAX) {
           if (gen !== _fetchGeneration) return;
-          // Keep the most recently-modified models, drop the rest. This caps memory at
-          // ~80-160MB (5-10KB/model × 16k) rather than unbounded growth from repeated
-          // fetches. Oldest-by-date is safe because users filter by date range anyway.
-          all.sort((a, b) => {
+          // Keep injected base models (pinned) regardless of date, then fill remaining
+          // capacity with the most recently-modified non-injected models. This prevents
+          // cross-author parent models (which may have old lastModified dates) from being
+          // silently dropped, which would orphan their child quantizations.
+          const pinned = [];
+          const droppable = [];
+          for (const m of all) {
+            if (_injectedBaseIds.has(m.id)) pinned.push(m);
+            else droppable.push(m);
+          }
+          droppable.sort((a, b) => {
             const da = a.lastModified ? new Date(a.lastModified).getTime() : 0;
             const db = b.lastModified ? new Date(b.lastModified).getTime() : 0;
             return db - da;
           });
-          all.length = CONFIG.ALL_FETCHED_MAX;
+          const room = CONFIG.ALL_FETCHED_MAX - pinned.length;
+          droppable.length = Math.max(0, Math.min(droppable.length, room));
+          all = droppable.concat(pinned);
+          _allFetched = all;
         }
         // Re-render unconditionally — injectBaseModels may have marked existing models
         // as _injected (bypassing the date filter via _injectedBaseIds), which changes
@@ -2410,7 +2420,6 @@ async function fetchTasks(tasks) {
 // Used by Quick mode to surface parents of visible quants without fetching new models.
 function markLocalParents(all) {
   const gen = _fetchGeneration;
-  if (gen !== _fetchGeneration) return;
   const seen = new Set(all.map(m => m.id));
   for (let i = 0; i < all.length; i++) {
     if (gen !== _fetchGeneration) return;
