@@ -18,7 +18,9 @@ A dark-color themed, browser-based, 4-level hierarchical explorer for HuggingFac
 
 ### Tiered Output Structure
 
-Select your search criteria and click **Get Results**.  A four tier model navigation tree is presented:
+Select your search criteria and click **Get Quick Results** or **Get Deep Results**.  A four tier model navigation tree is presented:
+
+**Get Quick Results** — fetches top models per pipeline tag; skips cross-author base model injection for speed. **Get Deep Results** — same as Quick, plus resolves cross-author base models referenced by quantizations via individual API calls. Slower but surfaces more quantizations.
 
 | Level | Role | What You See | Sortable By |
 |-------|------|-------|-------------|
@@ -87,8 +89,11 @@ The other text filters control which models and derivative authors will be displ
 - **Expandable rows** - Click on any row (excluding the link) to expand 
 - **Cached results** - Re-expanding is instant; task fetches are skipped once complete; stale-generation renders are discarded
 - **Parameter deepening** - Models with unknown parameter counts are fetched when rows are opened and results are updated in real time (if available)
-- **API call counter** - displays total requests made in the session
-- **Quant badges** - color-coded by method (FP4, FP8, AWQ, GGUF, MLX, etc.); all detected methods shown
+- **Infer Missing Parameters chip** — When enabled (default), models with unknown params search their children to deduce the parent's parameter count via API
+- **Hide Missing Parameters chip** — When enabled, models without a known parameter count are hidden from L1 and L2 entirely
+- **API call counter** — displays total requests made in the session; hover for rate-limit info; flashes amber during active rate limiting (3+ consecutive 429s)
+- **Clear Cache button** — empties all in-memory caches (param cache, LRU model cache, inflight state, inference tracking) while preserving filters, sliders, and expanded sections
+- **Quant badges** — color-coded by method (FP4, FP8, AWQ, GGUF, MLX, etc.); all detected methods shown; orphan quants get a yellow badge
 
 ## Caveats
 

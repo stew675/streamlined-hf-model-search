@@ -69,6 +69,7 @@ For backward compatibility, these variables are proxied to `RenderCoordinator`:
 - `_inflightChildren` — Map `{parentId → { promise, results }}` to deduplicate concurrent L3/L4 fetches (results stored directly in entry to survive cache eviction)
 - `_inflightFetches` — Map `{url → promise}` to deduplicate concurrent `fetchJson` calls for the same URL before they even reach the rate limiter
 - `_apiTimestamps` — Sliding window for API rate limiting (1 call per 250ms = 4 req/s, no burst)
+- `_consecutive429s` — Consecutive 429 (rate limit) response counter; triggers amber flash on `#api-counter` when ≥3
 - `_hideMissingParamEnabled` — Boolean toggle for the "Hide Missing Parameters" chip; when true, models with `paramB === null` are filtered out in `modelPassesAllFilters()`, affecting L1, L2, and all expanded sections. Purely cosmetic — does not affect API fetches.
 - `_paramCache` — Global `Map<modelId, paramB>` caching resolved parameter counts across all levels; persists across renders within a session
 - `cache` — Global in-memory LRU cache (max `CACHE_MAX`=200 entries) keyed by:
@@ -230,6 +231,9 @@ Open `streamlined-hf-model-search.html` in a browser. Validate:
 18. "Hide Missing Parameters" chip toggles on/off with proper active/inactive styling
 19. When "Hide Missing Parameters" is enabled, models with "—" in the Params column are hidden from L1 and L2
 20. When "Hide Missing Parameters" is enabled and all of an author's base models lack params, that author is removed from the L1 list entirely
+21. API counter tooltip appears on hover over `#api-counter-wrap` with rate-limit info
+22. API counter text flashes amber when 3+ consecutive 429 responses are detected; returns to normal on next successful call
+23. "Clear Cache" button clears all caches and re-renders; filter/slider/expansion state is preserved; button shows "Cleared!" feedback briefly
 
 ## Common Pitfalls
 

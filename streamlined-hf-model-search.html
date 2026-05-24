@@ -173,6 +173,31 @@
   .ps-legend-tick { position: absolute; top: 0; transform: translateX(-50%); width: 1px; height: 5px; background: #6e7681; }
   .ps-legend-label { position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
     font-size: 0.62rem; color: #848d97; white-space: nowrap; }
+  #api-counter-wrap { position: relative; display: inline-flex; align-items: center; }
+  .api-counter-tooltip {
+    display: none; position: absolute; bottom: calc(100% + 10px); right: 0;
+    background: #1c2129; color: #e3b341; border: 1px solid #d2992266;
+    border-radius: 6px; padding: 8px 12px; font-size: 0.75rem;
+    white-space: nowrap; z-index: 10; pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5); line-height: 1.4; text-align: left;
+  }
+  #api-counter-wrap:hover .api-counter-tooltip { display: block; }
+  .api-counter-tooltip::after {
+    content: ""; position: absolute; top: 100%; right: 16px;
+    border: 6px solid transparent; border-top-color: #d2992266;
+  }
+  @keyframes api-counter-flash {
+    0%, 100% { color: #e3b341; }
+    50% { color: #d29922; }
+  }
+  #api-counter.rate-limited { animation: api-counter-flash 1s ease-in-out infinite; }
+  #clear-cache-btn { display: inline-flex; align-items: center; justify-content: center;
+    padding: 6px 20px; font-size: 0.82rem; font-weight: 600; border-radius: 14px;
+    cursor: pointer; user-select: none; background: #2d1515; border: 1px solid #4a2020;
+    color: #f87171; font-family: inherit; transition: background 0.15s, border-color 0.15s; margin-right: 16px; }
+  #clear-cache-btn:hover { background: #4a2020; border-color: #f8717166; }
+  #clear-cache-btn:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+  #clear-cache-btn:active { background: #5a2020; }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { transition-duration: 0s !important; }
   }
@@ -180,7 +205,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.19</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.21</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -242,7 +267,11 @@
     <button id="get-quick-results-btn" class="action-btn" title="Fetch top models per pipeline tag (by downloads + lastModified) — no cross-author base model injection. Faster but may miss quantizations whose parent base model is from a different author.">Get Quick Results</button>
     <button id="get-deep-results-btn" class="action-btn" title="Same as Quick, plus resolve cross-author base models referenced by quantizations via individual model API calls. Slower but surfaces more quantizations.">Get Deep Results</button>
   </div>
-  <span id="api-counter" class="filter-label" style="margin-left:auto; font-variant-numeric: tabular-nums; min-width: 100px; text-align: right;">API Calls: 0</span>
+  <span id="clear-cache-btn" role="button" tabindex="0" title="Clears: in-memory param cache, LRU model cache, inflight fetch state, canonical dedup cache, and inference tracking. Preserves all filters, sliders, and expanded sections.">Clear Cache</span>
+  <span id="api-counter-wrap" style="margin-left:auto; min-width: 100px; text-align: right;">
+    <span id="api-counter" class="filter-label" style="font-variant-numeric: tabular-nums;">API Calls: 0</span>
+    <div class="api-counter-tooltip" role="tooltip">Anonymous API calls are rate-limited by Hugging Face (~100 req/min). When the counter glows amber, rate limiting is actively throttling requests. Exponential backoff is applied automatically.</div>
+  </span>
 </div>
 <div id="text-filter-row">
   <label>L1 Author:</label>
@@ -269,6 +298,13 @@
 
 <script>
 (function() {
+// Design Notes (unaddressed review items):
+// - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
+//   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
+//   correctly and are fully documented in AGENTS.md. A full refactor to explicit
+//   getter/setter methods would be invasive with no functional benefit.
+// - CSS variableization: The dark theme is fixed per design intent. No light/dark
+//   toggle is planned. Hardcoded values are intentional for consistency.
 let _allFetched, _authorData, _canonicalAuthor;
 
 ['l1Author', 'l2Model', 'l3Author', 'l4Model'].forEach(key => {
@@ -400,6 +436,7 @@ const _inferredFromNameIds = new Set();
 const _inferredAttemptedIds = new Set();
 const _deepeningParamIds = new Set();
 let apiCalls = 0;
+let _consecutive429s = 0;
 function incApiCalls(n) { apiCalls += n; document.getElementById("api-counter").textContent = "API Calls: " + String(apiCalls); }
 function markDirty() { needsUpdate = true; document.getElementById("get-quick-results-btn").classList.add("ready"); document.getElementById("get-deep-results-btn").classList.add("ready"); }
 let sliderFrom = CONFIG.INIT_SLIDER_FROM;
@@ -461,6 +498,8 @@ async function fetchJson(url) {
           clearTimeout(timer);
         }
       } catch (err) {
+        _consecutive429s = 0;
+        document.getElementById("api-counter").classList.remove("rate-limited");
         if (retries < MAX_RETRIES) {
           retries++;
           const delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
@@ -471,6 +510,8 @@ async function fetchJson(url) {
         throw err;
       }
       if (res.ok) {
+        _consecutive429s = 0;
+        document.getElementById("api-counter").classList.remove("rate-limited");
         incApiCalls(1);
         return res.json();
       }
@@ -478,14 +519,22 @@ async function fetchJson(url) {
         retries++;
         let delay;
         if (res.status === 429) {
+          _consecutive429s++;
+          if (_consecutive429s >= 3) {
+            document.getElementById("api-counter").classList.add("rate-limited");
+          }
           const ra = res.headers.get('Retry-After');
           delay = ra ? parseInt(ra, 10) * 1000 : Math.min(1000 * Math.pow(2, retries - 1), 30000);
         } else {
+          _consecutive429s = 0;
+          document.getElementById("api-counter").classList.remove("rate-limited");
           delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
         }
         await new Promise(r => setTimeout(r, delay));
         continue;
       }
+      _consecutive429s = 0;
+      document.getElementById("api-counter").classList.remove("rate-limited");
       incApiCalls(1);
       throw new Error(`HTTP ${res.status}`);
     }
@@ -760,7 +809,7 @@ function normalizeModel(m) {
     cardData: m.cardData ? { base_model: m.cardData.base_model } : null
   };
 }
-// Parameter count cache: persists across sessions because model param counts are immutable.
+// In-memory parameter count cache: persists within a session because model param counts are immutable.
 // Never cleared — avoids redundant individual API fetches for already-resolved models.
 // Worst case memory impact with a maximum of 16384 expanded models estimated to be ~1.4MB
 const _paramCache = new Map();
@@ -2352,6 +2401,24 @@ document.querySelector("#main-table").addEventListener("click", e => {
 });
 document.getElementById("get-quick-results-btn").addEventListener("click", () => applyFilters(true, false));
 document.getElementById("get-deep-results-btn").addEventListener("click", () => applyFilters(true, true));
+document.getElementById("clear-cache-btn").addEventListener("click", () => {
+  const el = document.getElementById("clear-cache-btn");
+  el.textContent = "Cleared!";
+  setTimeout(() => { el.textContent = "Clear Cache"; }, 1500);
+  cache.clear();
+  _paramCache.clear();
+  _inflightChildren.clear();
+  _inferredParamIds.clear();
+  _inferredFromNameIds.clear();
+  _inferredAttemptedIds.clear();
+  _deepeningParamIds.clear();
+  _canonicalCache = null;
+  _consecutive429s = 0;
+  document.getElementById("api-counter").classList.remove("rate-limited");
+  const saved = new Set(expandedSections);
+  recomputeAndRender(saved);
+});
+addKeyboardClick(document.getElementById("clear-cache-btn"));
 document.getElementById("derived-param-chip").addEventListener("click", async () => {
   _derivedParamEnabled = !_derivedParamEnabled;
   const chip = document.getElementById("derived-param-chip");
