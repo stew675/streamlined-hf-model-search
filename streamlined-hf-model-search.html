@@ -180,7 +180,7 @@
 </head>
 <body>
 <h1>🔍 A Streamlined Hugging Face Model Search</h1>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.16</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260523.17</span></div>
 <div id="date-slider">
   <div class="ds-title">Date Range</div>
   <div class="ds-track-wrap">
@@ -1992,26 +1992,23 @@ async function tryResolveModelParam(m, gen, idx, author, container, getFiltered,
   const rowEl = document.querySelector(`tr.l2-row[data-model="${CSS.escape(m.id)}"]`);
   if (rowEl) rowEl.classList.add("inferring");
   document.getElementById("status").textContent =
-    `Inferring params from children for ${m.id.split("/").slice(1).join("/")}…`;
-  let resolved = await resolveParamFromChildren(m.id);
+    `Resolving params for ${m.id.split("/").slice(1).join("/")}…`;
+  let resolved = null, fromName = false;
+  // Try name heuristic first — fast, no API call. Many quant models embed
+  // the parameter count in their ID (e.g. "Qwen3.6-27B-FP8").
+  const idB = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Bb]/);
+  if (idB) { resolved = parseFloat(idB[1]); fromName = true; }
+  else {
+    const idM = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Mm]/);
+    if (idM) { resolved = parseFloat(idM[1]) / 1000; fromName = true; }
+  }
+  if (resolved === null) {
+    // Fall through to children-based inference when nothing is in the name.
+    resolved = await resolveParamFromChildren(m.id);
+  }
   if (rowEl) rowEl.classList.remove("inferring");
   _inferredAttemptedIds.add(m.id);
-  let fromName = false;
-  if (resolved === null) {
-    // Last resort for quant models: extract B/M from model ID.
-    // The normal getParamCount skips ID-based parsing for quant models because
-    // suffixes like -4B can be ambiguous (bit width vs param count). But at this
-    // point we've already tried safetensors/gguf, individual API fetch, parent
-    // inheritance, and children inference — so any remaining B/M in the name is
-    // almost certainly the parameter count.
-    const idB = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Bb]/);
-    if (idB) { resolved = parseFloat(idB[1]); fromName = true; }
-    else {
-      const idM = m.id.match(/(?<![a-zA-Z])(\d+\.?\d*)[Mm]/);
-      if (idM) { resolved = parseFloat(idM[1]) / 1000; fromName = true; }
-    }
-    if (resolved === null) return false;
-  }
+  if (resolved === null) return false;
   m.paramB = resolved;
   _paramCache.set(m.id, resolved);
   (fromName ? _inferredFromNameIds : _inferredParamIds).add(m.id);
