@@ -340,7 +340,7 @@
 
 <script>
 (function() {
-const APP_VERSION = '260525.10';
+const APP_VERSION = '260525.11';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -1785,7 +1785,7 @@ function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
     { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header", width: 125 }
   ];
   let html = `<table aria-label="Base models for ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead>`;
-  html += `<tr><th class="context-row context-l2" colspan="${cols.length}">Author: ${escapeHtml(author)}</th></tr>`;
+  html += `<tr><th class="context-row context-l2" colspan="${cols.length}">Base Models for ${escapeHtml(author)}</th></tr>`;
   html += `<tr>`;
   cols.forEach(c => { html += thHtml(c, state, "2"); });
   html += `</tr></thead><tbody>`;
@@ -2101,7 +2101,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   ];
 
   const parentName = parentId.split("/").slice(1).join("/");
-  const l3Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Base: ${parentName} — ${c.label}` } : c);
+  const l3Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Derivative Authors for ${parentName}` } : c);
   let html = `<table aria-label="Quant author groups for ${escapeHtml(parentId)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
   l3Cols.forEach(c => { html += thHtml(c, state, "3"); });
   html += `</tr></thead><tbody>`;
@@ -2189,7 +2189,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
     { key: "lastModified", label: "Updated", cls: "right", width: 110 }
   ];
 
-  const l4Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Author: ${author} — ${c.label}` } : c);
+  const l4Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Model IDs for ${author}` } : c);
   let html = `<table aria-label="Individual quantizations for ${escapeHtml(parentId)} by ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
   l4Cols.forEach(c => { html += thHtml(c, st, "4"); });
   html += `</tr></thead><tbody>`;
