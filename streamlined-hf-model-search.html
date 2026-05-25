@@ -223,8 +223,8 @@
   .filter-popup .model-id-cell { max-width: none !important; width: auto !important; }
   .filter-popup .model-id-cell a { display: inline !important; max-width: none !important; overflow: visible !important; white-space: normal !important; text-overflow: clip !important; vertical-align: baseline !important; }
 .filter-popup .fp-header { position: sticky; top: 0; background: #161b22; padding: 4px 10px; font-size: 0.75rem; font-weight: 600; color: #e6edf3; border-bottom: 1px solid #30363d; z-index: 2; }
-  .filter-popup .fp-footer { position: sticky; bottom: 0; background: #1c2129; padding: 4px 10px; color: #6e7681; font-size: 0.72rem; font-style: italic; border-top: 1px solid #21262d; text-align: center; z-index: 2; }
-  .filter-popup .fp-note { padding: 4px 10px; color: #6e7681; font-size: 0.72rem; font-style: italic; border-top: 1px solid #21262d; text-align: center; }
+  .filter-popup .fp-footer { position: sticky; bottom: 0; background: #1c2129; padding: 4px 10px; color: #8b949e; font-size: 0.72rem; font-style: italic; border-top: 1px solid #21262d; text-align: center; z-index: 2; }
+  .filter-popup .fp-note { padding: 4px 10px; color: #8b949e; font-size: 0.72rem; font-style: italic; border-top: 1px solid #21262d; text-align: center; }
 
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { transition-duration: 0s !important; }
@@ -235,7 +235,7 @@
 <a href="#main-table" class="skip-link">Skip to main content</a>
 <h1><span aria-hidden="true">🔍</span> A Streamlined Hugging Face Model Search</h1>
 <main>
-<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version">Version: 260524.16</span></div>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version"></span></div>
 <div id="date-slider">
   <h2 class="ds-title">Date Range</h2>
   <div class="ds-track-wrap" role="group" aria-label="Date range filter">
@@ -301,7 +301,7 @@
   </div>
   <span id="clear-cache-btn" role="button" tabindex="0" title="Clears: in-memory param cache, LRU model cache, inflight fetch state, canonical dedup cache, and inference tracking. Collapses expanded sections (re-expand to reload). Preserves all filters and sliders.">Clear Cache</span>
   <span id="api-counter-wrap" style="margin-left:auto; min-width: 100px; text-align: right;">
-    <span id="api-counter" class="filter-label" style="font-variant-numeric: tabular-nums;">API Calls: 0</span>
+    <span id="api-counter" class="filter-label" tabindex="0" role="button" style="font-variant-numeric: tabular-nums;">API Calls: 0</span>
     <div class="api-counter-tooltip" role="tooltip">Anonymous API calls are rate-limited by Hugging Face (~100 req/min). When the counter glows amber, rate limiting is actively throttling requests. Exponential backoff is applied automatically.</div>
   </span>
 </div>
@@ -338,6 +338,7 @@
 
 <script>
 (function() {
+const APP_VERSION = '260525.00';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -801,9 +802,12 @@ function positionPopupCenter(trigger, popup) {
   if (!parent) return;
   const pRect = parent.getBoundingClientRect();
   const tRect = trigger.getBoundingClientRect();
-  popup.style.display = 'block';
-  const w = popup.offsetWidth;
-  popup.style.display = '';
+  if (!popup._cachedWidth) {
+    popup.style.display = 'block';
+    popup._cachedWidth = popup.offsetWidth;
+    popup.style.display = '';
+  }
+  const w = popup._cachedWidth;
   let left = (tRect.left - pRect.left) + (tRect.width / 2) - (w / 2);
   left = Math.max(5, Math.min(left, pRect.width - w - 5));
   popup.style.bottom = 'calc(100% + 6px)';
@@ -958,8 +962,8 @@ function normalizeModel(m) {
   };
 }
 // In-memory parameter count cache: persists within a session because model param counts are immutable.
-// Never cleared — avoids redundant individual API fetches for already-resolved models.
-// Worst case memory impact with a maximum of 16384 expanded models estimated to be ~1.4MB
+// Cleared by Clear Cache handler alongside all other caches.
+// Worst case memory impact with a maximum of 16384 resolved models estimated to be ~1.4MB
 const _paramCache = new Map();
 function getParamCount(m) {
   const cached = _paramCache.get(m.id);
@@ -1604,7 +1608,10 @@ async function loadAuthorModels(idx, author, container) {
               if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
               else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
             }
-            if (p === null) p = getParamCount(full);
+            if (p === null) {
+              if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
+              else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
+            }
             if (p === null && isQuant) {
               // Last resort for quants: safetensors/gguf from full response
               if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
@@ -1685,7 +1692,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
       const trigger = document.getElementById(`fp-trigger-l2-empty-${author}`);
       const popup = document.getElementById(`fp-popup-l2-empty-${author}`);
       if (trigger && popup) {
-        wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set())));
+        wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), 200)));
       }
     } else {
       container.innerHTML = '<div class="detail-count" style="color:#6e7681">No base models match current filters.</div>';
@@ -1732,7 +1739,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
     const popup = document.getElementById(`fp-popup-l2-${author}`);
     if (trigger && popup) {
       const displayedIds = new Set(models.map(m => m.id));
-      wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, displayedIds)));
+      wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, displayedIds, 200)));
     }
   }
 
@@ -1740,13 +1747,13 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
     container._delegatedL2 = true;
     container.addEventListener("click", function(e) {
       const inner = e.target.closest(".detail-inner");
-      if (inner && inner !== this) return;
-      const s = l2StateMap.get(this.dataset.l2Author);
+      if (inner && inner !== container) return;
+      const s = l2StateMap.get(container.dataset.l2Author);
       if (!s) return;
       const th = e.target.closest("thead th");
       if (th) {
         handleSortClick(th, "2", `l2-${s.author}`, "downloads", true, () => {
-          renderL2(s.idx, s.author, s.models, this, s.totalBeforeFilter, s.allBaseModels);
+          renderL2(s.idx, s.author, s.models, container, s.totalBeforeFilter, s.allBaseModels);
         });
         return;
       }
@@ -1820,7 +1827,6 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       const _allFetchedIds = _allFetched ? new Set(_allFetched.map(m => m.id)) : new Set();
 
       const processChildren = (models) => {
-        let count = 0;
         for (const m of models) {
           if (m.id === parentId || seen.has(m.id)) continue;
           seen.add(m.id);
@@ -1860,10 +1866,8 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
               q_method: qMethod,
               tags: m.tags || []
             });
-            count++;
           }
         }
-        return count;
       };
 
       const nameUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
@@ -2105,7 +2109,7 @@ const hiddenL4 = quants.length - displayed.length;
     const popup = document.getElementById(`fp-popup-l4-${l4SafeId}`);
     if (trigger && popup) {
       const displayedIds = new Set(displayed.map(q => q.id));
-      wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(quants, displayedIds)));
+      wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(quants, displayedIds, 200)));
     }
   }
 
@@ -2262,16 +2266,17 @@ async function deriveVisibleUnknowns() {
     if (!models) continue;
     const unknown = models.filter(m => m.paramB === null && !_inferredAttemptedIds.has(m.id) && modelPassesAllFilters(m));
     if (unknown.length === 0) continue;
-    for (const m of unknown) {
+    const l1Row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
+    if (!l1Row) continue;
+    const idx = parseInt(l1Row.dataset.l1Idx);
+    const container = document.getElementById(`i1-${idx}`);
+    if (!container) continue;
+    const nonQuantBase = models.filter(m2 => !m2._orphanQuant && !m2._nestedQuant);
+    const getFiltered = () => nonQuantBase.filter(m2 => modelPassesAllFilters(m2));
+    for (let i = 0; i < unknown.length; i += CONFIG.PARAM_BATCH_SIZE) {
       if (gen !== _fetchGeneration) return;
-      const l1Row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
-      if (!l1Row) continue;
-      const idx = parseInt(l1Row.dataset.l1Idx);
-      const container = document.getElementById(`i1-${idx}`);
-      if (!container) continue;
-      const nonQuantBase = models.filter(m2 => !m2._orphanQuant && !m2._nestedQuant);
-      const getFiltered = () => nonQuantBase.filter(m2 => modelPassesAllFilters(m2));
-      await tryResolveModelParam(m, gen, idx, author, container, getFiltered, nonQuantBase.length, nonQuantBase);
+      const batch = unknown.slice(i, i + CONFIG.PARAM_BATCH_SIZE);
+      await Promise.all(batch.map(m => tryResolveModelParam(m, gen, idx, author, container, getFiltered, nonQuantBase.length, nonQuantBase)));
     }
   }
   if (gen === _fetchGeneration) document.getElementById("status").textContent = "";
@@ -2913,6 +2918,7 @@ async function injectBaseModels(all, onBatch) {
   });
   markDirty();
   document.getElementById("api-counter").textContent = "API Calls: 0";
+  document.getElementById("version").textContent = "Version: " + APP_VERSION;
   status.textContent = "Select your filters, then click Get Quick Results or Get Deep Results.";
   renderMain([]);
 })();
