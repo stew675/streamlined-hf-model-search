@@ -341,7 +341,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260525.20';
+const APP_VERSION = '260525.21';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -465,6 +465,13 @@ const CONFIG = {
   FETCH_CONCURRENCY: 5,
   THUMB_SIZE: 18,
 };
+
+// Expansion key prefixes — used for stable identification across re-renders.
+// a|author / m|modelId / g|parentId|groupAuthor
+const PREFIX_AUTHOR = 'a|';
+const PREFIX_MODEL = 'm|';
+const PREFIX_GROUP = 'g|';
+
 const fetchedTasks = new Set();
 let fetchedUntagged = false;
 let fetchedTrending = false;
@@ -1085,7 +1092,8 @@ function valueToPos(val) {
   return CONFIG.PARAM_SLIDER_MAX;
 }
 function sliderCenterPct(input, pos, max) {
-  const thumbSize = CONFIG.THUMB_SIZE, iw = input.clientWidth || 1, pct = pos / (max || CONFIG.PARAM_SLIDER_MAX);
+  const rect = input.getBoundingClientRect();
+  const thumbSize = CONFIG.THUMB_SIZE, iw = rect.width || 1, pct = pos / (max || CONFIG.PARAM_SLIDER_MAX);
   return Math.min(100, Math.max(0, (thumbSize / 2 + pct * (iw - thumbSize)) / iw * 100));
 }
 function paramValueToLabel(val) {
@@ -1252,17 +1260,17 @@ const RenderCoordinator = {
   },
 
   _pruneDescendantKeys(key) {
-    if (key.startsWith("a|")) {
-      const author = key.slice(2);
+    if (key.startsWith(PREFIX_AUTHOR)) {
+      const author = key.slice(PREFIX_AUTHOR.length);
       for (const k of [...this._state.expandedSections]) {
-        if (k.startsWith("m|" + author + "/") || k.startsWith("g|" + author + "/")) {
+        if (k.startsWith(PREFIX_MODEL + author + "/") || k.startsWith(PREFIX_GROUP + author + "/")) {
           this._state.expandedSections.delete(k);
         }
       }
-    } else if (key.startsWith("m|")) {
-      const modelId = key.slice(2);
+    } else if (key.startsWith(PREFIX_MODEL)) {
+      const modelId = key.slice(PREFIX_MODEL.length);
       for (const k of [...this._state.expandedSections]) {
-        if (k.startsWith("g|" + modelId + "|")) {
+        if (k.startsWith(PREFIX_GROUP + modelId + "|")) {
           this._state.expandedSections.delete(k);
         }
       }
@@ -1365,6 +1373,9 @@ const expandedSections = new Proxy(new Set(), {
 const _inflightChildren = new Map();
 function createLevelStateProxy(level) {
   const mapApi = ['get', 'set', 'has', 'delete', 'clear', 'forEach', 'keys', 'values', 'entries'];
+  // NOTE: These Proxies provide backward-compatible global access to RenderCoordinator state.
+  // New code should call RenderCoordinator._state / _levelState directly. In v2 these wrappers
+  // can be removed once all callers are migrated, reducing ~50 lines of indirection.
   return new Proxy(new Map(), {
     get(target, prop) {
       if (mapApi.includes(prop) || prop === Symbol.iterator) {
@@ -1383,12 +1394,12 @@ const l4StateMap = createLevelStateProxy('l4');
 
 function pruneExpiredExpansions(renderedAuthors) {
   for (const key of [...expandedSections]) {
-    if (!key.startsWith("a|")) continue;
-    const author = key.slice(2);
+    if (!key.startsWith(PREFIX_AUTHOR)) continue;
+    const author = key.slice(PREFIX_AUTHOR.length);
     if (!renderedAuthors.has(author)) {
       expandedSections.delete(key);
       for (const child of [...expandedSections]) {
-        if (child.startsWith("m|" + author + "/") || child.startsWith("g|" + author + "/")) {
+        if (child.startsWith(PREFIX_MODEL + author + "/") || child.startsWith(PREFIX_GROUP + author + "/")) {
           expandedSections.delete(child);
         }
       }
@@ -1794,7 +1805,7 @@ function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
     { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header", width: 125 }
   ];
   const l2Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Base Models for ${author}` } : c);
-  let html = `<table aria-label="Base models for ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
+  let html = `<table aria-label="Base models for ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` style="width:${c.width}px"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
   l2Cols.forEach((c, i) => { html += thHtml(c, state, "2", i + 1); });
   html += `</tr></thead><tbody>`;
   html += sorted.map((m, mIdx) => {
@@ -1851,7 +1862,7 @@ function setupL2Events(container) {
       const detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
       const inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
       const tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
-      const modelKey = `m|${modelId}`;
+      const modelKey = `${PREFIX_MODEL}${modelId}`;
       if (detailRow.style.display === "none") {
         detailRow.style.display = "";
         tog.classList.add("open");
@@ -2112,7 +2123,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
 
   const parentName = parentId.split("/").slice(1).join("/");
   const l3Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Derivative Authors for ${parentName}` } : c);
-  let html = `<table aria-label="Quant author groups for ${escapeHtml(parentId)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
+  let html = `<table aria-label="Quant author groups for ${escapeHtml(parentId)}"><colgroup>${cols.map(c => `<col${c.width ? ` style="width:${c.width}px"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
   l3Cols.forEach((c, i) => { html += thHtml(c, state, "3", i + 1); });
   html += `</tr></thead><tbody>`;
 
@@ -2158,7 +2169,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
         const detailRow = document.getElementById(`d3-${l2Idx}-${modelIdx}-${gIdx}`);
         const inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
         const tog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
-        const groupKey = `g|${parentId}|${author}`;
+        const groupKey = `${PREFIX_GROUP}${parentId}|${author}`;
         if (detailRow.style.display === "none") {
           detailRow.style.display = "";
           tog.classList.add("open");
@@ -2202,7 +2213,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
   ];
 
   const l4Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Derivative Models for ${author}` } : c);
-  let html = `<table aria-label="Individual quantizations for ${escapeHtml(parentId)} by ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
+  let html = `<table aria-label="Individual quantizations for ${escapeHtml(parentId)} by ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` style="width:${c.width}px"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
   l4Cols.forEach((c, i) => { html += thHtml(c, st, "4", i + 1); });
   html += `</tr></thead><tbody>`;
 
@@ -2264,8 +2275,8 @@ const hiddenL4 = quants.length - displayed.length;
 function refreshAllExpanded() {
   // Phase 1: re-expand L1 author rows
   for (const key of expandedSections) {
-    if (!key.startsWith("a|")) continue;
-    const author = key.slice(2);
+    if (!key.startsWith(PREFIX_AUTHOR)) continue;
+    const author = key.slice(PREFIX_AUTHOR.length);
     const row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
     if (!row) continue;
     const idx = parseInt(row.dataset.l1Idx);
@@ -2285,8 +2296,8 @@ function refreshAllExpanded() {
 
   // Phase 2: re-expand L2 model rows
   for (const key of expandedSections) {
-    if (!key.startsWith("m|")) continue;
-    const modelId = key.slice(2);
+    if (!key.startsWith(PREFIX_MODEL)) continue;
+    const modelId = key.slice(PREFIX_MODEL.length);
     const row = document.querySelector(`tr.l2-row[data-model="${CSS.escape(modelId)}"]`);
     if (!row) continue;
     const l2Idx = parseInt(row.dataset.l2Idx);
@@ -2314,7 +2325,7 @@ function refreshAllExpanded() {
 
   // Phase 3: re-expand L3 quant author group rows
   for (const key of expandedSections) {
-    if (!key.startsWith("g|")) continue;
+    if (!key.startsWith(PREFIX_GROUP)) continue;
     const parts = key.split("|");
     const modelId = parts[1];
     const groupAuthor = parts.slice(2).join("|");
@@ -2396,9 +2407,9 @@ async function deriveVisibleUnknowns() {
   if (!_derivedParamEnabled) return;
   const gen = _fetchGeneration;
   for (const key of expandedSections) {
-    if (!key.startsWith("a|")) continue;
+    if (!key.startsWith(PREFIX_AUTHOR)) continue;
     if (gen !== _fetchGeneration) break;
-    const author = key.slice(2);
+    const author = key.slice(PREFIX_AUTHOR.length);
     const models = cacheAccess(author);
     if (!models) continue;
     const unknown = models.filter(m => m.paramB === null && !_inferredAttemptedIds.has(m.id) && modelPassesAllFilters(m));
@@ -2709,7 +2720,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
     const detailRow = document.getElementById(`d1-${idx}`);
     const inner = document.getElementById(`i1-${idx}`);
     const tog = document.getElementById(`t1-${idx}`);
-    const authorKey = `a|${author}`;
+    const authorKey = `${PREFIX_AUTHOR}${author}`;
     if (detailRow.style.display === "none") {
       detailRow.style.display = "";
       tog.classList.add("open");
