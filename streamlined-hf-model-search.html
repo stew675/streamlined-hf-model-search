@@ -341,23 +341,13 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260525.21';
+const APP_VERSION = '260525.22';
 // Design Notes (unaddressed review items):
-// - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
-//   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
-//   correctly and are fully documented in AGENTS.md. A full refactor to explicit
-//   getter/setter methods would be invasive with no functional benefit.
+// - Proxy indirection removed in v260525.21 — all callers now access RenderCoordinator._state,
+//   _levelState, and helper methods directly. No indirection remains.
 // - CSS variableization: The dark theme is fixed per design intent. No light/dark
 //   toggle is planned. Hardcoded values are intentional for consistency.
 let _allFetched, _authorData, _canonicalAuthor;
-
-['l1Author', 'l2Model', 'l3Author', 'l4Model'].forEach(key => {
-  Object.defineProperty(window, '_' + key + 'Filter', {
-    get: () => RenderCoordinator._state.textFilters[key],
-    set: (v) => { RenderCoordinator._state.textFilters[key] = v; },
-    configurable: true
-  });
-});
 
 const TO_TAGS = [
   // Audio
@@ -985,10 +975,10 @@ function handleSortClick(th, level, sortKey, defaultKey, refreshAfter, renderFn)
   if (th.dataset.level !== level) return;
   const key = th.dataset.key;
   if (!key) return;
-  const st = detailSort[sortKey] || { key: defaultKey, asc: false };
+  const st = RC.getDetailSort(sortKey) || { key: defaultKey, asc: false };
   if (st.key === key) st.asc = !st.asc;
   else { st.key = key; st.asc = false; }
-  detailSort[sortKey] = st;
+  RC._state.detailSort[sortKey] = st;
   renderFn();
   if (refreshAfter) refreshAllExpanded();
 }
@@ -1114,7 +1104,8 @@ function isInParamRange(paramB) {
 // Injected base models bypass the date check so quants of recently-updated models
 // stay reachable even when the parent falls outside the slider window.
 function modelPassesAllFilters(m) {
-  if (_l2ModelFilter && !m.id.split("/").slice(1).join("/").toLowerCase().includes(_l2ModelFilter.toLowerCase())) return false;
+  const tf2 = RC._state.textFilters.l2Model;
+  if (tf2 && !m.id.split("/").slice(1).join("/").toLowerCase().includes(tf2.toLowerCase())) return false;
   if (!_injectedBaseIds.has(m.id) && !isInDateRange(m.lastModified)) return false;
   const tag = m.pipeline_tag;
   if (!tag && !activeSpecialFilters.has("include untagged")) return false;
@@ -1320,25 +1311,10 @@ const RenderCoordinator = {
   get _l4ModelFilter() { return this._state.textFilters.l4Model; },
 };
 
+const RC = RenderCoordinator; // short alias used throughout call sites
+
 let sortKey = "totalDownloads";
 let sortAsc = false;
-
-const detailSort = new Proxy({}, {
-  get(target, prop) {
-    return RenderCoordinator._state.detailSort[prop];
-  },
-  set(target, prop, value) {
-    RenderCoordinator._state.detailSort[prop] = value;
-    return true;
-  },
-  has(target, prop) {
-    return prop in RenderCoordinator._state.detailSort;
-  },
-  deleteProperty(target, prop) {
-    delete RenderCoordinator._state.detailSort[prop];
-    return true;
-  }
-});
 
 function syncSortState() {
   sortKey = RenderCoordinator._state.l1Sort.key;
@@ -1359,48 +1335,18 @@ function cacheAccess(key) {
   cache.set(key, v);
   return v;
 }
-const expandedSections = new Proxy(new Set(), {
-  get(target, prop) {
-    if (prop === 'add' || prop === 'delete' || prop === 'has' || prop === 'clear' || prop === 'forEach' || prop === Symbol.iterator) {
-      return function(...args) {
-        return RenderCoordinator._state.expandedSections[prop](...args);
-      };
-    }
-    if (prop === 'size') return RenderCoordinator._state.expandedSections.size;
-    return target[prop];
-  }
-});
+
 const _inflightChildren = new Map();
-function createLevelStateProxy(level) {
-  const mapApi = ['get', 'set', 'has', 'delete', 'clear', 'forEach', 'keys', 'values', 'entries'];
-  // NOTE: These Proxies provide backward-compatible global access to RenderCoordinator state.
-  // New code should call RenderCoordinator._state / _levelState directly. In v2 these wrappers
-  // can be removed once all callers are migrated, reducing ~50 lines of indirection.
-  return new Proxy(new Map(), {
-    get(target, prop) {
-      if (mapApi.includes(prop) || prop === Symbol.iterator) {
-        return function(...args) {
-          return RenderCoordinator._levelState[level][prop](...args);
-        };
-      }
-      if (prop === 'size') return RenderCoordinator._levelState[level].size;
-      return target[prop];
-    }
-  });
-}
-const l2StateMap = createLevelStateProxy('l2');
-const l3StateMap = createLevelStateProxy('l3');
-const l4StateMap = createLevelStateProxy('l4');
 
 function pruneExpiredExpansions(renderedAuthors) {
-  for (const key of [...expandedSections]) {
+  for (const key of [...RenderCoordinator.expandedSections]) {
     if (!key.startsWith(PREFIX_AUTHOR)) continue;
     const author = key.slice(PREFIX_AUTHOR.length);
     if (!renderedAuthors.has(author)) {
-      expandedSections.delete(key);
-      for (const child of [...expandedSections]) {
+      RenderCoordinator.expandedSections.delete(key);
+      for (const child of [...RenderCoordinator.expandedSections]) {
         if (child.startsWith(PREFIX_MODEL + author + "/") || child.startsWith(PREFIX_GROUP + author + "/")) {
-          expandedSections.delete(child);
+          RenderCoordinator.expandedSections.delete(child);
         }
       }
     }
@@ -1409,7 +1355,7 @@ function pruneExpiredExpansions(renderedAuthors) {
 
 function saveRestoreExpansions(saved) {
   for (const key of saved) {
-    if (!expandedSections.has(key)) expandedSections.add(key);
+    if (!RenderCoordinator.expandedSections.has(key)) RenderCoordinator.expandedSections.add(key);
   }
 }
 
@@ -1588,8 +1534,9 @@ function sortRows(rows, key, asc, subKey) {
 function renderMain(authorData) {
   const tbody = document.getElementById("body");
   let sorted = sortRows(authorData, sortKey, sortAsc, sortKey === "author" ? undefined : "author");
-  if (_l1AuthorFilter) {
-    const f = _l1AuthorFilter.toLowerCase();
+  const tf1 = RC._state.textFilters.l1Author;
+  if (tf1) {
+    const f = tf1.toLowerCase();
     sorted = [...sorted].sort((a, b) => {
       const aMatch = a.author.toLowerCase().includes(f);
       const bMatch = b.author.toLowerCase().includes(f);
@@ -1781,7 +1728,7 @@ function thHtml(c, state, level, colindex) {
 
 function renderL2Empty(idx, author, container, popupSource) {
   const allBaseModels = popupSource || cacheAccess(author) || [];
-  l2StateMap.set(author, { idx, author, models: [], allBaseModels });
+  RC._levelState.l2.set(author, { idx, author, models: [], allBaseModels });
   if (allBaseModels.length > 0) {
     container.innerHTML = `<div class="detail-count" style="color:#6e7681"><span id="fp-trigger-l2-empty-${author}" class="filter-popup-trigger" tabindex="0" role="button" aria-haspopup="true">No base models match current filters</span><div id="fp-popup-l2-empty-${author}" class="filter-popup"></div></div>`;
     const trigger = document.getElementById(`fp-trigger-l2-empty-${author}`);
@@ -1845,7 +1792,7 @@ function setupL2Events(container) {
   const l2Click = function(e) {
     const inner = e.target.closest(".detail-inner");
     if (inner && inner !== container) return;
-    const s = l2StateMap.get(container.dataset.l2Author);
+    const s = RC._levelState.l2.get(container.dataset.l2Author);
     if (!s) return;
     const th = e.target.closest("thead th");
     if (th) {
@@ -1867,7 +1814,7 @@ function setupL2Events(container) {
         detailRow.style.display = "";
         tog.classList.add("open");
         tog.setAttribute("aria-expanded", "true");
-        expandedSections.add(modelKey);
+        RenderCoordinator.expandedSections.add(modelKey);
         const key = `children-${modelId}`;
         const cached = cacheAccess(key);
         if (cached) {
@@ -1881,9 +1828,9 @@ function setupL2Events(container) {
         detailRow.style.display = "none";
         tog.classList.remove("open");
         tog.setAttribute("aria-expanded", "false");
-        expandedSections.delete(modelKey);
-        for (const k of [...expandedSections]) {
-          if (k.startsWith(`g|${modelId}|`)) expandedSections.delete(k);
+        RenderCoordinator.expandedSections.delete(modelKey);
+        for (const k of [...RenderCoordinator.expandedSections]) {
+          if (k.startsWith(PREFIX_GROUP + modelId + "|")) RenderCoordinator.expandedSections.delete(k);
         }
         tog?.focus();
       }
@@ -1899,7 +1846,7 @@ function setupL2Events(container) {
 }
 
 function renderL2(idx, author, models, container, totalBeforeFilter, popupSource) {
-  const state = detailSort[`l2-${author}`] || { key: "downloads", asc: false };
+  const state = RC.getDetailSort(`l2-${author}`) || { key: "downloads", asc: false };
   const sorted = sortRows(models, state.key, state.asc, state.key === "id" ? undefined : "id");
 
   if (sorted.length === 0) {
@@ -1911,7 +1858,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
   container.innerHTML = html;
   container.dataset.l2Author = author;
   const allBaseModels = popupSource || cacheAccess(author) || [];
-  l2StateMap.set(author, { idx, author, models, totalBeforeFilter, allBaseModels });
+  RC._levelState.l2.set(author, { idx, author, models, totalBeforeFilter, allBaseModels });
 
   wireL2Popups(author, models, allBaseModels, hidden);
   setupL2Events(container);
@@ -2023,7 +1970,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
         if (cached === undefined || cached === null) {
           _paramCache.set(parentId, maxChildParam);
           const pauthor = parentId.split("/")[0];
-          const st = l2StateMap.get(pauthor);
+          const st = RC._levelState.l2.get(pauthor);
           if (st) {
             const pm = st.models.find(m => m.id === parentId);
             if (pm && pm.paramB == null) pm.paramB = maxChildParam;
@@ -2110,9 +2057,9 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
     count: quants.length,
     totalDownloads: quants.reduce((s, q) => s + q.downloads, 0),
     quants
-  })).filter(g => !_l3AuthorFilter || g.author.toLowerCase().includes(_l3AuthorFilter.toLowerCase()));
+  })).filter(g => { const tf = RC._state.textFilters.l3Author; return !tf || g.author.toLowerCase().includes(tf.toLowerCase()); });
 
-  const state = detailSort[`l3-${parentId}`] || { key: "totalDownloads", asc: false };
+  const state = RC.getDetailSort(`l3-${parentId}`) || { key: "totalDownloads", asc: false };
   const sorted = sortRows(groupEntries, state.key, state.asc, state.key === "author" ? undefined : "author");
 
   const cols = [
@@ -2142,7 +2089,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   html += `<div class="detail-count">${filtered.length} child model(s) from ${groupEntries.length} author(s)${filtered.length !== children.length ? ` (filtered from ${children.length})` : ''}</div>`;
   container.innerHTML = html;
   container.dataset.l3Parent = parentId;
-  l3StateMap.set(parentId, { l2Idx, modelIdx, parentId, children });
+  RC._levelState.l3.set(parentId, { l2Idx, modelIdx, parentId, children });
 
   if (!container._delegatedL3) {
     // Event delegation: same rationale as L2 — survives innerHTML re-renders.
@@ -2150,7 +2097,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
     container.addEventListener("click", function(e) {
       const inner = e.target.closest(".detail-inner");
       if (inner && inner !== this) return;
-      const s = l3StateMap.get(this.dataset.l3Parent);
+      const s = RC._levelState.l3.get(this.dataset.l3Parent);
       if (!s) return;
       const th = e.target.closest("thead th");
       if (th) {
@@ -2174,7 +2121,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
           detailRow.style.display = "";
           tog.classList.add("open");
           tog.setAttribute("aria-expanded", "true");
-          expandedSections.add(groupKey);
+          RenderCoordinator.expandedSections.add(groupKey);
           const allChildren = cacheAccess(`children-${parentId}`) || s.children || [];
           const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
           renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, inner);
@@ -2183,7 +2130,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
           detailRow.style.display = "none";
           tog.classList.remove("open");
           tog.setAttribute("aria-expanded", "false");
-          expandedSections.delete(groupKey);
+          RenderCoordinator.expandedSections.delete(groupKey);
           tog?.focus();
         }
       }
@@ -2199,9 +2146,10 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
 
 // ── Level 4: Individual Quantizations ──
 function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
-  const st = detailSort[`l4-${parentId}-${author}`] || { key: "downloads", asc: false };
+  const st = RC.getDetailSort(`l4-${parentId}-${author}`) || { key: "downloads", asc: false };
   // quants is the pre-text-filter array (from cache or state). Create a filtered copy for display.
-  const displayed = _l4ModelFilter ? quants.filter(q => q.id.split("/").slice(1).join("/").toLowerCase().includes(_l4ModelFilter.toLowerCase())) : quants;
+  const tf4 = RC._state.textFilters.l4Model;
+  const displayed = tf4 ? quants.filter(q => q.id.split("/").slice(1).join("/").toLowerCase().includes(tf4.toLowerCase())) : quants;
   const sorted = sortRows(displayed, st.key, st.asc, st.key === "id" ? undefined : "id");
 
   const cols = [
@@ -2236,7 +2184,7 @@ const hiddenL4 = quants.length - displayed.length;
   const l4Key = `${parentId}|${author}`;
   container.dataset.l4Key = l4Key;
   // Store pre-text-filter quants so re-render (e.g. sort) can re-apply _l4ModelFilter correctly.
-  l4StateMap.set(l4Key, { l2Idx, modelIdx, gIdx, parentId, author, quants });
+  RC._levelState.l4.set(l4Key, { l2Idx, modelIdx, gIdx, parentId, author, quants });
 
   if (hiddenL4 > 0) {
     const trigger = document.getElementById(`fp-trigger-l4-${l4SafeId}`);
@@ -2253,7 +2201,7 @@ const hiddenL4 = quants.length - displayed.length;
     container.addEventListener("click", function(e) {
       const th = e.target.closest("thead th");
       if (!th || th.dataset.level !== "4") return;
-      const s = l4StateMap.get(this.dataset.l4Key);
+      const s = RC._levelState.l4.get(this.dataset.l4Key);
       if (!s) return;
       handleSortClick(th, "4", `l4-${s.parentId}-${s.author}`, "downloads", false, () => {
         renderL4(s.l2Idx, s.modelIdx, s.gIdx, s.parentId, s.author, s.quants, this);
@@ -2274,7 +2222,7 @@ const hiddenL4 = quants.length - displayed.length;
 // so restoration is robust even if DOM indices shift after re-render.
 function refreshAllExpanded() {
   // Phase 1: re-expand L1 author rows
-  for (const key of expandedSections) {
+  for (const key of RC.expandedSections) {
     if (!key.startsWith(PREFIX_AUTHOR)) continue;
     const author = key.slice(PREFIX_AUTHOR.length);
     const row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
@@ -2295,7 +2243,7 @@ function refreshAllExpanded() {
   }
 
   // Phase 2: re-expand L2 model rows
-  for (const key of expandedSections) {
+  for (const key of RC.expandedSections) {
     if (!key.startsWith(PREFIX_MODEL)) continue;
     const modelId = key.slice(PREFIX_MODEL.length);
     const row = document.querySelector(`tr.l2-row[data-model="${CSS.escape(modelId)}"]`);
@@ -2324,7 +2272,7 @@ function refreshAllExpanded() {
   }
 
   // Phase 3: re-expand L3 quant author group rows
-  for (const key of expandedSections) {
+  for (const key of RC.expandedSections) {
     if (!key.startsWith(PREFIX_GROUP)) continue;
     const parts = key.split("|");
     const modelId = parts[1];
@@ -2350,11 +2298,11 @@ function refreshAllExpanded() {
 // is expected (user is focused on typing, not watching the table). Sliders and filter chips
 // use the dirty-flag + button pattern instead to avoid unnecessary re-renders on drag.
 function applyTextFilters() {
-  _l1AuthorFilter = document.getElementById("l1-author-filter").value.trim();
-  _l2ModelFilter = document.getElementById("l2-model-filter").value.trim();
-  _l3AuthorFilter = document.getElementById("l3-author-filter").value.trim();
-  _l4ModelFilter = document.getElementById("l4-model-filter").value.trim();
-  const saved = new Set(expandedSections);
+  RC._state.textFilters.l1Author = document.getElementById("l1-author-filter").value.trim();
+  RC._state.textFilters.l2Model = document.getElementById("l2-model-filter").value.trim();
+  RC._state.textFilters.l3Author = document.getElementById("l3-author-filter").value.trim();
+  RC._state.textFilters.l4Model = document.getElementById("l4-model-filter").value.trim();
+  const saved = new Set(RenderCoordinator.expandedSections);
   recomputeAndRender(saved);
 }
 const debouncedTextFilter = debounce(applyTextFilters, CONFIG.DEBOUNCE_MS);
@@ -2362,7 +2310,7 @@ const debouncedTextFilter = debounce(applyTextFilters, CONFIG.DEBOUNCE_MS);
 // Re-render using existing in-memory data — no API calls, no generation bump.
 function applyLocalFilters() {
   if (!_allFetched || _allFetched.length === 0) return;
-  const saved = new Set(expandedSections);
+  const saved = new Set(RenderCoordinator.expandedSections);
   recomputeAndRender(saved);
 }
 const debouncedSliderUpdate = debounce(applyLocalFilters, CONFIG.DEBOUNCE_MS);
@@ -2406,7 +2354,7 @@ async function tryResolveModelParam(m, gen, idx, author, container, getFiltered,
 async function deriveVisibleUnknowns() {
   if (!_derivedParamEnabled) return;
   const gen = _fetchGeneration;
-  for (const key of expandedSections) {
+  for (const key of RenderCoordinator.expandedSections) {
     if (!key.startsWith(PREFIX_AUTHOR)) continue;
     if (gen !== _fetchGeneration) break;
     const author = key.slice(PREFIX_AUTHOR.length);
@@ -2479,7 +2427,7 @@ function buildDateSlider() {
 function applyFilters(force, deep) {
   if (!needsUpdate && !force) return;
   needsUpdate = false;
-  const savedExpansions = new Set(expandedSections);
+  const savedExpansions = new Set(RC.expandedSections);
   _fetchGeneration++;
   const gen = _fetchGeneration;
   const quickBtn = document.getElementById("get-quick-results-btn");
@@ -2555,7 +2503,7 @@ function applyFilters(force, deep) {
                 renderCounter++;
                 if (gen !== _fetchGeneration) return;
                 if (renderCounter % 2 !== 0) return;
-                const saved = new Set(expandedSections);
+                const saved = new Set(RC.expandedSections);
                 recomputeAndRender(saved);
               };
             })());
@@ -2725,7 +2673,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
       detailRow.style.display = "";
       tog.classList.add("open");
       tog.setAttribute("aria-expanded", "true");
-      expandedSections.add(authorKey);
+      RenderCoordinator.expandedSections.add(authorKey);
       const baseModels = cacheAccess(author);
       if (!baseModels) {
         inner.innerHTML = '<div class="detail-loading" role="status">Fetching base models…</div>';
@@ -2741,10 +2689,10 @@ renderL2(idx, author, filtered, inner, nonQuantBase.length, nonQuantBase);
       detailRow.style.display = "none";
       tog.classList.remove("open");
       tog.setAttribute("aria-expanded", "false");
-      expandedSections.delete(authorKey);
-      for (const key of [...expandedSections]) {
-        if (key.startsWith(`m|${author}/`) || key.startsWith(`g|${author}/`)) {
-          expandedSections.delete(key);
+      RenderCoordinator.expandedSections.delete(authorKey);
+      for (const key of [...RenderCoordinator.expandedSections]) {
+        if (key.startsWith(PREFIX_MODEL + author + "/") || key.startsWith(PREFIX_GROUP + author + "/")) {
+          RenderCoordinator.expandedSections.delete(key);
         }
       }
       tog?.focus();
@@ -2779,7 +2727,7 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   fetchedUntagged = false;
   fetchedTrending = false;
   _trendingAdded = 0;
-  expandedSections.clear();
+  RenderCoordinator.expandedSections.clear();
   document.getElementById("rate-limit-notice").style.display = "none";
   recomputeAndRenderWithoutDerive();
 });
@@ -2801,7 +2749,7 @@ document.getElementById("hide-missing-param-chip").addEventListener("click", () 
   chip.setAttribute("aria-checked", String(_hideMissingParamEnabled));
   // Cosmetic-only re-render: skip deriveVisibleUnknowns to avoid re-inferring
   // already-resolved models.
-  const saved = new Set(expandedSections);
+  const saved = new Set(RC.expandedSections);
   recomputeAndRenderWithoutDerive(saved);
 });
 addKeyboardClick(document.getElementById("hide-missing-param-chip"));
