@@ -342,8 +342,26 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260525.25';
-// Design Notes (unaddressed review items):
+const APP_VERSION = '260525.27';
+// Design Notes (review items addressed in v260525.27):
+// - resolveParamFromChildren: try extractParamFromId on each child's ID before
+//   making the individual API fetch. Most quant child names contain B/M patterns
+//   (e.g. "7B", "13B"), so the individual fetch is now rarely needed. This
+//   dramatically reduces API calls during "Infer Missing Params" processing.
+// Design Notes (review items addressed in v260525.26):
+// - _inflightChildren dedup: fallback to fresh fetch when the inflight promise resolves
+//   with null results (detached-container / error case) to prevent loading hang.
+// - Parent-param backfill from child search results: replaced metadata-based extraction
+//   (which never worked — search API doesn't return safetensors/gguf) with ID-based
+//   B/M pattern matching via extractParamFromId.
+// - Rate limiter: serialized slot acquisition via _rateSlotPromise chain to eliminate
+//   the check-then-push race between concurrent fetchJson calls.
+// - Clear Cache: removed redundant _fetchState flag resets (fetchedUntagged etc.) that
+//   caused unnecessary API calls; now also clears _levelState maps.
+// - Popup headers: "At most N shown" is now dynamic based on actual maxSamples cap.
+// - Dead code removed: unused injectionBatches variable, synchronous generation guards
+//   in markLocalParents (no-op in single-threaded JS).
+// - Accessibility: removed aria-colindex from colspanned detail-row cells.
 // - Proxy indirection removed in v260525.21 — all callers now access RenderCoordinator._state,
 //   _levelState, and helper methods directly. No indirection remains.
 // - CSS variableization: The dark theme is fixed per design intent. No light/dark
@@ -547,6 +565,30 @@ function matchesTaskFilter(pipelineTag) {
 
 const _apiTimestamps = [];
 const _inflightFetches = new Map();
+let _rateSlotPromise = Promise.resolve();
+
+// Serializes rate-limit slot acquisition so concurrent fetchJson calls cannot both
+// pass the length-check gate and then both push, which would exceed the limit.
+async function acquireRateSlot() {
+  const prev = _rateSlotPromise;
+  _rateSlotPromise = (async () => {
+    await prev;
+    while (true) {
+      const now = Date.now();
+      const cutoff = now - CONFIG.RATE_WINDOW;
+      while (_apiTimestamps.length > 0 && _apiTimestamps[0] < cutoff) {
+        _apiTimestamps.shift();
+      }
+      if (_apiTimestamps.length < CONFIG.RATE_LIMIT) {
+        _apiTimestamps.push(now);
+        return;
+      }
+      const wait = _apiTimestamps[0] + CONFIG.RATE_WINDOW - now + 10;
+      await new Promise(r => setTimeout(r, wait));
+    }
+  })();
+  return _rateSlotPromise;
+}
 
 // Fetches with URL-level dedup, rate limiting (sliding window), and exponential backoff.
 // URL dedup via _inflightFetches is checked before rate limiting so concurrent requests
@@ -559,17 +601,7 @@ async function fetchJson(url) {
     let retries = 0;
     const MAX_RETRIES = CONFIG.MAX_RETRIES;
     while (true) {
-      const now = Date.now();
-      const cutoff = now - CONFIG.RATE_WINDOW;
-      while (_apiTimestamps.length > 0 && _apiTimestamps[0] < cutoff) {
-        _apiTimestamps.shift();
-      }
-      if (_apiTimestamps.length >= CONFIG.RATE_LIMIT) {
-        const wait = _apiTimestamps[0] + CONFIG.RATE_WINDOW - now + 10;
-        await new Promise(r => setTimeout(r, wait));
-        continue;
-      }
-      _apiTimestamps.push(now);
+      await acquireRateSlot();
       let res;
       try {
         const controller = new AbortController();
@@ -790,7 +822,7 @@ function getFilteredOutModels(source, displayedIds, maxSamples) {
       updated: fmtDate(m.lastModified)
     });
   }
-  return { samples, totalHidden };
+  return { samples, totalHidden, maxSamples };
 }
 
 // Renders a compact popup table of filtered-out model samples with sortable columns.
@@ -798,7 +830,7 @@ function renderFilteredPopup(container, result) {
   container._popupData = result;
   if (!container._popupSort) container._popupSort = { key: 'updated', asc: false };
   const sp = container._popupSort;
-  const { samples, totalHidden } = result;
+  const { samples, totalHidden, maxSamples } = result;
   const sorted = [...samples].sort((a, b) => {
     let cmp = 0;
     if (sp.key === 'paramB') {
@@ -817,7 +849,8 @@ function renderFilteredPopup(container, result) {
     return sp.asc ? cmp : -cmp;
   });
   const arrow = k => k === sp.key ? (sp.asc ? ' ▲' : ' ▼') : '';
-  const fpHeader = '<div class="fp-header">Hidden Models Preview - At most 200 displayed</div>';
+  const capNote = (maxSamples != null && maxSamples < totalHidden) ? ` (at most ${maxSamples} shown)` : '';
+  const fpHeader = `<div class="fp-header">Hidden Models Preview${capNote}</div>`;
   if (!samples.length) {
     container.innerHTML = fpHeader + '<table><tbody><tr><td colspan="5" class="fp-note">No hidden models to preview.</td></tr></tbody></table>';
     return;
@@ -1800,7 +1833,7 @@ function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
       <td class="right" aria-colindex="5">${fmt(m.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
       <td class="updated-cell" aria-colindex="6">${fmtDate(m.lastModified)} <span style="color:#6e7681;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
     </tr>
-    <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none" aria-rowindex="${detailRowIdx}"><td colspan="6" aria-colindex="1"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
+    <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none" aria-rowindex="${detailRowIdx}"><td colspan="6"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
   }).join('');
   const hidden = (totalBeforeFilter != null && totalBeforeFilter > sorted.length) ? totalBeforeFilter - sorted.length : 0;
   html += `</tbody></table><div class="detail-count">${sorted.length} model(s)` + (hidden > 0 ? `, <span id="fp-trigger-l2-${author}" class="filter-popup-trigger" tabindex="0" role="button" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by current filters</span><div id="fp-popup-l2-${author}" class="filter-popup"></div>` : '') + `</div>`;
@@ -1904,8 +1937,9 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
 // active task filter and aren't already in _allFetched (avoids duplicating base models
 // that happen to be surfaced by the search endpoint).
 // No _fetchGeneration guard needed: container.isConnected catches stale renders after
-// L2 re-render, and _inflightChildren dedup ensures the second caller (from refreshAllExpanded)
-// renders into the new connected container when the shared promise resolves.
+// L2 re-render. _inflightChildren dedup shares the inflight promise across concurrent
+// expansions; fallback to a fresh fetch when the promise resolves with null results
+// (error case) prevents the UI from getting stuck in loading state.
 async function loadChildren(l2Idx, modelIdx, parentId, container) {
   const cacheKey = `children-${parentId}`;
 
@@ -1915,8 +1949,13 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
   const entry = _inflightChildren.get(cacheKey);
   if (entry) {
     await entry.promise;
-    if (entry.results && container.isConnected) renderL3(l2Idx, modelIdx, parentId, entry.results, container);
-    return;
+    if (entry.results && container.isConnected) {
+      renderL3(l2Idx, modelIdx, parentId, entry.results, container);
+      return;
+    }
+    // Inflight entry resolved with no results (fetch failed) or old container was
+    // detached. Fall through to issue a fresh fetch so the caller's container gets
+    // rendered, rather than leaving it stuck in "Fetching..." state.
   }
 
   const newEntry = { promise: null, results: null };
@@ -1983,19 +2022,15 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
         processChildren(rawResults);
       }
 
-      // Backfill parent paramB from child safetensors/gguf metadata — the search
-      // API occasionally returns gguf.total for GGUF children, which reveals the
-      // parent's true parameter count without an extra individual fetch.
+      // Infer parent paramB from child model IDs using B/M pattern matching.
+      // The search API never returns safetensors/gguf metadata even with full=true
+      // (see AGENTS.md), so metadata-based extraction is not viable here.
+      // ID pattern matching covers most real-world cases (e.g. children named
+      // "Qwen2.5-7B-GGUF" reveal the parent's 7B size).
       let maxChildParam = null;
       for (const cm of rawResults) {
-        if (cm.safetensors && cm.safetensors.total != null) {
-          const p = cm.safetensors.total / 1e9;
-          if (maxChildParam === null || p > maxChildParam) maxChildParam = p;
-        }
-        if (cm.gguf && cm.gguf.total != null) {
-          const p = cm.gguf.total / 1e9;
-          if (maxChildParam === null || p > maxChildParam) maxChildParam = p;
-        }
+        const p = extractParamFromId(cm.id);
+        if (p !== null && (maxChildParam === null || p > maxChildParam)) maxChildParam = p;
       }
       if (maxChildParam !== null) {
         const cached = _paramCache.get(parentId);
@@ -2052,25 +2087,30 @@ async function resolveParamFromChildren(modelId) {
   // original GGUF quants) are prioritized over newer pruned variants (REAP)
   // when DERIVED_BATCH_SIZE limits how many individual cards we fetch.
   children.sort((a, b) => (a.lastModified || "").localeCompare(b.lastModified || ""));
-  // Fetch individual cards for top children (costs API calls).
-  // Bypass getParamCount cache — the search result may have cached null for
-  // the child ID (search results lack metadata), shadowing the full response.
-  // Collect params from all fetched children and use the maximum — pruning
+  // Collect params from top children and use the maximum — pruning
   // (REAP, distillation) only reduces parameter counts, never increases them.
+  // Try free ID-based extraction first: most quant child names contain B/M
+  // patterns (e.g. "7B", "13B") that reveal the parent's parameter count
+  // without an API call. Fall back to individual model fetch only when the
+  // name lacks a B/M pattern (rare for quant models).
   // Early exit: if 3 non-null results agree on the current maximum, stop.
   let runningMax = null, maxConfidence = 0;
   for (let i = 0; i < Math.min(children.length, CONFIG.DERIVED_BATCH_SIZE); i++) {
-    try {
-      const full = await fetchJson(`https://huggingface.co/api/models/${children[i].id}?full=true`);
-      const childP = (full.safetensors && full.safetensors.total != null) ? full.safetensors.total / 1e9 :
-                     (full.gguf && full.gguf.total != null) ? full.gguf.total / 1e9 : null;
-      if (childP !== null) {
-        _paramCache.set(children[i].id, childP);
-        if (childP > runningMax) { runningMax = childP; maxConfidence = 1; }
-        else if (childP === runningMax) { maxConfidence++; }
-        if (maxConfidence >= 3) break;
-      }
-    } catch (e) { /* skip */ }
+    const childId = children[i].id;
+    let childP = extractParamFromId(childId);
+    if (childP === null) {
+      try {
+        const full = await fetchJson(`https://huggingface.co/api/models/${childId}?full=true`);
+        childP = (full.safetensors && full.safetensors.total != null) ? full.safetensors.total / 1e9 :
+                 (full.gguf && full.gguf.total != null) ? full.gguf.total / 1e9 : null;
+      } catch (e) { /* skip */ }
+    }
+    if (childP !== null) {
+      _paramCache.set(childId, childP);
+      if (childP > runningMax) { runningMax = childP; maxConfidence = 1; }
+      else if (childP === runningMax) { maxConfidence++; }
+      if (maxConfidence >= 3) break;
+    }
   }
   return runningMax;
 }
@@ -2526,12 +2566,10 @@ function applyFilters(force, deep) {
         }
         if (deep) {
           status.textContent = `Rendered ${_authorData.length} authors, resolving base models…`;
-          let injectionBatches = 0;
           try {
             await injectBaseModels(all, (() => {
               let renderCounter = 0;
               return () => {
-                injectionBatches++;
                 renderCounter++;
                 if (gen !== _fetchGeneration) return;
                 if (renderCounter % 2 !== 0) return;
@@ -2754,13 +2792,13 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   _inferredFromNameIds.clear();
   _inferredAttemptedIds.clear();
   _deepeningParamIds.clear();
-  _injectedBaseIds.clear();
+   _injectedBaseIds.clear();
 _canonicalCache = null;
    _consecutive429s = 0;
    updateRateLimitUI(false);
-   fetchedUntagged = false;
-   fetchedTrending = false;
-   _trendingAdded = 0;
+   RenderCoordinator._levelState.l2.clear();
+   RenderCoordinator._levelState.l3.clear();
+   RenderCoordinator._levelState.l4.clear();
    RenderCoordinator.expandedSections.clear();
    recomputeAndRenderWithoutDerive();
 });
@@ -2832,11 +2870,8 @@ async function fetchTasks(tasks) {
 // already exists in `all` as `_injected` (bypassing the date filter). No API calls.
 // Used by Quick mode to surface parents of visible quants without fetching new models.
 function markLocalParents(all) {
-  const gen = _fetchGeneration;
-  if (gen !== _fetchGeneration) return;
   const seen = new Set(all.map(m => m.id));
   for (let i = 0; i < all.length; i++) {
-    if (gen !== _fetchGeneration) return;
     const m = all[i];
     if (!isInDateRange(m.lastModified)) continue;
 
