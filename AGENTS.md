@@ -66,7 +66,7 @@ Open in browser, validate:
 12. Same-author quants appear at L2 under their author (not silently suppressed)
 13. Rapid double-clicks don't produce stale renders or duplicate API calls
 14. Hidden Models Preview popups: appear at L2/L4 on hover, center over trigger with boundary clamping, stay visible when moving mouse into popup, links clickable
-15. Popup hidden count matches L2/L4 trigger count exactly
+15. Popup hidden count matches L2/L4 trigger count exactly; L2 popup shows all hidden models (no sample cap)
 16. Popup sortable columns: click any header to sort, ▲/▼ arrows indicate sort direction
 17. "Hide Missing Params" chip hides param-less models from L1/L2
 18. API counter flashes amber on 3+ consecutive 429s
@@ -93,4 +93,5 @@ Open in browser, validate:
 - **Cache eviction fallback**: When `children-{parentId}` is evicted from LRU cache, L3 falls back to `s.children` from `l3StateMap` (survives eviction).
 - **Clear Cache + generation guard**: Clears all caches and increments `_fetchGeneration` to abort stale async. Unlike `applyFilters`, it collapses all expanded sections (no cached data to restore from).
 - **Popup source consistency**: L2/L4 hidden count and popup hidden count must match exactly. `popupSource` passed to `renderL2` must be the same array that `totalBeforeFilter` was computed from (typically `nonQuantBase`).
+- **L2 vs L4 hidden labels**: L2 label says "hidden by current filters" and counts models removed by ALL filters (date, param, pipeline, text, etc.), with popup showing all hidden (no sample cap). L4 says "hidden by text filter" and counts only text-filtered models, popup capped at 200 samples. This difference is intentional: L2 filters are many and layered (sliders + chips + text), while L4 only has the text filter.
 - **Popup ID sanitization**: L4 popup IDs replace `/` with `__` in parentId (`l4SafeId`) to produce valid HTML IDs. Trigger and popup must use the same sanitized key.

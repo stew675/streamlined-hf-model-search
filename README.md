@@ -95,7 +95,8 @@ The L3 and L4 filters apply at their respective expansion levels within already-
 
 ### Hidden Models Preview Popups
 
-When the *L2 Model ID* or *L4 Model ID* filter hides models, a hidden count link appears below each affected table (e.g., "+12 hidden by search settings").
+When filters (date range, param range, pipeline tags, text search, etc.) hide models, a hidden count link appears below the L2 table (e.g., "+12 hidden by current filters").
+At L4, the link only appears when the *L4 Model ID* text filter hides models (e.g., "+2 hidden by text filter").
 Hovering over this link opens a **Hidden Models Preview** popup showing all filtered-out models in a scrollable table.
 
 The popup displays:
@@ -109,6 +110,7 @@ By default the hidden model list is sorted by Updated date descending (most rece
 
 The popup features:
 - Sticky header ("Hidden Models Preview"), sticky column headers, and a persistent footer showing total hidden count
+- Shows every hidden model (no sample limit) — scrollable within a 300px max-height container
 - Center-positioned over the trigger link with viewport boundary clamping
 - 200ms hover delay to prevent flicker on accidental mouse passes
 - Stays visible when hovering into the popup so links are clickable

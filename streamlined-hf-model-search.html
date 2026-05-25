@@ -341,7 +341,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260525.16';
+const APP_VERSION = '260525.17';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -1777,7 +1777,7 @@ function renderL2Empty(idx, author, container, popupSource) {
     const trigger = document.getElementById(`fp-trigger-l2-empty-${author}`);
     const popup = document.getElementById(`fp-popup-l2-empty-${author}`);
     if (trigger && popup) {
-      wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), 200)));
+      wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), allBaseModels.length)));
       addKeyboardClick(trigger);
     }
   } else {
@@ -1814,7 +1814,7 @@ function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
     <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none" aria-rowindex="${detailRowIdx}"><td colspan="6" aria-colindex="1"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
   }).join('');
   const hidden = (totalBeforeFilter != null && totalBeforeFilter > sorted.length) ? totalBeforeFilter - sorted.length : 0;
-  html += `</tbody></table><div class="detail-count">${sorted.length} model(s)` + (hidden > 0 ? `, <span id="fp-trigger-l2-${author}" class="filter-popup-trigger" tabindex="0" role="button" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by search settings</span><div id="fp-popup-l2-${author}" class="filter-popup"></div>` : '') + `</div>`;
+  html += `</tbody></table><div class="detail-count">${sorted.length} model(s)` + (hidden > 0 ? `, <span id="fp-trigger-l2-${author}" class="filter-popup-trigger" tabindex="0" role="button" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by current filters</span><div id="fp-popup-l2-${author}" class="filter-popup"></div>` : '') + `</div>`;
   return { html, hidden };
 }
 
@@ -1824,7 +1824,7 @@ function wireL2Popups(author, models, allBaseModels, hidden) {
   const popup = document.getElementById(`fp-popup-l2-${author}`);
   if (trigger && popup) {
     const displayedIds = new Set(models.map(m => m.id));
-    wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, displayedIds, 200)));
+    wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, displayedIds, allBaseModels.length)));
     addKeyboardClick(trigger);
   }
 }
