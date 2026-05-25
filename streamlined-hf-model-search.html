@@ -334,7 +334,7 @@
 
 <script>
 (function() {
-const APP_VERSION = '260525.06';
+const APP_VERSION = '260525.07';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -1772,10 +1772,11 @@ function renderL2Empty(idx, author, container, popupSource, totalBeforeFilter) {
 function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
   const cols = [
     { key: "id", label: "Model ID" },
-    { key: "paramB", label: "Params", headerCls: "updated-header", cls: "center", width: 160 },
+    { key: "pipeline_tag", label: "Pipeline", cls: "center", width: 130 },
+    { key: "paramB", label: "Params", headerCls: "updated-header", cls: "center", width: 135 },
     { key: "downloads", label: "Downloads", cls: "right", width: 110 },
     { key: "likes", label: "Likes", cls: "right", width: 80 },
-    { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header", width: 135 }
+    { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header", width: 125 }
   ];
   let html = `<table aria-label="Base models for ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
   cols.forEach(c => { html += thHtml(c, state, "2"); });
@@ -1785,12 +1786,13 @@ function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
     const orphanBadge = qMethods.length ? qMethods.map(q => `<span class="badge orphan" title="Parent base model filtered out">${escapeHtml(q.toUpperCase())}</span>`).join(' ') + ' ' : '';
     return `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}">
       <td class="model-id-cell"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(m.id)}">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
+      <td class="center">${escapeHtml(m.pipeline_tag)}</td>
       <td class="center" style="font-size:0.78rem">${paramBadgeHtml(m)}</td>
       <td class="right">${fmt(m.downloads)}</td>
       <td class="right">${fmt(m.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
       <td class="updated-cell">${fmtDate(m.lastModified)} <span style="color:#6e7681;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
     </tr>
-    <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none"><td colspan="5"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
+    <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none"><td colspan="6"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
   }).join('');
   const hidden = (totalBeforeFilter != null && totalBeforeFilter > sorted.length) ? totalBeforeFilter - sorted.length : 0;
   html += `</tbody></table><div class="detail-count">${sorted.length} model(s)` + (hidden > 0 ? `, <span id="fp-trigger-l2-${author}" class="filter-popup-trigger" tabindex="0" role="button" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by search settings</span><div id="fp-popup-l2-${author}" class="filter-popup"></div>` : '') + `</div>`;
@@ -1954,6 +1956,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
               created_at: m.createdAt || "",
               updated_at: m.lastModified || "",
               lastModified: m.lastModified || "",
+              pipeline_tag: m.pipeline_tag || "",
               q_method: qMethod,
               tags: m.tags || []
             });
@@ -2170,7 +2173,8 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 
   const cols = [
     { key: "id", label: "Model ID" },
-    { key: "q_method", label: "Quant", headerCls: "updated-header", cls: "center", width: 160 },
+    { key: "pipeline_tag", label: "Pipeline", cls: "center", width: 120 },
+    { key: "q_method", label: "Quant", headerCls: "updated-header", cls: "center", width: 140 },
     { key: "downloads", label: "Downloads", cls: "right", width: 110 },
     { key: "likes", label: "Likes", cls: "right", width: 80 },
     { key: "lastModified", label: "Updated", cls: "right", width: 110 }
@@ -2184,6 +2188,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
   html += sorted.map(q => {
     return `<tr class="l4-row">
       <td class="model-id-cell"><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.id.split("/").slice(1).join("/"))}">${escapeHtml(q.id.split("/").slice(1).join("/"))}</a></td>
+      <td class="center">${escapeHtml(q.pipeline_tag)}</td>
       <td class="center"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
       <td class="right">${fmt(q.downloads)}</td>
       <td class="right">${fmt(q.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
