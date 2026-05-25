@@ -29,7 +29,7 @@
   #main-table > thead > tr > th { top: 0; z-index: 100; }
   .detail-inner table th[data-level="2"] { top: 36px; z-index: 90; }
   .detail-inner table th[data-level="3"] { top: 64px; z-index: 80; }
-  .detail-inner table th[data-level="4"] { top: 92px; z-index: 70; }
+  .detail-inner table th[data-level="4"] { top: 94px; z-index: 70; }
   th[tabindex="0"]:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; outline-offset: -2px; }
    tr > th:not(:last-child), tr > td:not(:last-child) { border-right: 1px solid #21262d; }
   th:hover { background: #1c2129; }
@@ -325,7 +325,7 @@
 <table id="main-table" aria-label="Authors and base model counts">
   <thead>
     <tr>
-      <th data-key="author" scope="col" tabindex="0">Model Author<span class="arrow"></span></th>
+      <th data-key="author" scope="col" tabindex="0">Base Model Authors<span class="arrow"></span></th>
       <th data-key="count" class="right" scope="col" tabindex="0"><span class="sort-arrow"></span>Base Models</th>
       <th data-key="totalDownloads" class="right" scope="col" tabindex="0"><span class="sort-arrow"></span>Total Downloads</th>
       <th data-key="totalLikes" class="right" scope="col" tabindex="0"><span class="sort-arrow"></span>Total Likes</th>
@@ -338,7 +338,7 @@
 
 <script>
 (function() {
-const APP_VERSION = '260525.12';
+const APP_VERSION = '260525.14';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -1782,7 +1782,7 @@ function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
     { key: "likes", label: "Likes", cls: "right", width: 80 },
     { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header", width: 125 }
   ];
-  const l2Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Base Model IDs for ${author}` } : c);
+  const l2Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Base Models for ${author}` } : c);
   let html = `<table aria-label="Base models for ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
   l2Cols.forEach(c => { html += thHtml(c, state, "2"); });
   html += `</tr></thead><tbody>`;
@@ -2186,7 +2186,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
     { key: "lastModified", label: "Updated", cls: "right", width: 110 }
   ];
 
-  const l4Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Model IDs for ${author}` } : c);
+  const l4Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Derivative Models for ${author}` } : c);
   let html = `<table aria-label="Individual quantizations for ${escapeHtml(parentId)} by ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
   l4Cols.forEach(c => { html += thHtml(c, st, "4"); });
   html += `</tr></thead><tbody>`;
