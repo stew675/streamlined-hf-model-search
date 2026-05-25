@@ -20,7 +20,10 @@ A dark-color themed, browser-based, 4-level hierarchical explorer for HuggingFac
 
 Select your search criteria and click **Get Quick Results** or **Get Deep Results**.  A four tier model navigation tree is presented:
 
-**Get Quick Results** — fetches top models per pipeline tag; skips cross-author base model injection for speed. **Get Deep Results** — same as Quick, plus resolves cross-author base models referenced by quantizations via individual API calls. Slower but surfaces more quantizations.
+**Get Quick Results** - fetches top models per pipeline tag; skips cross-author base model injection for speed.
+
+**Get Deep Results** - same as Quick, plus resolves cross-author base models referenced by quantizations via individual API calls.
+Using Get Deep Results is slower but surfaces more quantizations.
 
 | Level | Role | What You See | Sortable By |
 |-------|------|-------|-------------|
@@ -74,7 +77,9 @@ The **Quant Types** chip bar lets you toggle popular quant type categories on/of
 - Safe Tensors
 - Others — whatever doesn't match the above (GPTQ, EETQ, AQLM, EXL2, Marlin, BNB, INT8, INT4, Q8, Q4)
 
-Quant method detection checks both model name and tags for known keywords. When a model ID contains multiple quant keywords, all are displayed in the badge. Fine-tunes (cross-author models derived from a base) are labeled "finetune" with a green badge.
+Quant method detection checks both model name and tags for known keywords.
+When a model ID contains multiple quant keywords, all are displayed in the badge.
+Fine-tunes (cross-author models derived from a base) are labeled "finetune" with a green badge.
 
 ### Output Display Filters
 
@@ -82,20 +87,27 @@ Above the displayed results are 4 text boxes which may be used to selectively fi
 
 The *L1 Author* box pins matching Base Model Authors to the top of the hierarchical tree rather than hiding non-matching authors.
 
-The *L2 Model ID*, *L3 Author*, and *L4 Model ID* filters act as global search terms that cascade through the hierarchy. For example, typing a model name in the *L2 Model ID* box will narrow base models across all authors, which in turn updates L1 author counts to reflect only matching models. This intentional behavior lets you quickly find specific models regardless of which author hosts them. The L3 and L4 filters apply at their respective expansion levels within already-expanded sections.
+The *L2 Model ID*, *L3 Author*, and *L4 Model ID* filters act as global search terms that cascade through the hierarchy.
+For example, typing a model name in the *L2 Model ID* box will narrow base models across all authors.
+This will in turn update the list of displayed L1 authors to reflect only those with matching models.
+This intentional behavior lets you quickly find specific models regardless of which author hosts them.
+The L3 and L4 filters apply at their respective expansion levels within already-expanded sections.
 
 ### Hidden Models Preview Popups
 
-When the *L2 Model ID* or *L4 Model ID* filter hides models, a hidden count link appears below each affected table (e.g., "+12 hidden by search settings"). Hovering over this link opens a **Hidden Models Preview** popup showing all filtered-out models in a scrollable table.
+When the *L2 Model ID* or *L4 Model ID* filter hides models, a hidden count link appears below each affected table (e.g., "+12 hidden by search settings").
+Hovering over this link opens a **Hidden Models Preview** popup showing all filtered-out models in a scrollable table.
 
 The popup displays:
-- **Model ID** — clickable link to the HuggingFace model page
-- **Params** — parameter count (resolved from cache; em-dash if unknown)
-- **Quant** — detected quant method, or "SAFE TENSOR" when no quant keyword is found in the name
-- **Tag** — pipeline tag for the model
-- **Updated** — last modification date (YYYY-MM-DD format)
+- **Model ID** - clickable link to the HuggingFace model page
+- **Params** - parameter count (resolved from cache; em-dash if unknown)
+- **Quant** - detected quant method, or "SAFE TENSOR" when no quant keyword is found in the name
+- **Tag** - pipeline tag for the model
+- **Updated** - last modification date (YYYY-MM-DD format)
 
-Models are sorted by Updated date descending (most recent first). The popup features:
+By default the hidden model list is sorted by Updated date descending (most recent first), but the user may sort by any column as desired.
+
+The popup features:
 - Sticky header ("Hidden Models Preview"), sticky column headers, and a persistent footer showing total hidden count
 - Center-positioned over the trigger link with viewport boundary clamping
 - 200ms hover delay to prevent flicker on accidental mouse passes
@@ -108,11 +120,11 @@ Models are sorted by Updated date descending (most recent first). The popup feat
 - **Expandable rows** - Click on any row (excluding the link) to expand
 - **Cached results** - Re-expanding is instant; task fetches are skipped once complete; stale-generation renders are discarded
 - **Parameter deepening** - Models with unknown parameter counts are fetched when rows are opened and results are updated in real time (if available)
-- **Infer Missing Params chip** — When enabled (default), models with unknown params search their children to deduce the parent's parameter count via API. Uses name-based B/M regex first, then searches children (2 API calls per model), then fetches individual child cards (up to 10; stops early after 3 agreeing results)
-- **Hide Missing Params chip** — When enabled, models without a known parameter count are hidden from L1 and L2 entirely
-- **API call counter** — displays total requests made in the session; hover for rate-limit info; flashes amber during active rate limiting (3+ consecutive 429s)
-- **Clear Cache button** — empties all in-memory caches (param cache, LRU model cache, inflight state, inference tracking) while preserving filters, sliders. Collapses expanded sections — re-expand to reload from API
-- **Quant badges** — color-coded by method (FP4, FP8, AWQ, GGUF, MLX, etc.); all detected methods shown; orphan quants get a yellow badge
+- **Infer Missing Params chip** - When enabled then models with unknown params search their children to deduce the parent's parameter count via API. Uses name-based Base Model ID regex first, then searches children (2 API calls per model), then fetches individual child cards (up to 10; stops early after 3 agreeing results)
+- **Hide Missing Params chip** - When enabled, models without a known parameter count are hidden from L1 and L2 entirely
+- **API call counter** - displays total requests made in the session; hover for rate-limit info; flashes amber during active rate limiting (3+ consecutive 429s)
+- **Clear Cache button** - empties all in-memory caches (param cache, LRU model cache, inflight state, inference tracking) while preserving filters, sliders. Collapses expanded sections - re-expand to reload from API
+- **Quant badges** - color-coded by method (FP4, FP8, AWQ, GGUF, MLX, etc.); all detected methods shown; orphan quants get a yellow badge
 - **Debug bar** - "Dump of all Fetched Models" chip shows raw `_allFetched` data to verify if a model was fetched before filter/suppression logic hides it
 
 ## Caveats
@@ -120,10 +132,9 @@ Models are sorted by Updated date descending (most recent first). The popup feat
 By necessity of being kind to the Hugging Face API end-point, author and model results are *NOT* exhaustively complete.
 The utility does have generous limits for the number of models it will pull though.
 
-For very obscure models with minimal visibility or active use, then these may be left out of the search results.
-If you're looking for something extremely obscure or specific, use the main HuggingFace Search Page.
+For obscure or old models with minimal visibility or active use, then such models may be left out of the search results.
+Additionally many authors don't tag their model metadata properly which can also lead to them not getting pulled down in the results.
 
-Unfortunately many authors don't tag their model metadata properly.
 In order to expose such authors would require hammering the HuggingFace API quite heavily which is bad practise.
 
 As a result, if you know the name of a specific author/model that you're looking for, then just use the regular Hugging Face Search Page and look them up there.
