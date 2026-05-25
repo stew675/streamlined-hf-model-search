@@ -117,14 +117,17 @@ Models are sorted by Updated date descending (most recent first). The popup feat
 
 ## Caveats
 
-By necessity of being kind to the Hugging Face API end-point, not all author and model results are exhaustively complete.
+By necessity of being kind to the Hugging Face API end-point, author and model results are *NOT* exhaustively complete.
+The utility does have generous limits for the number of models it will pull though.
+
+For very obscure models with minimal visibility or active use, then these may be left out of the search results.
+If you're looking for something extremely obscure or specific, use the main HuggingFace Search Page.
 
 Unfortunately many authors don't tag their model metadata properly.
 In order to expose such authors would require hammering the HuggingFace API quite heavily which is bad practise.
 
 As a result, if you know the name of a specific author/model that you're looking for, then just use the regular Hugging Face Search Page and look them up there.
 
-While the utility has extremely generous limits for the number of authors it will pull, for very obscure authors with no real visibility or active use, then these may be left out of the search results.  Again, if you're looking for something extremely obscure or specific, use the main HuggingFace Search Page.
 
 ## Browser Requirements
 
