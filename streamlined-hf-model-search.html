@@ -334,7 +334,7 @@
 
 <script>
 (function() {
-const APP_VERSION = '260525.05';
+const APP_VERSION = '260525.06';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -1460,7 +1460,7 @@ function buildFilterBar() {
     createFilterChip({
       container: bar, dataset: { method }, text: method.toUpperCase(),
       className: "filter-chip active", ariaPressed: true,
-      onClick: () => { applyFilterLogic(method); syncFilterChips(); markDirty(); }
+      onClick: () => { applyFilterLogic(method); syncFilterChips(); debouncedSliderUpdate(); }
     });
   });
 }
