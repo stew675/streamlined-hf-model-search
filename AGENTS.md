@@ -33,7 +33,7 @@ When modifying this file, write the new content to a temporary file (e.g. `AGENT
 
 ## Backward-Compatible Proxies
 
-Global variables `expandedSections`, `detailSort[*]`, `l2StateMap`/`l3StateMap`/`l4StateMap`, and `_l{1,2,3,4}Filter` are `Proxy` objects delegating to `RenderCoordinator._state` / `_levelState`. New code should use the RenderCoordinator API directly.
+Removed in v260525.21 — all callers now access `RenderCoordinator._state`, `_levelState`, and helper methods (`getDetailSort`, `expandedSections`) directly. No indirection remains.
 
 ## Render Pipeline
 
