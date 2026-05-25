@@ -342,7 +342,19 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260525.27';
+const APP_VERSION = '260525.29';
+// Design Notes (review items addressed in v260525.29):
+// - Fix race condition in markLocalParents: now takes `gen` as a parameter and
+//   checks `gen !== _fetchGeneration` before any state modifications. Prevents
+//   stale async operations from corrupting _injectedBaseIds and model._injected.
+// Design Notes (review items addressed in v260525.28):
+// - Fix regression in markLocalParents: removal of "const gen = _fetchGeneration"
+//   caused "gen === _fetchGeneration" to always be false (gen was undefined),
+//   so _injectedBaseIds was never populated. Parent models outside date range
+//   were incorrectly filtered out even when they had in-range child models.
+// - Also call markLocalParents in loadAuthorModels: ensures parent models fetched
+//   directly from author API (not in _allFetched) are also marked as injected
+//   when they have in-range children.
 // Design Notes (review items addressed in v260525.27):
 // - resolveParamFromChildren: try extractParamFromId on each child's ID before
 //   making the individual API fetch. Most quant child names contain B/M patterns
@@ -1705,6 +1717,8 @@ async function loadAuthorModels(idx, author, container) {
     const models = raw.map(normalizeModel);
     if (!cacheAccess(author + "_models")) cacheSet(author + "_models", models);
 
+         markLocalParents(models, gen);
+
     const authorKnownIds = new Set(models.map(x => x.id));
     const byAuthorId = new Map(models.map(x => [x.id, x]));
     const baseModels = models.filter(m => isBase(m)).map(m => ({
@@ -2588,7 +2602,7 @@ function applyFilters(force, deep) {
           // a prior deep fetch should persist across quick re-fetches since upstream data
           // is static and re-injecting would waste API calls. Clear Cache or a fresh deep
           // fetch resets the set (injectBaseModels calls .clear()).
-          markLocalParents(all);
+           markLocalParents(all, gen);
         }
         if (all.length > CONFIG.ALL_FETCHED_MAX) {
           if (gen !== _fetchGeneration) return;
@@ -2626,8 +2640,8 @@ function applyFilters(force, deep) {
         document.getElementById("main-table").setAttribute("aria-busy", "false");
       }
     })();
-  } else {
-    markLocalParents(_allFetched || []);
+   } else {
+    markLocalParents(_allFetched || [], gen);
     reenable();
     recomputeAndRender(savedExpansions);
   }
@@ -2869,9 +2883,12 @@ async function fetchTasks(tasks) {
 // Local-only parent marking: scan all date-range models and mark any parent that
 // already exists in `all` as `_injected` (bypassing the date filter). No API calls.
 // Used by Quick mode to surface parents of visible quants without fetching new models.
-function markLocalParents(all) {
+// Takes `gen` as a generation guard to prevent stale async operations from corrupting state.
+function markLocalParents(all, gen) {
+  if (gen !== _fetchGeneration) return;
   const seen = new Set(all.map(m => m.id));
   for (let i = 0; i < all.length; i++) {
+    if (gen !== _fetchGeneration) return;
     const m = all[i];
     if (!isInDateRange(m.lastModified)) continue;
 
@@ -2902,7 +2919,7 @@ function markLocalParents(all) {
       const parent = all.find(p => p.id === baseId);
       if (parent) {
         parent._injected = true;
-        if (gen === _fetchGeneration) _injectedBaseIds.add(baseId);
+        _injectedBaseIds.add(baseId);
       }
     }
   }
@@ -2920,7 +2937,7 @@ async function injectBaseModels(all, onBatch) {
   const gen = _fetchGeneration;
   if (gen !== _fetchGeneration) return;
   _injectedBaseIds.clear();  // Reset on deep fetch — fresh injection pass will repopulate.
-  markLocalParents(all);
+  markLocalParents(all, gen);
   if (gen !== _fetchGeneration) return;
   const seenAuthors = new Set(all.map(m => m.id.split("/")[0]));
   const status = document.getElementById("status");
