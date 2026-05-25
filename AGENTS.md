@@ -29,7 +29,7 @@ When modifying this file, write the new content to a temporary file (e.g. `AGENT
 - `_injectedBaseIds` — Injections bypass the date slider so recently-updated quants remain reachable via their parent.
 - `sliderFrom/sliderTo` — 0..80 (0=Anytime, 1-79=14-day increments, 80=Now).
 - `paramSliderFrom/paramSliderTo` — 0..220 (piecewise linear 7-segment mapping).
-- `_popupTimers` — `Map<popupEl, timeoutId>` for debounced popup show/hide (200ms show, 300ms hide).
+- `_popupTimers` — `Map<popupEl, timeoutId>` for debounced popup show/hide (150ms show, 200ms hide).
 
 ## Backward-Compatible Proxies
 

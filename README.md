@@ -127,7 +127,6 @@ The popup features:
 - **API call counter** - displays total requests made in the session; hover for rate-limit info; flashes amber during active rate limiting (3+ consecutive 429s)
 - **Clear Cache button** - empties all in-memory caches (param cache, LRU model cache, inflight state, inference tracking) while preserving filters, sliders. Collapses expanded sections - re-expand to reload from API
 - **Quant badges** - color-coded by method (FP4, FP8, AWQ, GGUF, MLX, etc.); all detected methods shown; orphan quants get a yellow badge
-- **Debug bar** - "Dump of all Fetched Models" chip shows raw `_allFetched` data to verify if a model was fetched before filter/suppression logic hides it
 
 ## Caveats
 

@@ -104,12 +104,12 @@
   #main-table .model-id-cell a { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
   #filter-row { display: flex; flex-wrap: nowrap; align-items: center; }
   #filter-bar { flex: 1 1 auto; min-width: 0; }
-  #debug-bar .filter-chip, #button-row .filter-chip, #filter-bar .filter-chip, #from-bar .filter-chip, #to-bar .filter-chip, #special-bar .filter-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem;
-                        padding: 5px 12px; min-height: 24px; border-radius: 14px; cursor: pointer; user-select: none;
-                        background: #161b22; border: 1px solid #30363d; transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; }
-  #debug-bar .filter-chip:hover, #button-row .filter-chip:hover, #filter-bar .filter-chip:hover, #from-bar .filter-chip:hover, #to-bar .filter-chip:hover, #special-bar .filter-chip:hover { background: #1c2129; color: #c9d1d9; }
-  #debug-bar .filter-chip.active, #button-row .filter-chip.active, #filter-bar .filter-chip.active, #from-bar .filter-chip.active, #to-bar .filter-chip.active, #special-bar .filter-chip.active { color: #58a6ff; border-color: #58a6ff; box-shadow: 0 0 6px #1f6feb33; }
-  #debug-bar .filter-chip.inactive, #button-row .filter-chip.inactive, #filter-bar .filter-chip.inactive, #from-bar .filter-chip.inactive, #to-bar .filter-chip.inactive, #special-bar .filter-chip.inactive { color: #8b949e; border-color: #484f58; }
+ #button-row .filter-chip, #filter-bar .filter-chip, #from-bar .filter-chip, #to-bar .filter-chip, #special-bar .filter-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem;
+                         padding: 5px 12px; min-height: 24px; border-radius: 14px; cursor: pointer; user-select: none;
+                         background: #161b22; border: 1px solid #30363d; transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; }
+  #button-row .filter-chip:hover, #filter-bar .filter-chip:hover, #from-bar .filter-chip:hover, #to-bar .filter-chip:hover, #special-bar .filter-chip:hover { background: #1c2129; color: #c9d1d9; }
+  #button-row .filter-chip.active, #filter-bar .filter-chip.active, #from-bar .filter-chip.active, #to-bar .filter-chip.active, #special-bar .filter-chip.active { color: #58a6ff; border-color: #58a6ff; box-shadow: 0 0 6px #1f6feb33; }
+  #button-row .filter-chip.inactive, #filter-bar .filter-chip.inactive, #from-bar .filter-chip.inactive, #to-bar .filter-chip.inactive, #special-bar .filter-chip.inactive { color: #8b949e; border-color: #484f58; }
   #filter-bar .filter-label, #from-bar .filter-label, #to-bar .filter-label, #special-bar .filter-label, #filter-bar h3, #from-bar h3, #to-bar h3, #special-bar h3 { color: #8b949e; font-size: 0.78rem; margin-right: 4px; font-weight: 600; display: inline; }
   .task-bar-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; align-items: center; }
    .task-bar-row .filter-label, .task-bar-row h3 { color: #8b949e; font-size: 0.78rem; margin-right: 4px; font-weight: 600; display: inline; }
@@ -216,7 +216,7 @@
   .filter-popup-trigger { cursor: help; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
   .filter-popup-trigger:hover { color: #c9d1d9; }
   .filter-popup-trigger:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; border-radius: 2px; }
-  .filter-popup { display: none; position: absolute; z-index: 200;
+  .filter-popup { display: none; position: absolute; z-index: 1000; /* Note: isolation is intentionally NOT used — it breaks stacking context with sticky table headers, causing popups to render behind them */
     background: #1c2129; border: 1px solid #30363d; border-radius: 6px; padding: 0;
     box-shadow: 0 4px 16px rgba(0,0,0,0.6); max-height: 300px; overflow-y: auto; width: 65%; min-width: 320px; }
   .filter-popup.visible { display: block; }
@@ -233,6 +233,7 @@
   .filter-popup .fp-note { padding: 4px 10px; color: #8b949e; font-size: 0.72rem; font-style: italic; border-top: 1px solid #21262d; text-align: center; }
 
   @media (max-width: 480px) { .filter-popup { width: 90% !important; min-width: unset; } }
+  @media (max-width: 600px) { .ps-tooltip { display: none !important; } }
 
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { transition-duration: 0s !important; }
@@ -341,7 +342,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260525.23';
+const APP_VERSION = '260525.24';
 // Design Notes (unaddressed review items):
 // - Proxy indirection removed in v260525.21 — all callers now access RenderCoordinator._state,
 //   _levelState, and helper methods directly. No indirection remains.
@@ -2544,7 +2545,7 @@ function applyFilters(force, deep) {
           droppable.sort((a, b) => {
             const da = a.lastModified ? new Date(a.lastModified).getTime() : 0;
             const db = b.lastModified ? new Date(b.lastModified).getTime() : 0;
-            return db !== da ? db - da : a.id.localeCompare(b.id);
+            return db !== da ? db - da : (b.id || '').localeCompare(a.id || '');
           });
           const room = CONFIG.ALL_FETCHED_MAX - pinned.length;
           droppable.length = Math.max(0, Math.min(droppable.length, room));
