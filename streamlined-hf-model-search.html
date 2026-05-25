@@ -96,7 +96,7 @@
   #task-bars { display: flex; flex-wrap: wrap; gap: 20px; margin: 8px 0 12px; align-items: center; }
   #from-bar, #to-bar { flex: 0 0 auto; }
   #filter-bar, #from-bar, #to-bar, #special-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  #main-table .model-id-cell { max-width: 0; width: 100%; }
+  #main-table .model-id-cell { min-width: 0; width: 100%; }
   #main-table .model-id-cell a { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
   #filter-row { display: flex; flex-wrap: nowrap; align-items: center; }
   #filter-bar { flex: 1 1 auto; min-width: 0; }
@@ -334,7 +334,7 @@
 
 <script>
 (function() {
-const APP_VERSION = '260525.04';
+const APP_VERSION = '260525.05';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -1318,6 +1318,7 @@ function syncSortState() {
 const cache = new Map();
 function cacheSet(key, value) {
   if (cache.has(key)) cache.delete(key);
+  // Evict oldest entry (Map insertion order; cacheAccess promotes by delete+re-set, so first key = LRU)
   if (cache.size >= CONFIG.CACHE_MAX) cache.delete(cache.keys().next().value);
   cache.set(key, value);
 }
@@ -1545,6 +1546,7 @@ function sortRows(rows, key, asc, subKey) {
         else cmp = 0;
       }
     }
+    if (cmp === 0) cmp = a.id.localeCompare(b.id);
     return asc ? cmp : -cmp;
   });
 }
@@ -2575,7 +2577,9 @@ function updateDateUI() {
   const fromInput = document.getElementById("ds-from");
   const toInput = document.getElementById("ds-to");
   fromInput.setAttribute("aria-valuenow", String(sliderFrom));
+  fromInput.setAttribute("aria-valuetext", sliderValueToLabel(sliderFrom));
   toInput.setAttribute("aria-valuenow", String(sliderTo));
+  toInput.setAttribute("aria-valuetext", sliderValueToLabel(sliderTo));
   const left = sliderCenterPct(fromInput, sliderFrom, CONFIG.DATE_SLIDER_MAX);
   const right = sliderCenterPct(toInput, sliderTo, CONFIG.DATE_SLIDER_MAX);
   const fill = document.getElementById("ds-fill");
@@ -2615,7 +2619,9 @@ function updateParamUI() {
   const fromInput = document.getElementById("ps-from");
   const toInput = document.getElementById("ps-to");
   fromInput.setAttribute("aria-valuenow", String(paramSliderFrom));
+  fromInput.setAttribute("aria-valuetext", paramValueToLabel(paramPosToValue(paramSliderFrom)));
   toInput.setAttribute("aria-valuenow", String(paramSliderTo));
+  toInput.setAttribute("aria-valuetext", paramValueToLabel(paramPosToValue(paramSliderTo)));
   const left = sliderCenterPct(fromInput, paramSliderFrom);
   const right = sliderCenterPct(toInput, paramSliderTo);
 
@@ -2798,6 +2804,7 @@ async function fetchTasks(tasks) {
 // Used by Quick mode to surface parents of visible quants without fetching new models.
 function markLocalParents(all) {
   const gen = _fetchGeneration;
+  if (gen !== _fetchGeneration) return;
   const seen = new Set(all.map(m => m.id));
   for (let i = 0; i < all.length; i++) {
     if (gen !== _fetchGeneration) return;
