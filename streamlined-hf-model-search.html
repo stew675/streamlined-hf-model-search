@@ -342,7 +342,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260525.24';
+const APP_VERSION = '260525.25';
 // Design Notes (unaddressed review items):
 // - Proxy indirection removed in v260525.21 — all callers now access RenderCoordinator._state,
 //   _levelState, and helper methods directly. No indirection remains.
@@ -486,6 +486,17 @@ const _inferredAttemptedIds = new Set();
 const _deepeningParamIds = new Set();
 let apiCalls = 0;
 let _consecutive429s = 0;
+const _rateLimitCounter = document.getElementById("api-counter");
+const _rateLimitNotice = document.getElementById("rate-limit-notice");
+function updateRateLimitUI(isLimited) {
+  if (isLimited) {
+    _rateLimitCounter.classList.add("rate-limited");
+    _rateLimitNotice.style.display = "";
+  } else {
+    _rateLimitCounter.classList.remove("rate-limited");
+    _rateLimitNotice.style.display = "none";
+  }
+}
 function incApiCalls(n) { apiCalls += n; document.getElementById("api-counter").textContent = "API Requests: " + String(apiCalls); }
 function markDirty() { needsUpdate = true; document.getElementById("get-quick-results-btn").classList.add("ready"); document.getElementById("get-deep-results-btn").classList.add("ready"); }
 let sliderFrom = CONFIG.INIT_SLIDER_FROM;
@@ -570,7 +581,7 @@ async function fetchJson(url) {
         }
       } catch (err) {
         _consecutive429s = 0;
-        document.getElementById("api-counter").classList.remove("rate-limited"); document.getElementById("rate-limit-notice").style.display = "none";
+        updateRateLimitUI(false);
         if (retries < MAX_RETRIES) {
           retries++;
           const delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
@@ -582,7 +593,7 @@ async function fetchJson(url) {
       }
       if (res.ok) {
         _consecutive429s = 0;
-        document.getElementById("api-counter").classList.remove("rate-limited"); document.getElementById("rate-limit-notice").style.display = "none";
+        updateRateLimitUI(false);
         incApiCalls(1);
         return res.json();
       }
@@ -591,22 +602,19 @@ async function fetchJson(url) {
         let delay;
         if (res.status === 429) {
           _consecutive429s++;
-          if (_consecutive429s >= 3) {
-            document.getElementById("api-counter").classList.add("rate-limited");
-            document.getElementById("rate-limit-notice").style.display = "";
-          }
+          updateRateLimitUI(_consecutive429s >= 3);
           const ra = res.headers.get('Retry-After');
           delay = ra ? parseInt(ra, 10) * 1000 : Math.min(1000 * Math.pow(2, retries - 1), 30000);
         } else {
           _consecutive429s = 0;
-          document.getElementById("api-counter").classList.remove("rate-limited"); document.getElementById("rate-limit-notice").style.display = "none";
+          updateRateLimitUI(false);
           delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
         }
         await new Promise(r => setTimeout(r, delay));
         continue;
       }
       _consecutive429s = 0;
-      document.getElementById("api-counter").classList.remove("rate-limited"); document.getElementById("rate-limit-notice").style.display = "none";
+      updateRateLimitUI(false);
       incApiCalls(1);
       throw new Error(`HTTP ${res.status}`);
     }
@@ -858,7 +866,8 @@ function renderFilteredPopup(container, result) {
 
 // Popup show/hide with debounce to prevent flicker on accidental mouse passes.
 // The popup stays visible when hovering over it (not just the trigger), so links are clickable.
-const _popupTimers = new Map(); // id → timeout handle
+const _popupTimers = new Map(); // el → timeout handle
+const _popupScrollPositions = new WeakMap(); // el → scrollTop, restored across open/close cycles
 function positionPopupCenter(trigger, popup) {
   const parent = trigger.closest('.detail-count');
   if (!parent) return;
@@ -877,11 +886,18 @@ function positionPopupCenter(trigger, popup) {
 }
 function schedulePopupShow(popupEl, delay) {
   clearTimeout(_popupTimers.get(popupEl));
-  _popupTimers.set(popupEl, setTimeout(() => { popupEl.classList.add("visible"); popupEl.scrollTop = 0; }, delay || 150));
+  _popupTimers.set(popupEl, setTimeout(() => {
+    popupEl.classList.add("visible");
+    const saved = _popupScrollPositions.get(popupEl);
+    popupEl.scrollTop = typeof saved === "number" ? saved : 0;
+  }, delay || 150));
 }
 function schedulePopupHide(popupEl, delay) {
   clearTimeout(_popupTimers.get(popupEl));
-  _popupTimers.set(popupEl, setTimeout(() => popupEl.classList.remove("visible"), delay || 200));
+  _popupTimers.set(popupEl, setTimeout(() => {
+    _popupScrollPositions.set(popupEl, popupEl.scrollTop);
+    popupEl.classList.remove("visible");
+  }, delay || 200));
 }
 
 // Wires up hover events on both trigger and popup so the popup stays alive when moving between them.
@@ -1025,9 +1041,15 @@ function normalizeModel(m) {
     cardData: m.cardData ? { base_model: m.cardData.base_model } : null
   };
 }
-// In-memory parameter count cache: persists within a session because model param counts are immutable.
-// Cleared by Clear Cache handler alongside all other caches.
-// Worst case memory impact with a maximum of 16384 resolved models estimated to be ~1.4MB
+// In-memory parameter count cache keyed by model ID. Entries are immutable — a
+// model's param count never changes on HF. Growth is strictly bounded:
+//   • At most one entry per unique model ID encountered during the session.
+//   • The total pool of models is capped at ALL_FETCHED_MAX (16,384).
+//   • Each entry stores a single number (~0.125 bytes in Map overhead + ~8 bytes
+//     for the string key), yielding a worst-case memory footprint of ~1.4 MB.
+// No LRU eviction is needed — this cache cannot grow unbounded, and active
+// per-entry tracking would add complexity with no practical benefit at <2 MB.
+// Cleared on Clear Cache.
 const _paramCache = new Map();
 function getParamCount(m) {
   const cached = _paramCache.get(m.id);
@@ -2733,15 +2755,14 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   _inferredAttemptedIds.clear();
   _deepeningParamIds.clear();
   _injectedBaseIds.clear();
-  _canonicalCache = null;
-  _consecutive429s = 0;
-  document.getElementById("api-counter").classList.remove("rate-limited"); document.getElementById("rate-limit-notice").style.display = "none";
-  fetchedUntagged = false;
-  fetchedTrending = false;
-  _trendingAdded = 0;
-  RenderCoordinator.expandedSections.clear();
-  document.getElementById("rate-limit-notice").style.display = "none";
-  recomputeAndRenderWithoutDerive();
+_canonicalCache = null;
+   _consecutive429s = 0;
+   updateRateLimitUI(false);
+   fetchedUntagged = false;
+   fetchedTrending = false;
+   _trendingAdded = 0;
+   RenderCoordinator.expandedSections.clear();
+   recomputeAndRenderWithoutDerive();
 });
 addKeyboardClick(document.getElementById("clear-cache-btn"));
 document.getElementById("derived-param-chip").addEventListener("click", async () => {
