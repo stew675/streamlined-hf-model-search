@@ -26,6 +26,7 @@
   #main-table > tbody > tr > td:nth-child(4) { width: 120px; }
   th { background: #161b22; padding: 8px 10px; text-align: left; cursor: pointer;
         user-select: none; border-bottom: 2px solid #30363d; position: sticky; top: 0; transition: background 0.15s, border-color 0.15s; }
+  th[tabindex="0"]:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; outline-offset: -2px; }
    tr > th:not(:last-child), tr > td:not(:last-child) { border-right: 1px solid #21262d; }
   th:hover { background: #1c2129; }
   th.sorted { background: #1c2129; border-bottom-color: #58a6ff; }
@@ -43,7 +44,7 @@
   .task { text-align: left; white-space: nowrap; }
   #count { font-size: 0.85rem; color: #8b949e; margin-top: 8px; }
 
-  .toggle { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; color: #8b949e; margin-right: 4px; font-size: 0.7rem; transition: transform 0.15s, color 0.15s; flex-shrink: 0; border: none; background: none; cursor: pointer; padding: 0; font: inherit; line-height: 1; }
+  .toggle { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; min-width: 24px; color: #8b949e; margin-right: 4px; font-size: 0.82rem; transition: transform 0.15s, color 0.15s; flex-shrink: 0; border: none; background: none; cursor: pointer; padding: 0; font: inherit; line-height: 1; }
   .toggle:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; border-radius: 2px; }
   .toggle.open { transform: rotate(90deg); color: #58a6ff; }
 
@@ -51,6 +52,7 @@
   tr.l1-row:hover td { background: #1a2030; }
 
   tr.detail-row td { padding: 0; background: #010409; }
+  tr.detail-row, .l1-row, .l2-row, .l3-row, .l4-row { scroll-margin-top: 50px; }
   .detail-inner { padding: 8px 12px 12px 16px; }
   .detail-inner table { font-size: 0.8rem; }
   .detail-inner th { font-size: 0.75rem; padding: 5px 8px; background: #161b22; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
@@ -99,15 +101,15 @@
   #filter-row { display: flex; flex-wrap: nowrap; align-items: center; }
   #filter-bar { flex: 1 1 auto; min-width: 0; }
   #debug-bar .filter-chip, #button-row .filter-chip, #filter-bar .filter-chip, #from-bar .filter-chip, #to-bar .filter-chip, #special-bar .filter-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem;
-                        padding: 3px 10px; border-radius: 14px; cursor: pointer; user-select: none;
+                        padding: 5px 12px; min-height: 24px; border-radius: 14px; cursor: pointer; user-select: none;
                         background: #161b22; border: 1px solid #30363d; transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; }
   #debug-bar .filter-chip:hover, #button-row .filter-chip:hover, #filter-bar .filter-chip:hover, #from-bar .filter-chip:hover, #to-bar .filter-chip:hover, #special-bar .filter-chip:hover { background: #1c2129; color: #c9d1d9; }
   #debug-bar .filter-chip.active, #button-row .filter-chip.active, #filter-bar .filter-chip.active, #from-bar .filter-chip.active, #to-bar .filter-chip.active, #special-bar .filter-chip.active { color: #58a6ff; border-color: #58a6ff; box-shadow: 0 0 6px #1f6feb33; }
-  #debug-bar .filter-chip.inactive, #button-row .filter-chip.inactive, #filter-bar .filter-chip.inactive, #from-bar .filter-chip.inactive, #to-bar .filter-chip.inactive, #special-bar .filter-chip.inactive { color: #8b949e; border-color: #21262d; }
-  #filter-bar .filter-label, #from-bar .filter-label, #to-bar .filter-label, #special-bar .filter-label { color: #8b949e; font-size: 0.78rem; margin-right: 4px; }
+  #debug-bar .filter-chip.inactive, #button-row .filter-chip.inactive, #filter-bar .filter-chip.inactive, #from-bar .filter-chip.inactive, #to-bar .filter-chip.inactive, #special-bar .filter-chip.inactive { color: #8b949e; border-color: #484f58; }
+  #filter-bar .filter-label, #from-bar .filter-label, #to-bar .filter-label, #special-bar .filter-label, #filter-bar h3, #from-bar h3, #to-bar h3, #special-bar h3 { color: #8b949e; font-size: 0.78rem; margin-right: 4px; font-weight: 600; display: inline; }
   .task-bar-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; align-items: center; }
-   .task-bar-row .filter-label { color: #8b949e; font-size: 0.78rem; margin-right: 4px; }
-   .task-bar-row .act-tag { display: inline-block; font-size: 0.72rem; padding: 2px 8px; border-radius: 10px;
+   .task-bar-row .filter-label, .task-bar-row h3 { color: #8b949e; font-size: 0.78rem; margin-right: 4px; font-weight: 600; display: inline; }
+   .task-bar-row .act-tag { display: inline-block; font-size: 0.72rem; padding: 3px 10px; min-height: 24px; border-radius: 10px;
       cursor: pointer; user-select: none; background: #161b22; border: 1px solid #30363d;
       transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; color: #8b949e; }
    .task-bar-row .act-tag:hover { background: #1c2129; color: #c9d1d9; }
@@ -119,7 +121,8 @@
      user-select: none; background: #21262d; color: #6e7681; border: 1px solid #30363d; font-family: inherit;
      transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; }
    .action-btn.ready { background: #238636; color: #fff; border-color: #2ea043; cursor: pointer; box-shadow: 0 0 8px #23863666; }
-   .action-btn.ready:hover { background: #2ea043; box-shadow: 0 0 12px #2ea04388; }
+    .action-btn.ready:hover { background: #2ea043; box-shadow: 0 0 12px #2ea04388; }
+   a[target="_blank"]::after { content: " ↗"; font-size: 0.72em; }
    .action-btn:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
    .filter-chip:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
    .action-btn:disabled { pointer-events: none; opacity: 0.5; }
@@ -133,9 +136,10 @@
   #text-filter-row label { color: #8b949e; font-size: 0.78rem; }
   #text-filter-row .fiw { position: relative; display: inline-flex; align-items: center; }
   #text-filter-row .fiw input { padding-right: 20px; }
-  #text-filter-row .fic { position: absolute; right: 5px; cursor: pointer; color: #8b949e; font-size: 13px; line-height: 1;
-    user-select: none; display: none; }
+  #text-filter-row .fic { position: absolute; right: 5px; cursor: pointer; color: #8b949e; font-size: 16px; line-height: 1;
+    user-select: none; display: none; width: 24px; height: 24px; align-items: center; justify-content: center; }
   #text-filter-row .fic:hover { color: #f85149; }
+  #text-filter-row .fic:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; border-radius: 4px; }
   #text-filter-row .fiw input:not(:placeholder-shown) + .fic { display: block; }
 
   /* Range sliders */
@@ -174,7 +178,7 @@
   .ps-legend { position: relative; height: 18px; }
   .ps-legend-tick { position: absolute; top: 0; transform: translateX(-50%); width: 1px; height: 5px; background: #6e7681; }
   .ps-legend-label { position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
-    font-size: 0.62rem; color: #848d97; white-space: nowrap; }
+    font-size: 0.62rem; color: #8b949e; white-space: nowrap; }
   #api-counter-wrap { position: relative; display: inline-flex; align-items: center; }
   .api-counter-tooltip {
     display: none; position: absolute; bottom: calc(100% + 10px); right: 0;
@@ -207,12 +211,13 @@
   #scope-notice a { color: #58a6ff; }
   .filter-popup-trigger { cursor: help; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
   .filter-popup-trigger:hover { color: #c9d1d9; }
+  .filter-popup-trigger:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; border-radius: 2px; }
   .filter-popup { display: none; position: absolute; z-index: 50;
     background: #1c2129; border: 1px solid #30363d; border-radius: 6px; padding: 0;
     box-shadow: 0 4px 16px rgba(0,0,0,0.6); max-height: 300px; overflow-y: auto; width: 65%; min-width: 320px; }
   .filter-popup.visible { display: block; }
 .filter-popup table { width: 100%; font-size: 0.75rem; border-collapse: collapse; margin: 0; table-layout: auto !important; }
-  .filter-popup th { background: #161b22; padding: 4px 8px; font-size: 0.7rem; cursor: pointer; position: sticky !important; top: 20px; border-bottom: 1px solid #30363d; white-space: nowrap; z-index: 1; user-select: none; }
+  .filter-popup th { background: #161b22; padding: 4px 8px; font-size: 0.7rem; cursor: pointer; position: sticky !important; top: 20px; border-bottom: 1px solid #30363d; white-space: nowrap; z-index: 1; user-select: none; min-height: 24px; }
   .filter-popup th:hover { background: #1c2129; }
   .filter-popup td { padding: 3px 8px; border-bottom: none !important; font-size: 0.75rem; border-right: 1px solid #21262d !important; }
   .filter-popup td:last-child { border-right: none !important; }
@@ -268,24 +273,24 @@
 </div>
 <div id="task-bars">
 <div id="from-bar" role="group" aria-label="Input modality filters">
-  <span class="filter-label"><b>From PipeLine Classes:</b></span>
+  <h3 class="filter-label">From PipeLine Classes:</h3>
 </div>
 <div id="to-bar" role="group" aria-label="Output modality filters">
-  <span class="filter-label"><b>To PipeLine Classes:</b></span>
+  <h3 class="filter-label">To PipeLine Classes:</h3>
 </div>
 <div id="special-bar" role="group" aria-label="Special filters">
-  <span class="filter-label"><b>Untagged PipeLines:</b></span>
+  <h3 class="filter-label">Untagged PipeLines:</h3>
 </div>
 </div>
 <div id="activated-types" class="task-bar-row">
-  <span class="filter-label"><b>Activated Pipeline Tags:</b></span>
+  <h3 class="filter-label">Activated Pipeline Tags:</h3>
 </div>
 <div id="available-types" class="task-bar-row">
-  <span class="filter-label"><b>Available Pipeline Tags:</b></span>
+  <h3 class="filter-label">Available Pipeline Tags:</h3>
 </div>
 <div id="filter-row">
 <div id="filter-bar" role="group" aria-label="Quantization type filters">
-  <span class="filter-label"><b>Quant Types:</b></span>
+  <h3 class="filter-label">Quant Types:</h3>
 </div>
 </div>
 <div id="sort-announce" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></div>
@@ -312,14 +317,14 @@
    <label for="l4-model-filter"><b>L4 Model ID:</b></label>
    <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" title="Filters individual quant models within already-expanded L3 sections." autocomplete="off"><span class="fic" data-for="l4-model-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
 </div>
-<div id="scope-notice">Top 500 by downloads + top 500 by recent updates per pipeline tag, plus 1000 trending models — broader coverage of popular and recently active models. Older or niche models may not appear; use <a href="https://huggingface.co/models" target="_blank" rel="noopener noreferrer">HF Search</a> for full coverage.</div>
+<div id="scope-notice">Top 500 by downloads + top 500 by recent updates per pipeline tag, plus 1000 trending models — broader coverage of popular and recently active models. Older or niche models may not appear; use <a href="https://huggingface.co/models" target="_blank" rel="noopener noreferrer" aria-label="Hugging Face Search (opens in new tab)">HF Search</a> for full coverage.</div>
 <table id="main-table" aria-label="Authors and base model counts">
   <thead>
     <tr>
-      <th data-key="author" scope="col">Model Author<span class="arrow"></span></th>
-      <th data-key="count" class="right" scope="col"><span class="sort-arrow"></span>Base Models</th>
-      <th data-key="totalDownloads" class="right" scope="col"><span class="sort-arrow"></span>Total Downloads</th>
-      <th data-key="totalLikes" class="right" scope="col"><span class="sort-arrow"></span>Total Likes</th>
+      <th data-key="author" scope="col" tabindex="0">Model Author<span class="arrow"></span></th>
+      <th data-key="count" class="right" scope="col" tabindex="0"><span class="sort-arrow"></span>Base Models</th>
+      <th data-key="totalDownloads" class="right" scope="col" tabindex="0"><span class="sort-arrow"></span>Total Downloads</th>
+      <th data-key="totalLikes" class="right" scope="col" tabindex="0"><span class="sort-arrow"></span>Total Likes</th>
     </tr>
   </thead>
   <tbody id="body"></tbody>
@@ -329,7 +334,7 @@
 
 <script>
 (function() {
-const APP_VERSION = '260525.03';
+const APP_VERSION = '260525.04';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -791,11 +796,11 @@ function renderFilteredPopup(container, result) {
     return;
   }
   let html = `<table><thead><tr>
-    <th scope="col" data-sk="id">Model ID${arrow('id')}</th>
-    <th scope="col" data-sk="paramB" style="text-align:center">Params${arrow('paramB')}</th>
-    <th scope="col" data-sk="qMethod" style="text-align:center">Quant${arrow('qMethod')}</th>
-    <th scope="col" data-sk="pipelineTag">Tag${arrow('pipelineTag')}</th>
-    <th scope="col" data-sk="updated" style="white-space:nowrap">Updated${arrow('updated')}</th>
+    <th scope="col" data-sk="id" tabindex="0">Model ID${arrow('id')}</th>
+    <th scope="col" data-sk="paramB" tabindex="0" style="text-align:center">Params${arrow('paramB')}</th>
+    <th scope="col" data-sk="qMethod" tabindex="0" style="text-align:center">Quant${arrow('qMethod')}</th>
+    <th scope="col" data-sk="pipelineTag" tabindex="0">Tag${arrow('pipelineTag')}</th>
+    <th scope="col" data-sk="updated" tabindex="0" style="white-space:nowrap">Updated${arrow('updated')}</th>
   </tr></thead><tbody>`;
   html += sorted.map(s => {
     const name = s.id.split("/").slice(1).join("/");
@@ -872,6 +877,7 @@ function wirePopupHover(trigger, popup, makeContent) {
   const hide = () => schedulePopupHide(popup);
   trigger.addEventListener("mouseenter", show);
   trigger.addEventListener("mouseleave", hide);
+  trigger.addEventListener("click", show);
   popup.addEventListener("mouseenter", () => clearTimeout(_popupTimers.get(popup)));
   popup.addEventListener("mouseleave", hide);
 }
@@ -1738,21 +1744,23 @@ function thHtml(c, state, level) {
   const cls = allCls.trim() + (isSorted ? " sorted" : "");
   const arrow = isSorted ? (state.asc ? "▲" : "▼") : "";
   const ariaSort = isSorted ? ` aria-sort="${state.asc ? "ascending" : "descending"}"` : '';
+  const tabIdx = ' tabindex="0"';
   if (allCls.includes("right") || allCls.includes("center") || allCls.includes("updated-header")) {
-    return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}><span class="arrow-left">${arrow}</span>${escapeHtml(c.label)}</th>`;
+    return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}${tabIdx}><span class="arrow-left">${arrow}</span>${escapeHtml(c.label)}</th>`;
   }
-  return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}>${escapeHtml(c.label)}<span class="arrow">${arrow}</span></th>`;
+  return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}${tabIdx}>${escapeHtml(c.label)}<span class="arrow">${arrow}</span></th>`;
 }
 
 function renderL2Empty(idx, author, container, popupSource, totalBeforeFilter) {
   const allBaseModels = popupSource || cacheAccess(author) || [];
   l2StateMap.set(author, { idx, author, models: [], totalBeforeFilter, allBaseModels });
   if (allBaseModels.length > 0) {
-    container.innerHTML = `<div class="detail-count" style="color:#6e7681"><span id="fp-trigger-l2-empty-${author}" class="filter-popup-trigger">No base models match current filters</span><div id="fp-popup-l2-empty-${author}" class="filter-popup"></div></div>`;
+    container.innerHTML = `<div class="detail-count" style="color:#6e7681"><span id="fp-trigger-l2-empty-${author}" class="filter-popup-trigger" tabindex="0" role="button" aria-haspopup="true">No base models match current filters</span><div id="fp-popup-l2-empty-${author}" class="filter-popup"></div></div>`;
     const trigger = document.getElementById(`fp-trigger-l2-empty-${author}`);
     const popup = document.getElementById(`fp-popup-l2-empty-${author}`);
     if (trigger && popup) {
       wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), 200)));
+      addKeyboardClick(trigger);
     }
   } else {
     container.innerHTML = '<div class="detail-count" style="color:#6e7681">No base models match current filters.</div>';
@@ -1777,13 +1785,13 @@ function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
       <td class="model-id-cell"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(m.id)}">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
       <td class="center" style="font-size:0.78rem">${paramBadgeHtml(m)}</td>
       <td class="right">${fmt(m.downloads)}</td>
-      <td class="right">${fmt(m.likes)}<span class="likes-icon">♥</span></td>
+      <td class="right">${fmt(m.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
       <td class="updated-cell">${fmtDate(m.lastModified)} <span style="color:#6e7681;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
     </tr>
     <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none"><td colspan="5"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
   }).join('');
   const hidden = (totalBeforeFilter != null && totalBeforeFilter > sorted.length) ? totalBeforeFilter - sorted.length : 0;
-  html += `</tbody></table><div class="detail-count">${sorted.length} model(s)` + (hidden > 0 ? `, <span id="fp-trigger-l2-${author}" class="filter-popup-trigger" style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by search settings</span><div id="fp-popup-l2-${author}" class="filter-popup"></div>` : '') + `</div>`;
+  html += `</tbody></table><div class="detail-count">${sorted.length} model(s)` + (hidden > 0 ? `, <span id="fp-trigger-l2-${author}" class="filter-popup-trigger" tabindex="0" role="button" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by search settings</span><div id="fp-popup-l2-${author}" class="filter-popup"></div>` : '') + `</div>`;
   return { html, hidden };
 }
 
@@ -1794,13 +1802,14 @@ function wireL2Popups(author, models, allBaseModels, hidden) {
   if (trigger && popup) {
     const displayedIds = new Set(models.map(m => m.id));
     wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, displayedIds, 200)));
+    addKeyboardClick(trigger);
   }
 }
 
 function setupL2Events(container) {
   if (container._delegatedL2) return;
   container._delegatedL2 = true;
-  container.addEventListener("click", function(e) {
+  const l2Click = function(e) {
     const inner = e.target.closest(".detail-inner");
     if (inner && inner !== container) return;
     const s = l2StateMap.get(container.dataset.l2Author);
@@ -1846,6 +1855,13 @@ function setupL2Events(container) {
         tog?.focus();
       }
     }
+  };
+  container.addEventListener("click", l2Click);
+  container.addEventListener("keydown", function(e) {
+    const th = e.target.closest("thead th[tabindex]");
+    if (!th || (e.key !== "Enter" && e.key !== " ")) return;
+    e.preventDefault();
+    th.click();
   });
 }
 
@@ -2134,6 +2150,12 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
         }
       }
     });
+    container.addEventListener("keydown", function(e) {
+      const th = e.target.closest("thead th[tabindex]");
+      if (!th || (e.key !== "Enter" && e.key !== " ")) return;
+      e.preventDefault();
+      th.click();
+    });
   }
 }
 
@@ -2162,7 +2184,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
       <td class="model-id-cell"><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.id.split("/").slice(1).join("/"))}">${escapeHtml(q.id.split("/").slice(1).join("/"))}</a></td>
       <td class="center"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
       <td class="right">${fmt(q.downloads)}</td>
-      <td class="right">${fmt(q.likes)}<span class="likes-icon">♥</span></td>
+      <td class="right">${fmt(q.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
       <td class="right">${fmtDate(q.lastModified)}</td>
     </tr>`;
   }).join('');
@@ -2170,7 +2192,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 const hiddenL4 = quants.length - displayed.length;
   // Sanitize parentId for HTML IDs: replace / with __ to avoid invalid characters.
   const l4SafeId = `${parentId.replace(/\//g, '__')}_${author}`;
-  html += `</tbody></table><div class="detail-count">${displayed.length} model(s)` + (hiddenL4 > 0 ? `, <span id="fp-trigger-l4-${l4SafeId}" class="filter-popup-trigger" style="color:#6e7681;font-size:0.75rem">+${hiddenL4} hidden by text filter</span><div id="fp-popup-l4-${l4SafeId}" class="filter-popup"></div>` : '') + `</div>`;
+  html += `</tbody></table><div class="detail-count">${displayed.length} model(s)` + (hiddenL4 > 0 ? `, <span id="fp-trigger-l4-${l4SafeId}" class="filter-popup-trigger" tabindex="0" role="button" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">+${hiddenL4} hidden by text filter</span><div id="fp-popup-l4-${l4SafeId}" class="filter-popup"></div>` : '') + `</div>`;
   container.innerHTML = html;
   const l4Key = `${parentId}|${author}`;
   container.dataset.l4Key = l4Key;
@@ -2183,6 +2205,7 @@ const hiddenL4 = quants.length - displayed.length;
     if (trigger && popup) {
       const displayedIds = new Set(displayed.map(q => q.id));
       wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(quants, displayedIds, 200)));
+      addKeyboardClick(trigger);
     }
   }
 
@@ -2196,6 +2219,12 @@ const hiddenL4 = quants.length - displayed.length;
       handleSortClick(th, "4", `l4-${s.parentId}-${s.author}`, "downloads", false, () => {
         renderL4(s.l2Idx, s.modelIdx, s.gIdx, s.parentId, s.author, s.quants, this);
       });
+    });
+    container.addEventListener("keydown", function(e) {
+      const th = e.target.closest("thead th[tabindex]");
+      if (!th || th.dataset.level !== "4" || (e.key !== "Enter" && e.key !== " ")) return;
+      e.preventDefault();
+      th.click();
     });
   }
 }
@@ -2670,6 +2699,12 @@ renderL2(idx, author, filtered, inner, nonQuantBase.length, nonQuantBase);
       tog?.focus();
     }
   }
+});
+document.querySelector("#main-table").addEventListener("keydown", e => {
+  const th = e.target.closest("#main-table > thead > tr > th");
+  if (!th || (e.key !== "Enter" && e.key !== " ")) return;
+  e.preventDefault();
+  th.click();
 });
 document.getElementById("get-quick-results-btn").addEventListener("click", () => applyFilters(true, false));
 document.getElementById("get-deep-results-btn").addEventListener("click", () => applyFilters(true, true));
