@@ -228,7 +228,7 @@
   .filter-popup tr:hover td { background: transparent; cursor: default; }
   .filter-popup .model-id-cell { max-width: none !important; width: auto !important; }
   .filter-popup .model-id-cell a { display: inline !important; max-width: none !important; overflow: visible !important; white-space: normal !important; text-overflow: clip !important; vertical-align: baseline !important; }
-.filter-popup .fp-header { position: sticky; top: 0; background: #161b22; padding: 4px 10px; font-size: 0.75rem; font-weight: 600; color: #e6edf3; border-bottom: 1px solid #30363d; z-index: 2; }
+.filter-popup .fp-header { position: sticky; top: 0; background: #161b22; padding: 4px 10px; font-size: 0.75rem; font-weight: 600; color: #e6edf3; border-bottom: 1px solid #30363d; z-index: 2; text-align: center; }
   .filter-popup .fp-footer { position: sticky; bottom: 0; background: #1c2129; padding: 4px 10px; color: #8b949e; font-size: 0.72rem; font-style: italic; border-top: 1px solid #21262d; text-align: center; z-index: 2; }
   .filter-popup .fp-note { padding: 4px 10px; color: #8b949e; font-size: 0.72rem; font-style: italic; border-top: 1px solid #21262d; text-align: center; }
 
@@ -341,7 +341,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260525.18';
+const APP_VERSION = '260525.19';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
