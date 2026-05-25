@@ -205,10 +205,6 @@
   .skip-link:focus { top: 8px; }
   #scope-notice { font-size: 0.75rem; color: #8b949e; padding: 6px 10px; margin: 6px 0; background: #161b22; border: 1px solid #30363d; border-radius: 6px; text-align: center; }
   #scope-notice a { color: #58a6ff; }
-  #debug-bar { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 6px 0; border-top: 1px solid #21262d; }
-  #debug-dump-container { margin-top: 4px; max-height: 80vh; overflow: auto; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 8px; }
-  #debug-dump-content { width: 100%; min-height: 100px; background: transparent; border: none; color: #8b949e; font-family: 'Courier New', monospace; font-size: 0.7rem; line-height: 1.5; resize: none; outline: none; padding: 0; margin: 0; }
-  #debug-dump-content:focus { outline: 1px solid #58a6ff; outline-offset: 2px; border-radius: 2px; }
   .filter-popup-trigger { cursor: help; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
   .filter-popup-trigger:hover { color: #c9d1d9; }
   .filter-popup { display: none; position: absolute; z-index: 50;
@@ -293,7 +289,7 @@
 </div>
 <div id="sort-announce" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></div>
 <div id="button-row">
-  <span id="derived-param-chip" class="filter-chip active" role="checkbox" aria-checked="true" tabindex="0" style="margin-right:auto; user-select:none" title="When enabled, models with unknown parameter counts will first try a Base Model regex from the model name, then search their children (2 search API calls per model) and fetch individual child model cards (up to 10 per model; stops early after 3 agreeing results) to infer the parent's parameter count.">Infer Missing Params</span>
+  <span id="derived-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" tabindex="0" style="margin-right:auto; user-select:none" title="When enabled, models with unknown parameter counts will first try a Base Model regex from the model name, then search their children (2 search API calls per model) and fetch individual child model cards (up to 10 per model; stops early after 3 agreeing results) to infer the parent's parameter count.">Infer Missing Params</span>
   <span id="hide-missing-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" tabindex="0" style="user-select:none" title="When enabled, models without a known parameter count are hidden from display.">Hide Missing Params</span>
   <div id="button-center">
     <button id="get-quick-results-btn" class="action-btn" title="Fetch top models per pipeline tag (by downloads + lastModified) — no cross-author base model injection. Faster but may miss quantizations whose parent base model is from a different author.">Get Quick Results</button>
@@ -328,17 +324,11 @@
   <tbody id="body"></tbody>
 </table>
 <div id="count"></div>
-<div id="debug-bar">
-  <span class="filter-label">Debug:</span>
-  <span id="debug-dump-chip" class="filter-chip inactive" role="button" tabindex="0" aria-pressed="false" title="Show raw _allFetched data — check if a model was fetched before filter/suppression logic hides it">Dump of all Fetched Models</span>
-  <span id="debug-count" style="color:#6e7681;font-size:0.78rem;margin-left:auto"></span>
-</div>
-<div id="debug-dump-container" style="display:none"><textarea id="debug-dump-content" readonly spellcheck="false" wrap="off"></textarea></div>
 </main>
 
 <script>
 (function() {
-const APP_VERSION = '260525.00';
+const APP_VERSION = '260525.02';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -472,7 +462,7 @@ let _trendingAdded = 0;
 let _fetchGeneration = 0;
 const _injectedBaseIds = new Set();
 let needsUpdate = false;
-let _derivedParamEnabled = true;
+let _derivedParamEnabled = false;
 let _hideMissingParamEnabled = false;
 const _inferredParamIds = new Set();
 const _inferredFromNameIds = new Set();
@@ -976,6 +966,22 @@ function getParamCount(m) {
   }
   _paramCache.set(m.id, result);
   return result;
+}
+function paramBadgeHtml(m) {
+  if (m.paramB == null) {
+    return '<span class="no-param" title="No resolvable parameter count data found">—</span>';
+  }
+  const label = paramValueToLabel(m.paramB);
+  if (_deepeningParamIds.has(m.id)) {
+    return `<span class="deepening-param" title="Resolved via direct API fetch">${label}</span>`;
+  }
+  if (_inferredFromNameIds.has(m.id)) {
+    return `<span class="name-infer-param" title="Inferred from model name pattern">${label}</span>`;
+  }
+  if (_inferredParamIds.has(m.id)) {
+    return `<span class="derived-param" title="Derived from parent or children metadata">${label}</span>`;
+  }
+  return label;
 }
 // Piecewise-linear mapping: 7 segments covering 0..1000B params on a 220-position slider.
 // Dense at low end (0.025B/step up to 1B), coarser above. Chosen over continuous
@@ -1532,6 +1538,71 @@ function renderErrorWithRetry(container, message, retryFn) {
   if (btn) btn.addEventListener("click", retryFn, { once: true });
 }
 
+async function deepenBatch(idx, author, container, unknownModels, filterApplied, nonQuantBase, gen) {
+  const statusEl = document.getElementById("status");
+  const totalUnk = unknownModels.length;
+  for (let i = 0; i < totalUnk; i += CONFIG.PARAM_BATCH_SIZE) {
+    const batch = unknownModels.slice(i, i + CONFIG.PARAM_BATCH_SIZE);
+    statusEl.textContent = `Resolving parameters for ${author}… (${Math.min(i + CONFIG.PARAM_BATCH_SIZE, totalUnk)}/${totalUnk})`;
+    await Promise.all(batch.map(async (m) => {
+      try {
+        const full = await fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`);
+        const idLower = (m.id || "").toLowerCase();
+        const isQuant = RE_Q_EXISTS.test(idLower);
+        let p = null;
+        if (isQuant) {
+          p = extractParamFromId(m.id);
+        } else {
+          if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
+          else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
+        }
+        if (p === null) {
+          if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
+          else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
+        }
+        if (p === null && isQuant) {
+          if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
+          else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
+        }
+        if (p !== null) { m.paramB = p; _paramCache.set(m.id, p); _deepeningParamIds.add(m.id); }
+      } catch (e) {
+        console.warn("Failed to fetch param for", m.id, e);
+      }
+    }));
+    if (gen !== _fetchGeneration || !container.isConnected) return;
+    const pruned = filterApplied();
+    const detailRow = document.getElementById(`d1-${idx}`);
+    if (detailRow && detailRow.style.display !== "none") {
+      renderL2(idx, author, pruned, container, nonQuantBase.length, nonQuantBase);
+      if (gen === _fetchGeneration) refreshAllExpanded();
+    }
+  }
+}
+
+function inheritParentParams(unknownModels, baseModels) {
+  for (const m of unknownModels) {
+    if (m.paramB != null) continue;
+    const bits = m.id.split('/');
+    let name = bits[1];
+    while (name.length > 0) {
+      const dash = name.lastIndexOf('-');
+      if (dash <= 0) break;
+      name = name.substring(0, dash);
+      const candId = bits[0] + '/' + name;
+      const parent = baseModels.find(b => b.id === candId && b.paramB != null) ||
+        (_allFetched || []).find(f => f.id === candId && f.paramB != null);
+      if (parent) { m.paramB = parent.paramB; _paramCache.set(m.id, parent.paramB); _inferredFromNameIds.add(m.id); break; }
+    }
+  }
+}
+
+async function deriveRemainingUnknowns(stillUnknown, gen, idx, author, container, filterApplied, nonQuantBase) {
+  for (const m of stillUnknown) {
+    if (gen !== _fetchGeneration || !container.isConnected) return;
+    await tryResolveModelParam(m, gen, idx, author, container, filterApplied, nonQuantBase.length, nonQuantBase);
+  }
+}
+
 async function loadAuthorModels(idx, author, container) {
   const gen = _fetchGeneration;
   try {
@@ -1586,73 +1657,17 @@ async function loadAuthorModels(idx, author, container) {
 
     const unknownModels = dated.filter(m => m.paramB === null);
     if (unknownModels.length > 0) {
-      const statusEl = document.getElementById("status");
-      const totalUnk = unknownModels.length;
-      for (let i = 0; i < totalUnk; i += CONFIG.PARAM_BATCH_SIZE) {
-        const batch = unknownModels.slice(i, i + CONFIG.PARAM_BATCH_SIZE);
-        statusEl.textContent = `Resolving parameters for ${author}… (${Math.min(i + CONFIG.PARAM_BATCH_SIZE, totalUnk)}/${totalUnk})`;
-        await Promise.all(batch.map(async (m) => {
-          try {
-            const full = await fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`);
-            // For quant models, prefer B/M regex from the model ID (clean
-            // integer) over safetensors/gguf element counts, which can be
-            // slightly inflated by extra tensors (scales, zero points) and
-            // cause rounding mismatches vs the model name.  Fall back to
-            // safetensors/gguf only when the ID has no B/M suffix at all.
-            const idLower = (m.id || "").toLowerCase();
-            const isQuant = RE_Q_EXISTS.test(idLower);
-            let p = null;
-            if (isQuant) {
-              p = extractParamFromId(m.id);
-            } else {
-              if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
-              else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
-            }
-            if (p === null) {
-              if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
-              else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
-            }
-            if (p === null && isQuant) {
-              // Last resort for quants: safetensors/gguf from full response
-              if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
-              else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
-            }
-            if (p !== null) { m.paramB = p; _paramCache.set(m.id, p); _deepeningParamIds.add(m.id); }
-          } catch (e) {
-            console.warn("Failed to fetch param for", m.id, e);
-          }
-        }));
-        if (gen !== _fetchGeneration || !container.isConnected) return;
-        const pruned = filterApplied();
-        const detailRow = document.getElementById(`d1-${idx}`);
-        if (detailRow && detailRow.style.display !== "none") {
-          renderL2(idx, author, pruned, container, nonQuantBase.length, nonQuantBase);
-          if (gen === _fetchGeneration) refreshAllExpanded();
-        }
-      }
-      for (const m of unknownModels) {
-        if (m.paramB != null) continue;
-        const bits = m.id.split('/');
-        let name = bits[1];
-        while (name.length > 0) {
-          const dash = name.lastIndexOf('-');
-          if (dash <= 0) break;
-          name = name.substring(0, dash);
-          const candId = bits[0] + '/' + name;
-          const parent = baseModels.find(b => b.id === candId && b.paramB != null) ||
-            (_allFetched || []).find(f => f.id === candId && f.paramB != null);
-          if (parent) { m.paramB = parent.paramB; _paramCache.set(m.id, parent.paramB); _inferredFromNameIds.add(m.id); break; }
-        }
-      }
+      await deepenBatch(idx, author, container, unknownModels, filterApplied, nonQuantBase, gen);
+      if (gen !== _fetchGeneration || !container.isConnected) return;
+      inheritParentParams(unknownModels, baseModels);
       if (_derivedParamEnabled) {
         const stillUnknown = unknownModels.filter(m => m.paramB === null && !_inferredAttemptedIds.has(m.id));
-        for (const m of stillUnknown) {
-          if (gen !== _fetchGeneration || !container.isConnected) return;
-          await tryResolveModelParam(m, gen, idx, author, container, filterApplied, nonQuantBase.length, nonQuantBase);
+        if (stillUnknown.length > 0) {
+          await deriveRemainingUnknowns(stillUnknown, gen, idx, author, container, filterApplied, nonQuantBase);
         }
       }
       if (gen !== _fetchGeneration || !container.isConnected) return;
-      statusEl.textContent = "";
+      document.getElementById("status").textContent = "";
       const updated = filterApplied();
       const detailRow = document.getElementById(`d1-${idx}`);
       if (detailRow && detailRow.style.display !== "none") {
@@ -1680,26 +1695,22 @@ function thHtml(c, state, level) {
   return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}>${escapeHtml(c.label)}<span class="arrow">${arrow}</span></th>`;
 }
 
-function renderL2(idx, author, models, container, totalBeforeFilter, popupSource) {
-  const state = detailSort[`l2-${author}`] || { key: "downloads", asc: false };
-  const sorted = sortRows(models, state.key, state.asc, state.key === "id" ? undefined : "id");
-
-  if (sorted.length === 0) {
-    const allBaseModels = popupSource || cacheAccess(author) || [];
-    l2StateMap.set(author, { idx, author, models: [], totalBeforeFilter, allBaseModels });
-    if (allBaseModels.length > 0) {
-      container.innerHTML = `<div class="detail-count" style="color:#6e7681"><span id="fp-trigger-l2-empty-${author}" class="filter-popup-trigger">No base models match current filters</span><div id="fp-popup-l2-empty-${author}" class="filter-popup"></div></div>`;
-      const trigger = document.getElementById(`fp-trigger-l2-empty-${author}`);
-      const popup = document.getElementById(`fp-popup-l2-empty-${author}`);
-      if (trigger && popup) {
-        wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), 200)));
-      }
-    } else {
-      container.innerHTML = '<div class="detail-count" style="color:#6e7681">No base models match current filters.</div>';
+function renderL2Empty(idx, author, container, popupSource, totalBeforeFilter) {
+  const allBaseModels = popupSource || cacheAccess(author) || [];
+  l2StateMap.set(author, { idx, author, models: [], totalBeforeFilter, allBaseModels });
+  if (allBaseModels.length > 0) {
+    container.innerHTML = `<div class="detail-count" style="color:#6e7681"><span id="fp-trigger-l2-empty-${author}" class="filter-popup-trigger">No base models match current filters</span><div id="fp-popup-l2-empty-${author}" class="filter-popup"></div></div>`;
+    const trigger = document.getElementById(`fp-trigger-l2-empty-${author}`);
+    const popup = document.getElementById(`fp-popup-l2-empty-${author}`);
+    if (trigger && popup) {
+      wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), 200)));
     }
-    return;
+  } else {
+    container.innerHTML = '<div class="detail-count" style="color:#6e7681">No base models match current filters.</div>';
   }
+}
 
+function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
   const cols = [
     { key: "id", label: "Model ID" },
     { key: "paramB", label: "Params", headerCls: "updated-header", cls: "center", width: 160 },
@@ -1707,92 +1718,105 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
     { key: "likes", label: "Likes", cls: "right", width: 80 },
     { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header", width: 135 }
   ];
-
-  // Header table structure
   let html = `<table aria-label="Base models for ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
   cols.forEach(c => { html += thHtml(c, state, "2"); });
   html += `</tr></thead><tbody>`;
-
-  // Optimized: Use map + join for table rows instead of forEach + +=
   html += sorted.map((m, mIdx) => {
     const qMethods = getOrphanQuantMethod(m.id);
     const orphanBadge = qMethods.length ? qMethods.map(q => `<span class="badge orphan" title="Parent base model filtered out">${escapeHtml(q.toUpperCase())}</span>`).join(' ') + ' ' : '';
     return `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}">
       <td class="model-id-cell"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(m.id)}">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
-      <td class="center" style="font-size:0.78rem">${m.paramB != null ? (_deepeningParamIds.has(m.id) ? `<span class="deepening-param" title="Resolved via direct API fetch">${paramValueToLabel(m.paramB)}</span>` : _inferredFromNameIds.has(m.id) ? `<span class="name-infer-param" title="Inferred from model name pattern">${paramValueToLabel(m.paramB)}</span>` : _inferredParamIds.has(m.id) ? `<span class="derived-param" title="Derived from parent or children metadata">${paramValueToLabel(m.paramB)}</span>` : paramValueToLabel(m.paramB)) : `<span class="no-param" title="No resolvable parameter count data found">—</span>`}</td>
+      <td class="center" style="font-size:0.78rem">${paramBadgeHtml(m)}</td>
       <td class="right">${fmt(m.downloads)}</td>
       <td class="right">${fmt(m.likes)}<span class="likes-icon">♥</span></td>
       <td class="updated-cell">${fmtDate(m.lastModified)} <span style="color:#6e7681;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
     </tr>
     <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none"><td colspan="5"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
   }).join('');
+  const hidden = (totalBeforeFilter != null && totalBeforeFilter > sorted.length) ? totalBeforeFilter - sorted.length : 0;
+  html += `</tbody></table><div class="detail-count">${sorted.length} model(s)` + (hidden > 0 ? `, <span id="fp-trigger-l2-${author}" class="filter-popup-trigger" style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by search settings</span><div id="fp-popup-l2-${author}" class="filter-popup"></div>` : '') + `</div>`;
+  return { html, hidden };
+}
 
- const hidden = (totalBeforeFilter != null && totalBeforeFilter > models.length) ? totalBeforeFilter - models.length : 0;
-  html += `</tbody></table><div class="detail-count">${models.length} model(s)` + (hidden > 0 ? `, <span id="fp-trigger-l2-${author}" class="filter-popup-trigger" style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by search settings</span><div id="fp-popup-l2-${author}" class="filter-popup"></div>` : '') + `</div>`;
+function wireL2Popups(author, models, allBaseModels, hidden) {
+  if (hidden <= 0) return;
+  const trigger = document.getElementById(`fp-trigger-l2-${author}`);
+  const popup = document.getElementById(`fp-popup-l2-${author}`);
+  if (trigger && popup) {
+    const displayedIds = new Set(models.map(m => m.id));
+    wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, displayedIds, 200)));
+  }
+}
+
+function setupL2Events(container) {
+  if (container._delegatedL2) return;
+  container._delegatedL2 = true;
+  container.addEventListener("click", function(e) {
+    const inner = e.target.closest(".detail-inner");
+    if (inner && inner !== container) return;
+    const s = l2StateMap.get(container.dataset.l2Author);
+    if (!s) return;
+    const th = e.target.closest("thead th");
+    if (th) {
+      handleSortClick(th, "2", `l2-${s.author}`, "downloads", true, () => {
+        renderL2(s.idx, s.author, s.models, container, s.totalBeforeFilter, s.allBaseModels);
+      });
+      return;
+    }
+    const tr = e.target.closest("tr.l2-row");
+    if (tr && e.target.tagName !== "A") {
+      const l2Idx = parseInt(tr.dataset.l2Idx);
+      const modelIdx = parseInt(tr.dataset.modelIdx);
+      const modelId = tr.dataset.model;
+      const detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
+      const inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
+      const tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
+      const modelKey = `m|${modelId}`;
+      if (detailRow.style.display === "none") {
+        detailRow.style.display = "";
+        tog.classList.add("open");
+        tog.setAttribute("aria-expanded", "true");
+        expandedSections.add(modelKey);
+        const key = `children-${modelId}`;
+        const cached = cacheAccess(key);
+        if (cached) {
+          renderL3(l2Idx, modelIdx, modelId, cached, inner);
+        } else {
+          inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
+          loadChildren(l2Idx, modelIdx, modelId, inner);
+        }
+        tog?.focus();
+      } else {
+        detailRow.style.display = "none";
+        tog.classList.remove("open");
+        tog.setAttribute("aria-expanded", "false");
+        expandedSections.delete(modelKey);
+        for (const k of [...expandedSections]) {
+          if (k.startsWith(`g|${modelId}|`)) expandedSections.delete(k);
+        }
+        tog?.focus();
+      }
+    }
+  });
+}
+
+function renderL2(idx, author, models, container, totalBeforeFilter, popupSource) {
+  const state = detailSort[`l2-${author}`] || { key: "downloads", asc: false };
+  const sorted = sortRows(models, state.key, state.asc, state.key === "id" ? undefined : "id");
+
+  if (sorted.length === 0) {
+    renderL2Empty(idx, author, container, popupSource, totalBeforeFilter);
+    return;
+  }
+
+  const { html, hidden } = buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state);
   container.innerHTML = html;
   container.dataset.l2Author = author;
   const allBaseModels = popupSource || cacheAccess(author) || [];
   l2StateMap.set(author, { idx, author, models, totalBeforeFilter, allBaseModels });
 
-  if (hidden > 0) {
-    const trigger = document.getElementById(`fp-trigger-l2-${author}`);
-    const popup = document.getElementById(`fp-popup-l2-${author}`);
-    if (trigger && popup) {
-      const displayedIds = new Set(models.map(m => m.id));
-      wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, displayedIds, 200)));
-    }
-  }
-
-  if (!container._delegatedL2) {
-    container._delegatedL2 = true;
-    container.addEventListener("click", function(e) {
-      const inner = e.target.closest(".detail-inner");
-      if (inner && inner !== container) return;
-      const s = l2StateMap.get(container.dataset.l2Author);
-      if (!s) return;
-      const th = e.target.closest("thead th");
-      if (th) {
-        handleSortClick(th, "2", `l2-${s.author}`, "downloads", true, () => {
-          renderL2(s.idx, s.author, s.models, container, s.totalBeforeFilter, s.allBaseModels);
-        });
-        return;
-      }
-      const tr = e.target.closest("tr.l2-row");
-      if (tr && e.target.tagName !== "A") {
-        const l2Idx = parseInt(tr.dataset.l2Idx);
-        const modelIdx = parseInt(tr.dataset.modelIdx);
-        const modelId = tr.dataset.model;
-        const detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
-        const inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
-        const tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
-        const modelKey = `m|${modelId}`;
-        if (detailRow.style.display === "none") {
-          detailRow.style.display = "";
-          tog.classList.add("open");
-          tog.setAttribute("aria-expanded", "true");
-          expandedSections.add(modelKey);
-          const key = `children-${modelId}`;
-          const cached = cacheAccess(key);
-          if (cached) {
-            renderL3(l2Idx, modelIdx, modelId, cached, inner);
-          } else {
-            inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
-            loadChildren(l2Idx, modelIdx, modelId, inner);
-          }
-          tog?.focus();
-        } else {
-          detailRow.style.display = "none";
-          tog.classList.remove("open");
-          tog.setAttribute("aria-expanded", "false");
-          expandedSections.delete(modelKey);
-          for (const k of [...expandedSections]) {
-            if (k.startsWith(`g|${modelId}|`)) expandedSections.delete(k);
-          }
-          tog?.focus();
-        }
-      }
-    });
-  }
+  wireL2Popups(author, models, allBaseModels, hidden);
+  setupL2Events(container);
 }
 
 // Two-phase search: first try model name alone (covers quant suffixes), fall back to
@@ -2643,61 +2667,6 @@ document.getElementById("hide-missing-param-chip").addEventListener("click", () 
   recomputeAndRenderWithoutDerive(saved);
 });
 addKeyboardClick(document.getElementById("hide-missing-param-chip"));
-
-// ── Debug Dump ──
-let _debugDumpSerialized = null;
-let _debugDumpGeneration = -1;
-
-function serializeAllFetched() {
-  const all = _allFetched || [];
-  if (all.length === 0) return "(empty)";
-  const padId = 60, padDl = 10, padLk = 8, padTag = 25, padParam = 8;
-  const hId = "Model ID".padEnd(padId);
-  const hDl = "Downloads".padStart(padDl);
-  const hLk = "Likes".padStart(padLk);
-  const hDate = "Updated".padEnd(10);
-  const hTag = "Pipeline".padEnd(padTag);
-  const hParam = "Params".padStart(padParam);
-  const hTags = "Tags";
-  const header = `${hId} ${hDl} ${hLk} ${hDate} ${hTag} ${hParam} ${hTags}`;
-  const lines = all.map(m => {
-    const id = m.id.padEnd(padId);
-    const dl = String(m.downloads || 0).padStart(padDl);
-    const lk = String(m.likes || 0).padStart(padLk);
-    const date = (m.lastModified || "").slice(0, 10).padEnd(10);
-    const tag = (m.pipeline_tag || "—").padEnd(padTag);
-    const param = (m.paramB != null ? paramValueToLabel(m.paramB) : "—").padStart(padParam);
-    const tags = (m.tags || []).slice(0, 3).join(", ");
-    return `${id} ${dl} ${lk} ${date} ${tag} ${param} ${tags}`;
-  });
-  return header + "\n" + lines.join("\n");
-}
-
-document.getElementById("debug-dump-chip").addEventListener("click", () => {
-  const chip = document.getElementById("debug-dump-chip");
-  const container = document.getElementById("debug-dump-container");
-  const textarea = document.getElementById("debug-dump-content");
-  if (container.style.display !== "none") {
-    container.style.display = "none";
-    chip.textContent = "Dump of all Fetched Models";
-    chip.classList.remove("active");
-    chip.classList.add("inactive");
-    chip.setAttribute("aria-pressed", "false");
-    return;
-  }
-  if (_debugDumpGeneration !== _fetchGeneration || _debugDumpSerialized === null) {
-    _debugDumpSerialized = serializeAllFetched();
-    _debugDumpGeneration = _fetchGeneration;
-    textarea.value = _debugDumpSerialized;
-    document.getElementById("debug-count").textContent = "(" + ((_allFetched || []).length) + " entries)";
-  }
-  container.style.display = "";
-  chip.textContent = "Hide _allFetched Dump";
-  chip.classList.remove("inactive");
-  chip.classList.add("active");
-  chip.setAttribute("aria-pressed", "true");
-});
-addKeyboardClick(document.getElementById("debug-dump-chip"));
 
 // ── Init ──
 // Fetch top models per pipeline tag (by downloads + by lastModified, merged + deduped).
