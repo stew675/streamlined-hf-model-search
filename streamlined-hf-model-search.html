@@ -334,7 +334,7 @@
 
 <script>
 (function() {
-const APP_VERSION = '260525.07';
+const APP_VERSION = '260525.08';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -1772,7 +1772,7 @@ function renderL2Empty(idx, author, container, popupSource, totalBeforeFilter) {
 function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
   const cols = [
     { key: "id", label: "Model ID" },
-    { key: "pipeline_tag", label: "Pipeline", cls: "center", width: 130 },
+    { key: "pipeline_tag", label: "Pipeline", cls: "center", width: 180 },
     { key: "paramB", label: "Params", headerCls: "updated-header", cls: "center", width: 135 },
     { key: "downloads", label: "Downloads", cls: "right", width: 110 },
     { key: "likes", label: "Likes", cls: "right", width: 80 },
@@ -2173,8 +2173,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 
   const cols = [
     { key: "id", label: "Model ID" },
-    { key: "pipeline_tag", label: "Pipeline", cls: "center", width: 120 },
-    { key: "q_method", label: "Quant", headerCls: "updated-header", cls: "center", width: 140 },
+    { key: "q_method", label: "Quant", headerCls: "updated-header", cls: "center", width: 160 },
     { key: "downloads", label: "Downloads", cls: "right", width: 110 },
     { key: "likes", label: "Likes", cls: "right", width: 80 },
     { key: "lastModified", label: "Updated", cls: "right", width: 110 }
@@ -2188,7 +2187,6 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
   html += sorted.map(q => {
     return `<tr class="l4-row">
       <td class="model-id-cell"><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.id.split("/").slice(1).join("/"))}">${escapeHtml(q.id.split("/").slice(1).join("/"))}</a></td>
-      <td class="center">${escapeHtml(q.pipeline_tag)}</td>
       <td class="center"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
       <td class="right">${fmt(q.downloads)}</td>
       <td class="right">${fmt(q.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
