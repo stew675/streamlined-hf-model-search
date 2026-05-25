@@ -341,7 +341,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260525.19';
+const APP_VERSION = '260525.20';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -495,9 +495,10 @@ let sliderTo = CONFIG.INIT_SLIDER_TO;
 let paramSliderFrom = CONFIG.INIT_PARAM_SLIDER_FROM;
 let paramSliderTo = CONFIG.INIT_PARAM_SLIDER_TO;
 const Q_METHODS = ["awq", "gptq", "bitsandbytes", "eetq", "aqlm", "gguf", "exl2", "marlin", "mlx", "bnb", "fp4", "fp8", "nf4", "int8", "int4", "q8", "q4"];
-const RE_Q_EXISTS = /\b(?:awq|gptq|bitsandbytes|eetq|aqlm|gguf|exl2|marlin|mlx|bnb|fp4|fp8|nf4|int8|int4|q8|q4)\b/i;
-const RE_Q_MATCH = /\b(?:awq|gptq|bitsandbytes|eetq|aqlm|gguf|exl2|marlin|mlx|bnb|fp4|fp8|nf4|int8|int4|q8|q4)\b/gi;
-const RE_Q_STRIP = /-(?:awq|gptq|bitsandbytes|eetq|aqlm|gguf|exl2|marlin|mlx|bnb|fp4|fp8|nf4|int8|int4|q8|q4)$/i;
+const _Q_PATTERN = Q_METHODS.join("|");
+const RE_Q_EXISTS = new RegExp(`\\b(?:${_Q_PATTERN})\\b`, 'i');
+const RE_Q_MATCH = new RegExp(`\\b(?:${_Q_PATTERN})\\b`, 'gi');
+const RE_Q_STRIP = new RegExp(`-(?:${_Q_PATTERN})$`, 'i');
 const RE_B_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Bb]/;
 const RE_M_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Mm]/;
 // Sanity-range guard: no real model has <1M or >2T params. The B/M regex
@@ -697,7 +698,7 @@ function getOrphanQuantMethod(modelId) {
   return idLower.match(RE_Q_MATCH) || [];
 }
 
-function isNestedQuant(m, knownIds, allFetched) {
+function isNestedQuant(m, knownIds, allFetchedMap) {
   const cd = m.cardData;
   if (!cd) return false;
   const baseId = getBaseModelId(cd);
@@ -707,7 +708,7 @@ function isNestedQuant(m, knownIds, allFetched) {
   if (!knownIds.has(baseId)) return false;
   // Only suppress if the parent is itself a non-base (quant/derivative).
   // Same-author quants whose parent is a true base model should appear at L2.
-  const parent = allFetched.find(f => f.id === baseId);
+  const parent = allFetchedMap.get ? allFetchedMap.get(baseId) : undefined;
   return parent ? !isBase(parent) : false;
 }
 
@@ -718,22 +719,27 @@ function buildCanonicalAuthors() {
     return;
   }
   _canonicalAuthor = {};
+  // Single-pass: for each name, track the best (highest-download) author and whether
+  // multiple authors exist. Only names with >1 distinct author go into canonical map.
   const byName = {};
   (_allFetched || []).forEach(m => {
     const name = m.id.split("/").slice(1).join("/");
-    const author = m.id.split("/")[0].toLowerCase();
-    if (!byName[name]) byName[name] = [];
-    byName[name].push({ author, raw: m.id.split("/")[0], downloads: m.downloads || 0 });
+    const parts = m.id.split("/");
+    const authorLower = parts[0].toLowerCase();
+    const entry = { author: authorLower, raw: parts[0], downloads: m.downloads || 0 };
+    if (!byName[name]) {
+      byName[name] = { best: entry, authors: new Set([authorLower]) };
+    } else {
+      const g = byName[name];
+      g.authors.add(authorLower);
+      if (entry.downloads > g.best.downloads) g.best = entry;
+    }
   });
-  Object.entries(byName).forEach(([name, entries]) => {
-    const authors = [...new Set(entries.map(e => e.author))];
-    if (authors.length <= 1) return;
-    let best = null;
-    entries.forEach(e => {
-      if (!best || e.downloads > best.downloads) best = e;
-    });
-    _canonicalAuthor[name] = best.raw;
-  });
+  for (const name in byName) {
+    if (byName[name].authors.size > 1) {
+      _canonicalAuthor[name] = byName[name].best.raw;
+    }
+  }
   _canonicalCache = { result: _canonicalAuthor, ref: _allFetched };
 }
 
@@ -1127,12 +1133,13 @@ function computeAuthorData() {
   buildCanonicalAuthors();
   const all = _allFetched || [];
   const knownIds = new Set(all.map(x => x.id));
+  const byId = new Map(all.map(x => [x.id, x]));
   const map = {};
   all.forEach(m => {
     if (!modelPassesAllFilters(m)) return;
     if (!isBase(m)) return;
     if (isOrphanQuant(m, knownIds)) return;
-    if (isNestedQuant(m, knownIds, all)) return;
+    if (isNestedQuant(m, knownIds, byId)) return;
     if (isCanonicalCopy(m)) return;
     const author = m.id.split("/")[0];
     if (!map[author]) map[author] = { author, count: 0, totalDownloads: 0, totalLikes: 0 };
@@ -1624,18 +1631,9 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
         let p = null;
         if (isQuant) {
           p = extractParamFromId(m.id);
-        } else {
-          if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
-          else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
         }
-        if (p === null) {
-          if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
-          else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
-        }
-        if (p === null && isQuant) {
-          if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
-          else if (full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
-        }
+        if (p === null && full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
+        if (p === null && full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
         if (p !== null) { m.paramB = p; _paramCache.set(m.id, p); _deepeningParamIds.add(m.id); }
       } catch (e) {
         console.warn("Failed to fetch param for", m.id, e);
@@ -1685,6 +1683,7 @@ async function loadAuthorModels(idx, author, container) {
     if (!cacheAccess(author + "_models")) cacheSet(author + "_models", models);
 
     const authorKnownIds = new Set(models.map(x => x.id));
+    const byAuthorId = new Map(models.map(x => [x.id, x]));
     const baseModels = models.filter(m => isBase(m)).map(m => ({
       id: m.id,
       downloads: m.downloads || 0,
@@ -1696,7 +1695,7 @@ async function loadAuthorModels(idx, author, container) {
       paramB: getParamCount(m),
       pipeline_tag: m.pipeline_tag || "",
       _orphanQuant: isOrphanQuant(m, authorKnownIds),
-      _nestedQuant: isNestedQuant(m, authorKnownIds, models)
+      _nestedQuant: isNestedQuant(m, authorKnownIds, byAuthorId)
     }));
 
     cacheSet(author, baseModels);
@@ -2757,6 +2756,7 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   cache.clear();
   _paramCache.clear();
   _inflightChildren.clear();
+  _inflightFetches.clear();
   _inferredParamIds.clear();
   _inferredFromNameIds.clear();
   _inferredAttemptedIds.clear();
