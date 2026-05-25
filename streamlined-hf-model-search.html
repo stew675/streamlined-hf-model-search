@@ -188,7 +188,7 @@
     display: none; position: absolute; bottom: calc(100% + 10px); right: 0;
     background: #1c2129; color: #e3b341; border: 1px solid #d2992266;
     border-radius: 6px; padding: 8px 12px; font-size: 0.75rem;
-    white-space: nowrap; z-index: 10; pointer-events: none;
+    white-space: normal; width: 480px; z-index: 10; pointer-events: none;
     box-shadow: 0 4px 12px rgba(0,0,0,0.5); line-height: 1.4; text-align: left;
   }
   #api-counter-wrap:hover .api-counter-tooltip,
@@ -309,8 +309,8 @@
   </div>
   <span id="clear-cache-btn" role="button" tabindex="0" title="Clears: in-memory param cache, LRU model cache, inflight fetch state, canonical dedup cache, and inference tracking. Collapses expanded sections (re-expand to reload). Preserves all filters and sliders.">Clear Cache</span>
   <span id="api-counter-wrap" style="margin-left:auto; min-width: 100px; text-align: right;">
-    <span id="api-counter" class="filter-label" tabindex="0" role="button" style="font-variant-numeric: tabular-nums;">API Calls: 0</span>
-    <div class="api-counter-tooltip" role="tooltip">Anonymous API calls are rate-limited by Hugging Face (~100 req/min). When the counter glows amber, rate limiting is actively throttling requests. Exponential backoff is applied automatically.</div>
+   <span id="api-counter" class="filter-label" tabindex="0" role="button" style="font-variant-numeric: tabular-nums;">API Requests: 0</span>
+     <div class="api-counter-tooltip" role="tooltip">Anonymous API requests are rate-limited by Hugging Face (~100 req/min). Counter includes all attempts — successful, retried, and failed. When the counter glows amber, rate limiting is actively throttling requests.</div>
   </span>
   <span id="rate-limit-notice" style="display:none; padding:3px 10px; background:#d2992233; border:1px solid #d2992266; border-radius:6px; margin-left:8px; font-size:0.72rem; color:#e3b341; white-space:nowrap;">⚠️ Rate limited — backoff applied</span>
 </div>
@@ -341,7 +341,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260525.22';
+const APP_VERSION = '260525.23';
 // Design Notes (unaddressed review items):
 // - Proxy indirection removed in v260525.21 — all callers now access RenderCoordinator._state,
 //   _levelState, and helper methods directly. No indirection remains.
@@ -485,7 +485,7 @@ const _inferredAttemptedIds = new Set();
 const _deepeningParamIds = new Set();
 let apiCalls = 0;
 let _consecutive429s = 0;
-function incApiCalls(n) { apiCalls += n; document.getElementById("api-counter").textContent = "API Calls: " + String(apiCalls); }
+function incApiCalls(n) { apiCalls += n; document.getElementById("api-counter").textContent = "API Requests: " + String(apiCalls); }
 function markDirty() { needsUpdate = true; document.getElementById("get-quick-results-btn").classList.add("ready"); document.getElementById("get-deep-results-btn").classList.add("ready"); }
 let sliderFrom = CONFIG.INIT_SLIDER_FROM;
 let sliderTo = CONFIG.INIT_SLIDER_TO;
@@ -496,8 +496,8 @@ const _Q_PATTERN = Q_METHODS.join("|");
 const RE_Q_EXISTS = new RegExp(`\\b(?:${_Q_PATTERN})\\b`, 'i');
 const RE_Q_MATCH = new RegExp(`\\b(?:${_Q_PATTERN})\\b`, 'gi');
 const RE_Q_STRIP = new RegExp(`-(?:${_Q_PATTERN})$`, 'i');
-const RE_B_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Bb]/;
-const RE_M_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Mm]/;
+const RE_B_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Bb](?![a-zA-Z])/;
+const RE_M_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Mm](?![a-zA-Z])/;
 // Sanity-range guard: no real model has <1M or >2T params. The B/M regex
 // already has a negative lookbehind guard; this extra check catches anything
 // that passes the regex but is still clearly wrong (e.g. 0.0005B or 5000B).
@@ -808,7 +808,7 @@ function renderFilteredPopup(container, result) {
     return sp.asc ? cmp : -cmp;
   });
   const arrow = k => k === sp.key ? (sp.asc ? ' ▲' : ' ▼') : '';
-  const fpHeader = '<div class="fp-header">Hidden Models Preview (At most 200 displayed)</div>';
+  const fpHeader = '<div class="fp-header">Hidden Models Preview - At most 200 displayed</div>';
   if (!samples.length) {
     container.innerHTML = fpHeader + '<table><tbody><tr><td colspan="5" class="fp-note">No hidden models to preview.</td></tr></tbody></table>';
     return;
@@ -1566,6 +1566,15 @@ function renderMain(authorData) {
   document.getElementById("count").textContent = countText + ". Click to expand.";
 }
 
+function userFriendlyError(err) {
+  if (err.name === 'AbortError') return 'Request cancelled';
+  const msg = err.message || '';
+  if (msg.includes('404')) return 'Model not found or private';
+  if (msg.includes('Failed to fetch') || msg.toLowerCase().includes('network')) return 'Connection failed — check your internet connection';
+  if (msg.startsWith('HTTP ')) { const s = msg.slice(5); if (s === '429') return 'Rate limited — try again later'; }
+  return msg;
+}
+
 function renderErrorWithRetry(container, message, retryFn) {
   container.innerHTML = `<div class="detail-error" role="alert">
     <span>${escapeHtml(message)}</span>
@@ -1705,7 +1714,7 @@ async function loadAuthorModels(idx, author, container) {
       }
     }
   } catch (err) {
-    renderErrorWithRetry(container, err.message, () => {
+    renderErrorWithRetry(container, userFriendlyError(err), () => {
       if (container.isConnected) loadAuthorModels(idx, author, container);
     });
   }
@@ -1982,7 +1991,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       cacheSet(cacheKey, results);
       if (container.isConnected) renderL3(l2Idx, modelIdx, parentId, results, container);
     } catch (err) {
-      if (container.isConnected) renderErrorWithRetry(container, err.message, () => {
+      if (container.isConnected) renderErrorWithRetry(container, userFriendlyError(err), () => {
         if (container.isConnected) loadChildren(l2Idx, modelIdx, parentId, container);
       });
     }
@@ -2716,6 +2725,8 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   _paramCache.clear();
   _inflightChildren.clear();
   _inflightFetches.clear();
+  for (const [el, timer] of _popupTimers) { clearTimeout(timer); }
+  _popupTimers.clear();
   _inferredParamIds.clear();
   _inferredFromNameIds.clear();
   _inferredAttemptedIds.clear();
@@ -2973,7 +2984,7 @@ function _initApp() {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fic.click(); }
   });
   markDirty();
-  document.getElementById("api-counter").textContent = "API Calls: 0";
+  document.getElementById("api-counter").textContent = "API Requests: 0";
   document.getElementById("version").textContent = "Version: " + APP_VERSION;
   status.textContent = "Select your filters, then click Get Quick Results or Get Deep Results.";
   renderMain([]);
