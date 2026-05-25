@@ -341,7 +341,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260525.15';
+const APP_VERSION = '260525.16';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -451,7 +451,7 @@ const CONFIG = {
   DAYS_PER_STEP: 14,
   PARAM_BATCH_SIZE: 4,
   DERIVED_BATCH_SIZE: 10,
-  INJECTION_BATCH_SIZE: 8,
+  INJECTION_BATCH_SIZE: 8,  // Intentionally exceeds FETCH_CONCURRENCY (5): injection fetches are targeted individual model cards, not broad search queries, so a slightly higher batch size is safe and completes faster.
   PARAM_MIN_GAP: 5,
   AUTHOR_LIMIT: 1000,
   CHILD_LIMIT: 1000,
@@ -474,6 +474,10 @@ let _trendingAdded = 0;
 // Chosen over AbortController because it guards post-fetch side effects (render, cache write)
 // not just the fetch itself. AbortController would need a parallel mechanism anyway.
 let _fetchGeneration = 0;
+// Injected base models bypass the date filter. Cleared on deep re-fetch (injectBaseModels)
+// and Clear Cache, but intentionally NOT cleared on quick re-fetch: models that were
+// previously injected should remain visible since upstream data is static and re-injecting
+// would waste API calls without changing results.
 const _injectedBaseIds = new Set();
 let needsUpdate = false;
 let _derivedParamEnabled = false;
@@ -717,8 +721,9 @@ function buildCanonicalAuthors() {
   const byName = {};
   (_allFetched || []).forEach(m => {
     const name = m.id.split("/").slice(1).join("/");
+    const author = m.id.split("/")[0].toLowerCase();
     if (!byName[name]) byName[name] = [];
-    byName[name].push({ author: m.id.split("/")[0], downloads: m.downloads || 0 });
+    byName[name].push({ author, raw: m.id.split("/")[0], downloads: m.downloads || 0 });
   });
   Object.entries(byName).forEach(([name, entries]) => {
     const authors = [...new Set(entries.map(e => e.author))];
@@ -727,14 +732,15 @@ function buildCanonicalAuthors() {
     entries.forEach(e => {
       if (!best || e.downloads > best.downloads) best = e;
     });
-    _canonicalAuthor[name] = best.author;
+    _canonicalAuthor[name] = best.raw;
   });
   _canonicalCache = { result: _canonicalAuthor, ref: _allFetched };
 }
 
 function isCanonicalCopy(m) {
   const name = m.id.split("/").slice(1).join("/");
-  return _canonicalAuthor && _canonicalAuthor[name] !== undefined && _canonicalAuthor[name] !== m.id.split("/")[0];
+  return _canonicalAuthor && _canonicalAuthor[name] !== undefined &&
+    _canonicalAuthor[name].toLowerCase() !== m.id.split("/")[0].toLowerCase();
 }
 
 function fmt(n) { return n.toLocaleString(); }
@@ -1533,7 +1539,7 @@ function applyBarLogic(option, options, activeSet) {
 
 function sortCoerce(v, k) {
   if (["downloads", "likes", "totalDownloads", "totalLikes", "count", "paramB"].includes(k)) return Number(v);
-  if (["created_at", "updated_at", "lastModified"].includes(k)) return new Date(v || 0).getTime();
+  if (["created_at", "updated_at", "lastModified"].includes(k)) { const t = new Date(v || 0).getTime(); return t === t ? t : Infinity; }
   return String(v || "").toLowerCase();
 }
 function sortRows(rows, key, asc, subKey) {
@@ -1749,22 +1755,23 @@ async function loadAuthorModels(idx, author, container) {
 }
 
 // ── Level 2: Base Models ──
-function thHtml(c, state, level) {
+function thHtml(c, state, level, colindex) {
   const isSorted = state.key === c.key;
   const allCls = (c.headerCls || "") + " " + (c.cls || "");
   const cls = allCls.trim() + (isSorted ? " sorted" : "");
   const arrow = isSorted ? (state.asc ? "▲" : "▼") : "";
   const ariaSort = isSorted ? ` aria-sort="${state.asc ? "ascending" : "descending"}"` : '';
   const tabIdx = ' tabindex="0"';
+  const ci = colindex ? ` aria-colindex="${colindex}"` : '';
   if (allCls.includes("right") || allCls.includes("center") || allCls.includes("updated-header")) {
-    return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}${tabIdx}><span class="arrow-left">${arrow}</span>${escapeHtml(c.label)}</th>`;
+    return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}${tabIdx}${ci}><span class="arrow-left">${arrow}</span>${escapeHtml(c.label)}</th>`;
   }
-  return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}${tabIdx}>${escapeHtml(c.label)}<span class="arrow">${arrow}</span></th>`;
+  return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}${tabIdx}${ci}>${escapeHtml(c.label)}<span class="arrow">${arrow}</span></th>`;
 }
 
-function renderL2Empty(idx, author, container, popupSource, totalBeforeFilter) {
+function renderL2Empty(idx, author, container, popupSource) {
   const allBaseModels = popupSource || cacheAccess(author) || [];
-  l2StateMap.set(author, { idx, author, models: [], totalBeforeFilter, allBaseModels });
+  l2StateMap.set(author, { idx, author, models: [], allBaseModels });
   if (allBaseModels.length > 0) {
     container.innerHTML = `<div class="detail-count" style="color:#6e7681"><span id="fp-trigger-l2-empty-${author}" class="filter-popup-trigger" tabindex="0" role="button" aria-haspopup="true">No base models match current filters</span><div id="fp-popup-l2-empty-${author}" class="filter-popup"></div></div>`;
     const trigger = document.getElementById(`fp-trigger-l2-empty-${author}`);
@@ -1788,21 +1795,23 @@ function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
     { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header", width: 125 }
   ];
   const l2Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Base Models for ${author}` } : c);
-  let html = `<table aria-label="Base models for ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
-  l2Cols.forEach(c => { html += thHtml(c, state, "2"); });
+  let html = `<table aria-label="Base models for ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
+  l2Cols.forEach((c, i) => { html += thHtml(c, state, "2", i + 1); });
   html += `</tr></thead><tbody>`;
   html += sorted.map((m, mIdx) => {
     const qMethods = getOrphanQuantMethod(m.id);
+    const rowIdx = 2 + mIdx * 2;
+    const detailRowIdx = rowIdx + 1;
     const orphanBadge = qMethods.length ? qMethods.map(q => `<span class="badge orphan" title="Parent base model filtered out">${escapeHtml(q.toUpperCase())}</span>`).join(' ') + ' ' : '';
-    return `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}">
-      <td class="model-id-cell"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(m.id)}">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
-      <td class="center">${escapeHtml(m.pipeline_tag)}</td>
-      <td class="center" style="font-size:0.78rem">${paramBadgeHtml(m)}</td>
-      <td class="right">${fmt(m.downloads)}</td>
-      <td class="right">${fmt(m.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
-      <td class="updated-cell">${fmtDate(m.lastModified)} <span style="color:#6e7681;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
+    return `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}" aria-rowindex="${rowIdx}">
+      <td class="model-id-cell" aria-colindex="1"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(m.id)}">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
+      <td class="center" aria-colindex="2">${escapeHtml(m.pipeline_tag)}</td>
+      <td class="center" aria-colindex="3" style="font-size:0.78rem">${paramBadgeHtml(m)}</td>
+      <td class="right" aria-colindex="4">${fmt(m.downloads)}</td>
+      <td class="right" aria-colindex="5">${fmt(m.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
+      <td class="updated-cell" aria-colindex="6">${fmtDate(m.lastModified)} <span style="color:#6e7681;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
     </tr>
-    <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none"><td colspan="6"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
+    <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none" aria-rowindex="${detailRowIdx}"><td colspan="6" aria-colindex="1"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
   }).join('');
   const hidden = (totalBeforeFilter != null && totalBeforeFilter > sorted.length) ? totalBeforeFilter - sorted.length : 0;
   html += `</tbody></table><div class="detail-count">${sorted.length} model(s)` + (hidden > 0 ? `, <span id="fp-trigger-l2-${author}" class="filter-popup-trigger" tabindex="0" role="button" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by search settings</span><div id="fp-popup-l2-${author}" class="filter-popup"></div>` : '') + `</div>`;
@@ -1884,7 +1893,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
   const sorted = sortRows(models, state.key, state.asc, state.key === "id" ? undefined : "id");
 
   if (sorted.length === 0) {
-    renderL2Empty(idx, author, container, popupSource, totalBeforeFilter);
+    renderL2Empty(idx, author, container, popupSource);
     return;
   }
 
@@ -2104,18 +2113,20 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
 
   const parentName = parentId.split("/").slice(1).join("/");
   const l3Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Derivative Authors for ${parentName}` } : c);
-  let html = `<table aria-label="Quant author groups for ${escapeHtml(parentId)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
-  l3Cols.forEach(c => { html += thHtml(c, state, "3"); });
+  let html = `<table aria-label="Quant author groups for ${escapeHtml(parentId)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
+  l3Cols.forEach((c, i) => { html += thHtml(c, state, "3", i + 1); });
   html += `</tr></thead><tbody>`;
 
   // Optimized: Use map + join for table rows instead of forEach + +=
   html += sorted.map((g, gIdx) => {
-    return `<tr class="l3-row" data-l3-l2="${l2Idx}" data-l3-model-idx="${modelIdx}" data-l3-parent="${escapeHtml(parentId)}" data-l3-idx="${gIdx}" data-l3-author="${escapeHtml(g.author)}">
-      <td><button type="button" class="toggle" id="t3-${l2Idx}-${modelIdx}-${gIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(g.author)} quants">▶</button><a href="https://huggingface.co/${escapeHtml(g.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(g.author)}</a></td>
-      <td class="models-cell">${g.count}</td>
-      <td class="right">${fmt(g.totalDownloads)}</td>
+    const rowIdx = 2 + gIdx * 2;
+    const detailRowIdx = rowIdx + 1;
+    return `<tr class="l3-row" data-l3-l2="${l2Idx}" data-l3-model-idx="${modelIdx}" data-l3-parent="${escapeHtml(parentId)}" data-l3-idx="${gIdx}" data-l3-author="${escapeHtml(g.author)}" aria-rowindex="${rowIdx}">
+      <td aria-colindex="1"><button type="button" class="toggle" id="t3-${l2Idx}-${modelIdx}-${gIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(g.author)} quants">▶</button><a href="https://huggingface.co/${escapeHtml(g.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(g.author)}</a></td>
+      <td class="models-cell" aria-colindex="2">${g.count}</td>
+      <td class="right" aria-colindex="3">${fmt(g.totalDownloads)}</td>
     </tr>
-    <tr class="detail-row" id="d3-${l2Idx}-${modelIdx}-${gIdx}" style="display:none"><td colspan="3"><div class="detail-inner" id="i3-${l2Idx}-${modelIdx}-${gIdx}"></div></td></tr>`;
+    <tr class="detail-row" id="d3-${l2Idx}-${modelIdx}-${gIdx}" style="display:none" aria-rowindex="${detailRowIdx}"><td colspan="3" aria-colindex="1"><div class="detail-inner" id="i3-${l2Idx}-${modelIdx}-${gIdx}"></div></td></tr>`;
   }).join('');
   html += `</tbody></table>`;
   html += `<div class="detail-count">${filtered.length} child model(s) from ${groupEntries.length} author(s)${filtered.length !== children.length ? ` (filtered from ${children.length})` : ''}</div>`;
@@ -2192,18 +2203,18 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
   ];
 
   const l4Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Derivative Models for ${author}` } : c);
-  let html = `<table aria-label="Individual quantizations for ${escapeHtml(parentId)} by ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
-  l4Cols.forEach(c => { html += thHtml(c, st, "4"); });
+  let html = `<table aria-label="Individual quantizations for ${escapeHtml(parentId)} by ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
+  l4Cols.forEach((c, i) => { html += thHtml(c, st, "4", i + 1); });
   html += `</tr></thead><tbody>`;
 
   // Optimized: Use map + join for table rows instead of forEach + +=
-  html += sorted.map(q => {
-    return `<tr class="l4-row">
-      <td class="model-id-cell"><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.id.split("/").slice(1).join("/"))}">${escapeHtml(q.id.split("/").slice(1).join("/"))}</a></td>
-      <td class="center"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
-      <td class="right">${fmt(q.downloads)}</td>
-      <td class="right">${fmt(q.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
-      <td class="right">${fmtDate(q.lastModified)}</td>
+  html += sorted.map((q, qIdx) => {
+    return `<tr class="l4-row" aria-rowindex="${2 + qIdx}">
+      <td class="model-id-cell" aria-colindex="1"><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.id.split("/").slice(1).join("/"))}">${escapeHtml(q.id.split("/").slice(1).join("/"))}</a></td>
+      <td class="center" aria-colindex="2"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
+      <td class="right" aria-colindex="3">${fmt(q.downloads)}</td>
+      <td class="right" aria-colindex="4">${fmt(q.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
+      <td class="right" aria-colindex="5">${fmtDate(q.lastModified)}</td>
     </tr>`;
   }).join('');
 
@@ -2355,6 +2366,7 @@ async function tryResolveModelParam(m, gen, idx, author, container, getFiltered,
   resolved = extractParamFromId(m.id);
   if (resolved !== null) fromName = true;
   if (resolved === null) {
+    if (gen !== _fetchGeneration) { if (rowEl) rowEl.classList.remove("inferring"); return false; }
     // Fall through to children-based inference when nothing is in the name.
     resolved = await resolveParamFromChildren(m.id);
   }
@@ -2376,6 +2388,11 @@ async function tryResolveModelParam(m, gen, idx, author, container, getFiltered,
   return true;
 }
 
+// Called on every re-render when _derivedParamEnabled is true. Safe to re-run:
+// _inferredAttemptedIds tracks already-attempted models (both successes and failures),
+// so models that failed to resolve are skipped on subsequent passes without re-fetching.
+// New unknowns (e.g. from newly-fetched or freshly-expanded sections) are automatically
+// picked up and resolved on the next render cycle.
 async function deriveVisibleUnknowns() {
   if (!_derivedParamEnabled) return;
   const gen = _fetchGeneration;
@@ -2539,6 +2556,10 @@ function applyFilters(force, deep) {
           // Quick mode: mark parents already in _allFetched so quants outside the date
           // range still keep their parent visible (the data is already in hand — no API
           // calls needed, just a local scan).
+          // _injectedBaseIds is intentionally NOT cleared here — models injected during
+          // a prior deep fetch should persist across quick re-fetches since upstream data
+          // is static and re-injecting would waste API calls. Clear Cache or a fresh deep
+          // fetch resets the set (injectBaseModels calls .clear()).
           markLocalParents(all);
         }
         if (all.length > CONFIG.ALL_FETCHED_MAX) {
@@ -2740,6 +2761,7 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   _inferredFromNameIds.clear();
   _inferredAttemptedIds.clear();
   _deepeningParamIds.clear();
+  _injectedBaseIds.clear();
   _canonicalCache = null;
   _consecutive429s = 0;
   document.getElementById("api-counter").classList.remove("rate-limited"); document.getElementById("rate-limit-notice").style.display = "none";
@@ -2870,7 +2892,7 @@ function markLocalParents(all) {
 async function injectBaseModels(all, onBatch) {
   const gen = _fetchGeneration;
   if (gen !== _fetchGeneration) return;
-  _injectedBaseIds.clear();
+  _injectedBaseIds.clear();  // Reset on deep fetch — fresh injection pass will repopulate.
   markLocalParents(all);
   if (gen !== _fetchGeneration) return;
   const seenAuthors = new Set(all.map(m => m.id.split("/")[0]));
