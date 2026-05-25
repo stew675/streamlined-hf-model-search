@@ -55,7 +55,7 @@
   tr.l1-row td { cursor: pointer; font-weight: 600; }
   tr.l1-row:hover td { background: #1a2030; }
 
-  tr.detail-row td { padding: 0; background: #010409; isolation: isolate; }
+  tr.detail-row td { padding: 0; background: #010409; }
   tr.detail-row, .l1-row, .l2-row, .l3-row, .l4-row { scroll-margin-top: 50px; }
   .detail-inner { padding: 8px 12px 12px 16px; overflow: visible; }
   .detail-inner table { font-size: 0.8rem; }
@@ -216,7 +216,7 @@
   .filter-popup-trigger { cursor: help; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
   .filter-popup-trigger:hover { color: #c9d1d9; }
   .filter-popup-trigger:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; border-radius: 2px; }
-  .filter-popup { display: none; position: absolute; z-index: 50;
+  .filter-popup { display: none; position: absolute; z-index: 200;
     background: #1c2129; border: 1px solid #30363d; border-radius: 6px; padding: 0;
     box-shadow: 0 4px 16px rgba(0,0,0,0.6); max-height: 300px; overflow-y: auto; width: 65%; min-width: 320px; }
   .filter-popup.visible { display: block; }
@@ -341,7 +341,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260525.17';
+const APP_VERSION = '260525.18';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -805,7 +805,7 @@ function renderFilteredPopup(container, result) {
     return sp.asc ? cmp : -cmp;
   });
   const arrow = k => k === sp.key ? (sp.asc ? ' ▲' : ' ▼') : '';
-  const fpHeader = '<div class="fp-header">Hidden Models Preview</div>';
+  const fpHeader = '<div class="fp-header">Hidden Models Preview (At most 200 displayed)</div>';
   if (!samples.length) {
     container.innerHTML = fpHeader + '<table><tbody><tr><td colspan="5" class="fp-note">No hidden models to preview.</td></tr></tbody></table>';
     return;
@@ -873,7 +873,7 @@ function positionPopupCenter(trigger, popup) {
 }
 function schedulePopupShow(popupEl, delay) {
   clearTimeout(_popupTimers.get(popupEl));
-  _popupTimers.set(popupEl, setTimeout(() => { popupEl.scrollTop = 0; popupEl.classList.add("visible"); }, delay || 150));
+  _popupTimers.set(popupEl, setTimeout(() => { popupEl.classList.add("visible"); popupEl.scrollTop = 0; }, delay || 150));
 }
 function schedulePopupHide(popupEl, delay) {
   clearTimeout(_popupTimers.get(popupEl));
