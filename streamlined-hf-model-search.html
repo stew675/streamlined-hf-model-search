@@ -212,7 +212,8 @@
     box-shadow: 0 4px 16px rgba(0,0,0,0.6); max-height: 300px; overflow-y: auto; width: 65%; min-width: 320px; }
   .filter-popup.visible { display: block; }
 .filter-popup table { width: 100%; font-size: 0.75rem; border-collapse: collapse; margin: 0; table-layout: auto !important; }
-  .filter-popup th { background: #161b22; padding: 4px 8px; font-size: 0.7rem; cursor: default; position: sticky !important; top: 20px; border-bottom: 1px solid #30363d; white-space: nowrap; z-index: 1; }
+  .filter-popup th { background: #161b22; padding: 4px 8px; font-size: 0.7rem; cursor: pointer; position: sticky !important; top: 20px; border-bottom: 1px solid #30363d; white-space: nowrap; z-index: 1; user-select: none; }
+  .filter-popup th:hover { background: #1c2129; }
   .filter-popup td { padding: 3px 8px; border-bottom: none !important; font-size: 0.75rem; border-right: 1px solid #21262d !important; }
   .filter-popup td:last-child { border-right: none !important; }
   .filter-popup tr:hover td { background: transparent; cursor: default; }
@@ -328,7 +329,7 @@
 
 <script>
 (function() {
-const APP_VERSION = '260525.02';
+const APP_VERSION = '260525.03';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -757,20 +758,46 @@ function getFilteredOutModels(source, displayedIds, maxSamples) {
       updated: fmtDate(m.lastModified)
     });
   }
-  samples.sort((a, b) => (b.updated || "").localeCompare(a.updated || ""));
   return { samples, totalHidden };
 }
 
-// Renders a compact popup table of filtered-out model samples.
+// Renders a compact popup table of filtered-out model samples with sortable columns.
 function renderFilteredPopup(container, result) {
-const { samples, totalHidden } = result;
+  container._popupData = result;
+  if (!container._popupSort) container._popupSort = { key: 'updated', asc: false };
+  const sp = container._popupSort;
+  const { samples, totalHidden } = result;
+  const sorted = [...samples].sort((a, b) => {
+    let cmp = 0;
+    if (sp.key === 'paramB') {
+      const va = a.paramB != null ? a.paramB : -1;
+      const vb = b.paramB != null ? b.paramB : -1;
+      cmp = va - vb;
+    } else if (sp.key === 'updated') {
+      cmp = (a.updated || '').localeCompare(b.updated || '');
+    } else if (sp.key === 'id') {
+      cmp = a.id.localeCompare(b.id);
+    } else if (sp.key === 'qMethod') {
+      cmp = (a.qMethod || '').localeCompare(b.qMethod || '');
+    } else if (sp.key === 'pipelineTag') {
+      cmp = (a.pipelineTag || '').localeCompare(b.pipelineTag || '');
+    }
+    return sp.asc ? cmp : -cmp;
+  });
+  const arrow = k => k === sp.key ? (sp.asc ? ' ▲' : ' ▼') : '';
   const fpHeader = '<div class="fp-header">Hidden Models Preview</div>';
   if (!samples.length) {
     container.innerHTML = fpHeader + '<table><tbody><tr><td colspan="5" class="fp-note">No hidden models to preview.</td></tr></tbody></table>';
     return;
   }
-  let html = `<table><thead><tr><th scope="col">Model ID</th><th scope="col" style="text-align:center">Params</th><th scope="col" style="text-align:center">Quant</th><th scope="col">Tag</th><th scope="col" style="white-space:nowrap">Updated</th></tr></thead><tbody>`;
-  html += samples.map(s => {
+  let html = `<table><thead><tr>
+    <th scope="col" data-sk="id">Model ID${arrow('id')}</th>
+    <th scope="col" data-sk="paramB" style="text-align:center">Params${arrow('paramB')}</th>
+    <th scope="col" data-sk="qMethod" style="text-align:center">Quant${arrow('qMethod')}</th>
+    <th scope="col" data-sk="pipelineTag">Tag${arrow('pipelineTag')}</th>
+    <th scope="col" data-sk="updated" style="white-space:nowrap">Updated${arrow('updated')}</th>
+  </tr></thead><tbody>`;
+  html += sorted.map(s => {
     const name = s.id.split("/").slice(1).join("/");
     return `<tr>
       <td class="model-id-cell"><a href="https://huggingface.co/${escapeHtml(s.id)}" target="_blank" rel="noopener noreferrer">${escapeHtml(name)}</a></td>
@@ -782,6 +809,27 @@ const { samples, totalHidden } = result;
   }).join('');
   html += `</tbody></table><div class="fp-footer">${totalHidden} model(s) hidden by filters</div>`;
   container.innerHTML = fpHeader + html;
+  if (!container._popupSorted) {
+    container._popupSorted = true;
+    container.addEventListener('click', function(e) {
+      const th = e.target.closest('thead th[data-sk]');
+      if (!th) return;
+      const key = th.dataset.sk;
+      const s = this._popupSort;
+      if (!s || !this._popupData) return;
+      if (s.key === key) s.asc = !s.asc;
+      else { s.key = key; s.asc = key !== 'updated'; }
+      renderFilteredPopup(this, this._popupData);
+      if (this._popupTrigger) positionPopupCenter(this._popupTrigger, this);
+    });
+    container.addEventListener('keydown', function(e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const th = e.target.closest('thead th[data-sk]');
+      if (!th) return;
+      e.preventDefault();
+      th.click();
+    });
+  }
 }
 
 // Popup show/hide with debounce to prevent flicker on accidental mouse passes.
@@ -814,6 +862,7 @@ function schedulePopupHide(popupEl, delay) {
 
 // Wires up hover events on both trigger and popup so the popup stays alive when moving between them.
 function wirePopupHover(trigger, popup, makeContent) {
+  popup._popupTrigger = trigger;
   let contentReady = false;
   const show = () => {
     if (!contentReady) { makeContent(popup); contentReady = true; }
