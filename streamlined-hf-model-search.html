@@ -27,9 +27,11 @@
   th { background: #161b22; padding: 8px 10px; text-align: left; cursor: pointer;
         user-select: none; border-bottom: 2px solid #30363d; position: sticky; transition: background 0.15s, border-color 0.15s; }
   #main-table > thead > tr > th { top: 0; z-index: 100; }
-  .detail-inner table th[data-level="2"] { top: 36px; z-index: 90; }
-  .detail-inner table th[data-level="3"] { top: 64px; z-index: 80; }
-  .detail-inner table th[data-level="4"] { top: 92px; z-index: 70; }
+  .detail-inner table th.context-row { position: sticky; font-size: 0.72rem; font-weight: 600; color: #c9d1d9; background: #1a2030; border-bottom: 1px solid #30363d; padding: 5px 10px; text-align: left; cursor: default; user-select: none; }
+  .detail-inner table th.context-l2 { top: 36px; z-index: 91; }
+  .detail-inner table th[data-level="2"] { top: 64px; z-index: 90; }
+  .detail-inner table th[data-level="3"] { top: 92px; z-index: 80; }
+  .detail-inner table th[data-level="4"] { top: 120px; z-index: 70; }
   th[tabindex="0"]:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; outline-offset: -2px; }
    tr > th:not(:last-child), tr > td:not(:last-child) { border-right: 1px solid #21262d; }
   th:hover { background: #1c2129; }
@@ -338,7 +340,7 @@
 
 <script>
 (function() {
-const APP_VERSION = '260525.09';
+const APP_VERSION = '260525.10';
 // Design Notes (unaddressed review items):
 // - Proxy indirection (detailSort, expandedSections, level state): Kept for backward
 //   compatibility across ~50+ call sites. The Proxy wrappers add ~50 lines but work
@@ -1782,7 +1784,9 @@ function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
     { key: "likes", label: "Likes", cls: "right", width: 80 },
     { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header", width: 125 }
   ];
-  let html = `<table aria-label="Base models for ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
+  let html = `<table aria-label="Base models for ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead>`;
+  html += `<tr><th class="context-row context-l2" colspan="${cols.length}">Author: ${escapeHtml(author)}</th></tr>`;
+  html += `<tr>`;
   cols.forEach(c => { html += thHtml(c, state, "2"); });
   html += `</tr></thead><tbody>`;
   html += sorted.map((m, mIdx) => {
@@ -2096,8 +2100,10 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
     { key: "totalDownloads", label: "Downloads", cls: "right", width: 120 }
   ];
 
+  const parentName = parentId.split("/").slice(1).join("/");
+  const l3Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Base: ${parentName} — ${c.label}` } : c);
   let html = `<table aria-label="Quant author groups for ${escapeHtml(parentId)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
-  cols.forEach(c => { html += thHtml(c, state, "3"); });
+  l3Cols.forEach(c => { html += thHtml(c, state, "3"); });
   html += `</tr></thead><tbody>`;
 
   // Optimized: Use map + join for table rows instead of forEach + +=
@@ -2183,8 +2189,9 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
     { key: "lastModified", label: "Updated", cls: "right", width: 110 }
   ];
 
+  const l4Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Author: ${author} — ${c.label}` } : c);
   let html = `<table aria-label="Individual quantizations for ${escapeHtml(parentId)} by ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` width="${c.width}"` : ''}>`).join('')}</colgroup><thead><tr>`;
-  cols.forEach(c => { html += thHtml(c, st, "4"); });
+  l4Cols.forEach(c => { html += thHtml(c, st, "4"); });
   html += `</tr></thead><tbody>`;
 
   // Optimized: Use map + join for table rows instead of forEach + +=
