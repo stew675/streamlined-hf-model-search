@@ -24,7 +24,7 @@ When modifying this file, write the new content to a temporary file (e.g. `AGENT
 - `_inflightChildren` — `Map<parentId, {promise, results}>` to deduplicate concurrent L3/L4 fetches; results stored directly in the entry to survive LRU cache eviction.
 - `_inflightFetches` — `Map<url, promise>` to deduplicate concurrent `fetchJson` calls before they reach the rate limiter.
 - `_paramCache` — `Map<modelId, paramB>` persists across renders; cleared only by Clear Cache. Bound by unique models encountered (~1.4MB at 16k entries).
-- `cache` — In-memory LRU (200 entries) keyed by `"{author}"`, `"{author}_models"`, `"children-{parentId}"`. Uses `cacheSet`/`cacheAccess`.
+- `cache` — In-memory LRU (500 entries) keyed by `"{author}"`, `"{author}_models"`, `"children-{parentId}"`. Uses `cacheSet`/`cacheAccess`.
 - `_apiTimestamps` — Sliding window enforcing ≤4 req/s (1 call per 250ms, no burst).
 - `_injectedBaseIds` — Injections bypass the date slider so recently-updated quants remain reachable via their parent.
 - `sliderFrom/sliderTo` — 0..80 (0=Anytime, 1-79=14-day increments, 80=Now).
@@ -78,7 +78,7 @@ Open in browser, validate:
 - **Data attribute names**: `data-l3-model-idx` ≠ `data-l3-model`. Always verify matching.
 - **ID collisions**: L3/L4 IDs include all parent indices (`d3-{l2}-{model}-{g}`).
 - **Filter refresh**: `refreshAllExpanded` queries DOM via `expandedSections` Set — must cascade-delete descendant IDs on parent collapse to avoid re-rendering orphaned sections.
-- **Cache keys**: `children-{parentId}` uses the full model ID (e.g., `Qwen/Qwen2.5-7B`). LRU capped at 200 entries.
+- **Cache keys**: `children-{parentId}` uses the full model ID (e.g., `Qwen/Qwen2.5-7B`). LRU capped at 500 entries.
 - **Author name stripping**: L2 displays `m.id.split("/").slice(1).join("/")` to avoid repeating the author.
 - **L1 sort selector**: Uses `#main-table > thead > tr > th` to avoid L2/L3 nested `<th>` triggering. Do NOT delegate to `#main-table thead`.
 - **Param deepening**: Only fires for the single expanded author, in batches of 4, and only for models passing current date/param filters.
