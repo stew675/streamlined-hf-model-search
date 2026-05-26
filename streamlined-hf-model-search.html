@@ -342,7 +342,17 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260525.29';
+const APP_VERSION = '260525.30';
+// Design Notes (review items addressed in v260525.30):
+// - Fix race condition in fetchTasks: now takes `gen` as parameter and checks
+//   `gen !== _fetchGeneration` at entry, in batch loop, and before `fetchedTasks.add(tag)`.
+//   Prevents stale async operations from marking tasks as "fetched" while the caller
+//   discards the results, which would leave `fetchedTasks` out of sync with `_allFetched`.
+// - Removed dead B/M pattern checks: lines 2913 and 2971 contained B/M pattern matching
+//   that could never execute because the `seen.has(candId)` check on the previous line
+//   would have already broken the loop if true, and the subsequent `if (seen.has(baseId))`
+//   (markLocalParents) or `if (!seen.has(baseId) && bm && ...` (injectBaseModels) would
+//   always be false when reaching that branch.
 // Design Notes (review items addressed in v260525.29):
 // - Fix race condition in markLocalParents: now takes `gen` as a parameter and
 //   checks `gen !== _fetchGeneration` before any state modifications. Prevents
@@ -2543,8 +2553,8 @@ function applyFilters(force, deep) {
           _trendingAdded = 0;
           const seen = new Set((_allFetched || []).map(m => m.id));
           all = [...(_allFetched || [])];
-          if (newTasks.length > 0) {
-            const fresh = await fetchTasks(newTasks);
+           if (newTasks.length > 0) {
+             const fresh = await fetchTasks(newTasks, gen);
             for (const m of fresh) {
               if (!seen.has(m.id)) { seen.add(m.id); all.push(m); }
             }
@@ -2842,12 +2852,14 @@ addKeyboardClick(document.getElementById("hide-missing-param-chip"));
 // ── Init ──
 // Fetch top models per pipeline tag (by downloads + by lastModified, merged + deduped).
 // Concurrency capped at 5 to avoid saturating the browser's connection pool.
-async function fetchTasks(tasks) {
+async function fetchTasks(tasks, gen) {
+  if (gen !== _fetchGeneration) return [];
   const status = document.getElementById("status");
   const seen = new Set();
   const allFetched = [];
   const CONCURRENCY = CONFIG.FETCH_CONCURRENCY;
   for (let start = 0; start < tasks.length; start += CONCURRENCY) {
+    if (gen !== _fetchGeneration) return [];
     const batch = tasks.slice(start, start + CONCURRENCY);
     status.textContent = `Fetching ${batch.join(", ")}… (${Math.min(start + CONCURRENCY, tasks.length)}/${tasks.length})`;
     const results = await Promise.allSettled(batch.map(async tag => {
@@ -2861,6 +2873,7 @@ async function fetchTasks(tasks) {
       status.textContent = `Fetched ${results.length - failedTasks.length}/${results.length} tasks. Failed: ${failedTasks.join(", ")}.`;
     }
     for (const r of results) {
+      if (gen !== _fetchGeneration) return [];
       if (r.status === "rejected") {
         console.warn("fetchTasks: task failed", r.reason);
         continue;
@@ -2909,8 +2922,7 @@ function markLocalParents(all, gen) {
         if (dash <= 0) break;
         name = name.substring(0, dash);
         const candId = bits[0] + '/' + name;
-        if (seen.has(candId)) { baseId = candId; break; }
-        if (name.match(/\d+\.?\d*[Bb]/) || name.match(/\d+[Mm]/)) { baseId = candId; break; }
+         if (seen.has(candId)) { baseId = candId; break; }
       }
       if (!baseId) continue;
     }
@@ -2967,8 +2979,7 @@ async function injectBaseModels(all, onBatch) {
         if (dash <= 0) break;
         name = name.substring(0, dash);
         const candId = bits[0] + '/' + name;
-        if (seen.has(candId)) { baseId = candId; break; }
-        if (name.match(/\d+\.?\d*[Bb]/) || name.match(/\d+[Mm]/)) { baseId = candId; break; }
+         if (seen.has(candId)) { baseId = candId; break; }
       }
       if (!baseId) continue;
     }
