@@ -342,7 +342,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260526.01';
+const APP_VERSION = '260526.02';
 // Design Notes (review items addressed in v260525.31):
 // - Slider tooltip alignment: date-slider From uses align-right (sits left of knob), To
 //   uses align-left (sits right of knob). Param-slider uses centered (no alignment class).
@@ -1740,7 +1740,7 @@ async function loadAuthorModels(idx, author, container) {
       `https://huggingface.co/api/models?author=${author}&sort=downloads&direction=-1&limit=${CONFIG.AUTHOR_LIMIT}&full=true&cardData=true`
     );
     const models = raw.map(normalizeModel);
-    if (!cacheAccess(author + "_models")) cacheSet(author + "_models", models);
+    cacheSet(author + "_models", models);
 
          markLocalParents(models, gen);
 
@@ -1802,6 +1802,22 @@ async function loadAuthorModels(idx, author, container) {
       if (gen !== _fetchGeneration || !container.isConnected) return;
       document.getElementById("status").textContent = "";
       const updated = filterApplied();
+      const ad = _authorData;
+      for (const a of ad) {
+        if (a.author === author) {
+          a.count = updated.length;
+          a.totalDownloads = updated.reduce((s, m) => s + m.downloads, 0);
+          a.totalLikes = updated.reduce((s, m) => s + m.likes, 0);
+          break;
+        }
+      }
+      const l1Row = document.querySelector(`.l1-row[data-author="${CSS.escape(author)}"]`);
+      if (l1Row) {
+        const cells = l1Row.querySelectorAll("td");
+        cells[1].textContent = String(updated.length);
+        cells[2].textContent = fmt(updated.reduce((s, m) => s + m.downloads, 0));
+        cells[3].textContent = fmt(updated.reduce((s, m) => s + m.likes, 0));
+      }
       const detailRow = document.getElementById(`d1-${idx}`);
       if (detailRow && detailRow.style.display !== "none") {
         renderL2(idx, author, updated, container, nonQuantBase.length, nonQuantBase);
@@ -2469,7 +2485,9 @@ async function deriveVisibleUnknowns() {
     if (!key.startsWith(PREFIX_AUTHOR)) continue;
     if (gen !== _fetchGeneration) break;
     const author = key.slice(PREFIX_AUTHOR.length);
-    const models = cacheAccess(author);
+    const l2State = RC._levelState.l2.get(author);
+    if (!l2State) continue;
+    const models = l2State.allBaseModels;
     if (!models) continue;
     const unknown = models.filter(m => m.paramB === null && !_inferredAttemptedIds.has(m.id) && modelPassesAllFilters(m));
     if (unknown.length === 0) continue;
@@ -2478,12 +2496,11 @@ async function deriveVisibleUnknowns() {
     const idx = parseInt(l1Row.dataset.l1Idx);
     const container = document.getElementById(`i1-${idx}`);
     if (!container) continue;
-    const nonQuantBase = models.filter(m2 => !m2._orphanQuant && !m2._nestedQuant);
-    const getFiltered = () => nonQuantBase.filter(m2 => modelPassesAllFilters(m2));
+    const getFiltered = () => models.filter(m2 => modelPassesAllFilters(m2));
     for (let i = 0; i < unknown.length; i += CONFIG.PARAM_BATCH_SIZE) {
       if (gen !== _fetchGeneration) return;
       const batch = unknown.slice(i, i + CONFIG.PARAM_BATCH_SIZE);
-      await Promise.all(batch.map(m => tryResolveModelParam(m, gen, idx, author, container, getFiltered, nonQuantBase.length, nonQuantBase)));
+      await Promise.all(batch.map(m => tryResolveModelParam(m, gen, idx, author, container, getFiltered, models.length, models)));
     }
   }
   if (gen === _fetchGeneration) document.getElementById("status").textContent = "";
@@ -2505,19 +2522,19 @@ function enforceFromGap(fromEl, toEl, minGap, max) {
   }
   clampRange(fromEl, toEl, minGap, max);
 }
-function enforceToGap(fromEl, toEl, minGap) {
+function enforceToGap(fromEl, toEl, minGap, max) {
   const nv = parseInt(toEl.value);
   const fv = parseInt(fromEl.value);
   if (nv <= fv + (minGap - 1)) {
     fromEl.value = String(Math.max(nv - minGap, 0));
   }
-  clampRange(fromEl, toEl, minGap, CONFIG.PARAM_SLIDER_MAX);
+  clampRange(fromEl, toEl, minGap, max);
 }
 function setupSliderEvents(from, to, minGap, max, read, updateUI, markDirty) {
   from.addEventListener("input", () => { enforceFromGap(from, to, minGap, max); read(); updateUI(); });
   from.addEventListener("change", () => { enforceFromGap(from, to, minGap, max); read(); markDirty(); });
-  to.addEventListener("input", () => { enforceToGap(from, to, minGap); read(); updateUI(); });
-  to.addEventListener("change", () => { enforceToGap(from, to, minGap); read(); markDirty(); });
+  to.addEventListener("input", () => { enforceToGap(from, to, minGap, max); read(); updateUI(); });
+  to.addEventListener("change", () => { enforceToGap(from, to, minGap, max); read(); markDirty(); });
 }
 
 // ── Date slider ──
@@ -2834,6 +2851,8 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   _injectedBaseIds.clear();
   _canonicalCache = null;
   _consecutive429s = 0;
+  _trendingAdded = 0;
+  fetchedTrending = false;
   updateRateLimitUI(false);
   RenderCoordinator._levelState.l2.clear();
   RenderCoordinator._levelState.l3.clear();
