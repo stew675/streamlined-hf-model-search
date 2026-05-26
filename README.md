@@ -110,7 +110,7 @@ By default the hidden model list is sorted by Updated date descending (most rece
 
 The popup features:
 - Sticky header ("Hidden Models Preview"), sticky column headers, and a persistent footer showing total hidden count
-- Shows every hidden model (no sample limit) — scrollable within a 300px max-height container
+- Shows every hidden model at L2 (no sample limit); L4 popup capped at 200 samples — scrollable within a 300px max-height container
 - Center-positioned over the trigger link with viewport boundary clamping
 - 200ms hover delay to prevent flicker on accidental mouse passes
 - Stays visible when hovering into the popup so links are clickable

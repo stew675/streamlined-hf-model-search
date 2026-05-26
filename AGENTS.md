@@ -37,7 +37,7 @@ Removed in v260525.21 — all callers now access `RenderCoordinator._state`, `_l
 
 ## Render Pipeline
 
-`requestRender()` (batched via `requestAnimationFrame`) → `_doFullRender()`: syncSortState → computeAuthorData → renderL1 → updateArrows → pruneExpiredExpansions → saveRestoreExpansions → refreshAllExpanded (L2→L3→L4 cascade) → [optional] deriveVisibleUnknowns.
+`requestRender()` (batched via `requestAnimationFrame`) → `_doFullRender()`: syncSortState → computeAuthorData → renderL1 → updateArrows → pruneExpiredExpansions → saveRestoreExpansions (only when `saved` non-null; typically passed by `recomputeAndRender`) → refreshAllExpanded (L2→L3→L4 cascade) → [optional] deriveVisibleUnknowns.
 
 ## Conventions
 
