@@ -128,8 +128,10 @@
     .action-btn.ready:hover { background: #2ea043; box-shadow: 0 0 12px #2ea04388; }
    a[target="_blank"]::after { content: " ↗"; font-size: 0.72em; }
    .action-btn:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
-   .filter-chip:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
-   .action-btn:disabled { pointer-events: none; opacity: 0.5; }
+  .filter-chip:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+   .filter-chip, .act-tag { padding: 0; border: none; background: none; font: inherit; cursor: pointer; color: inherit; line-height: normal; }
+   .act-tag:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+    .action-btn:disabled { pointer-events: none; opacity: 0.5; }
 
   #text-filter-row { display: flex; gap: 10px; margin: 0 0 10px; align-items: center; flex-wrap: wrap; }
   #text-filter-row input { background: #161b22; border: 1px solid #30363d; border-radius: 6px;
@@ -141,7 +143,7 @@
   #text-filter-row .fiw { position: relative; display: inline-flex; align-items: center; }
   #text-filter-row .fiw input { padding-right: 20px; }
   #text-filter-row .fic { position: absolute; right: 5px; cursor: pointer; color: #8b949e; font-size: 16px; line-height: 1;
-    user-select: none; display: none; width: 24px; height: 24px; align-items: center; justify-content: center; }
+    user-select: none; display: none; width: 24px; height: 24px; align-items: center; justify-content: center; padding: 0; border: none; background: none; }
   #text-filter-row .fic:hover { color: #f85149; }
   #text-filter-row .fic:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; border-radius: 4px; }
   #text-filter-row .fiw input:not(:placeholder-shown) + .fic { display: block; }
@@ -213,7 +215,7 @@
   .skip-link:focus { top: 8px; }
   #scope-notice { font-size: 0.75rem; color: #8b949e; padding: 6px 10px; margin: 6px 0; background: #161b22; border: 1px solid #30363d; border-radius: 6px; text-align: center; }
   #scope-notice a { color: #58a6ff; }
-  .filter-popup-trigger { cursor: help; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
+  .filter-popup-trigger { cursor: help; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; padding: 0; border: none; background: none; font: inherit; color: inherit; }
   .filter-popup-trigger:hover { color: #c9d1d9; }
   .filter-popup-trigger:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; border-radius: 2px; }
   .filter-popup { display: none; position: absolute; z-index: 1000; /* Note: isolation is intentionally NOT used — it breaks stacking context with sticky table headers, causing popups to render behind them */
@@ -221,7 +223,7 @@
     box-shadow: 0 4px 16px rgba(0,0,0,0.6); max-height: 300px; overflow-y: auto; width: 65%; min-width: 320px; }
   .filter-popup.visible { display: block; }
 .filter-popup table { width: 100%; font-size: 0.75rem; border-collapse: collapse; margin: 0; table-layout: auto !important; }
-  .filter-popup th { background: #161b22; padding: 4px 8px; font-size: 0.7rem; cursor: pointer; position: sticky !important; top: 20px; border-bottom: 1px solid #30363d; white-space: nowrap; z-index: 1; user-select: none; min-height: 24px; }
+  .filter-popup th { background: #161b22; padding: 4px 8px; font-size: 0.7rem; cursor: pointer; position: sticky; top: 20px; border-bottom: 1px solid #30363d; white-space: nowrap; z-index: 1; user-select: none; min-height: 24px; }
   .filter-popup th:hover { background: #1c2129; }
   .filter-popup td { padding: 3px 8px; border-bottom: none !important; font-size: 0.75rem; border-right: 1px solid #21262d !important; }
   .filter-popup td:last-child { border-right: none !important; }
@@ -302,13 +304,13 @@
 </div>
 <div id="sort-announce" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></div>
 <div id="button-row">
-  <span id="derived-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" tabindex="0" style="margin-right:auto; user-select:none" title="When enabled, models with unknown parameter counts will first try a Base Model regex from the model name, then search their children (2 search API calls per model) and fetch individual child model cards (up to 10 per model; stops early after 3 agreeing results) to infer the parent's parameter count.">Infer Missing Params</span>
-  <span id="hide-missing-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" tabindex="0" style="user-select:none" title="When enabled, models without a known parameter count are hidden from display.">Hide Missing Params</span>
+  <button type="button" id="derived-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" style="margin-right:auto; user-select:none" title="When enabled, models with unknown parameter counts will first try a Base Model regex from the model name, then search their children (2 search API calls per model) and fetch individual child model cards (up to 10 per model; stops early after 3 agreeing results) to infer the parent's parameter count.">Infer Missing Params</button>
+  <button type="button" id="hide-missing-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" style="user-select:none" title="When enabled, models without a known parameter count are hidden from display.">Hide Missing Params</button>
   <div id="button-center">
     <button id="get-quick-results-btn" class="action-btn" title="Fetch top models per pipeline tag (by downloads + lastModified) — no cross-author base model injection. Faster but may miss quantizations whose parent base model is from a different author.">Get Quick Results</button>
     <button id="get-deep-results-btn" class="action-btn" title="Same as Quick, plus resolve cross-author base models referenced by quantizations via individual model API calls. Slower but surfaces more quantizations.">Get Deep Results</button>
   </div>
-  <span id="clear-cache-btn" role="button" tabindex="0" title="Clears: in-memory param cache, LRU model cache, inflight fetch state, canonical dedup cache, and inference tracking. Collapses expanded sections (re-expand to reload). Preserves all filters and sliders.">Clear Cache</span>
+  <button type="button" id="clear-cache-btn" title="Clears: in-memory param cache, LRU model cache, inflight fetch state, canonical dedup cache, and inference tracking. Collapses expanded sections (re-expand to reload). Preserves all filters and sliders.">Clear Cache</button>
   <span id="api-counter-wrap" style="margin-left:auto; min-width: 100px; text-align: right;">
    <span id="api-counter" class="filter-label" tabindex="0" role="button" style="font-variant-numeric: tabular-nums;">API Requests: 0</span>
      <div class="api-counter-tooltip" role="tooltip">Anonymous API requests are rate-limited by Hugging Face (~100 req/min). Counter includes all attempts — successful, retried, and failed. When the counter glows amber, rate limiting is actively throttling requests.</div>
@@ -317,13 +319,13 @@
 </div>
 <div id="text-filter-row">
    <label for="l1-author-filter"><b>L1 Author:</b></label>
-   <span class="fiw"><input type="text" id="l1-author-filter" placeholder="All authors (pinned top)" title="Pins matching authors to the top of L1; does not hide non-matching authors." autocomplete="off"><span class="fic" data-for="l1-author-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
-   <label for="l2-model-filter"><b>L2 Model ID:</b></label>
-   <span class="fiw"><input type="text" id="l2-model-filter" placeholder="Any base model" title="Filters base models across all authors. L1 counts will update to reflect only matching models." autocomplete="off"><span class="fic" data-for="l2-model-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
-   <label for="l3-author-filter"><b>L3 Author:</b></label>
-   <span class="fiw"><input type="text" id="l3-author-filter" placeholder="Any quant author" title="Filters quant authors within already-expanded L2 sections." autocomplete="off"><span class="fic" data-for="l3-author-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
-   <label for="l4-model-filter"><b>L4 Model ID:</b></label>
-   <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" title="Filters individual quant models within already-expanded L3 sections." autocomplete="off"><span class="fic" data-for="l4-model-filter" tabindex="0" role="button" aria-label="Clear">✕</span></span>
+<span class="fiw"><input type="text" id="l1-author-filter" placeholder="All authors (pinned top)" title="Pins matching authors to the top of L1; does not hide non-matching authors." autocomplete="off"><button type="button" class="fic" data-for="l1-author-filter" aria-label="Clear">✕</button></span>
+    <label for="l2-model-filter"><b>L2 Model ID:</b></label>
+    <span class="fiw"><input type="text" id="l2-model-filter" placeholder="Any base model" title="Filters base models across all authors. L1 counts will update to reflect only matching models." autocomplete="off"><button type="button" class="fic" data-for="l2-model-filter" aria-label="Clear">✕</button></span>
+    <label for="l3-author-filter"><b>L3 Author:</b></label>
+    <span class="fiw"><input type="text" id="l3-author-filter" placeholder="Any quant author" title="Filters quant authors within already-expanded L2 sections." autocomplete="off"><button type="button" class="fic" data-for="l3-author-filter" aria-label="Clear">✕</button></span>
+    <label for="l4-model-filter"><b>L4 Model ID:</b></label>
+    <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" title="Filters individual quant models within already-expanded L3 sections." autocomplete="off"><button type="button" class="fic" data-for="l4-model-filter" aria-label="Clear">✕</button></span>
 </div>
 <div id="scope-notice">Top 500 by downloads + top 500 by recent updates per pipeline tag, plus 1000 trending models — broader coverage of popular and recently active models. Older or niche models may not appear; use <a href="https://huggingface.co/models" target="_blank" rel="noopener noreferrer" aria-label="Hugging Face Search (opens in new tab)">HF Search</a> for full coverage.</div>
 <table id="main-table" aria-label="Authors and base model counts">
@@ -342,7 +344,25 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260526.04';
+const APP_VERSION = '260526.05';
+// Design Notes (review items addressed in v260526.05):
+// - Popup positioning: positionPopupCenter now runs inside schedulePopupShow's setTimeout
+//   callback instead of synchronously on mouseenter, preventing stale getBoundingClientRect()
+//   values when user scrolls/resizes during the 150ms debounce delay. Scroll/resize listeners
+//   hide all visible popups as additional defense against misalignment.
+// - Accessibility: filter chips, task tags, clear buttons, and popup triggers converted from
+//   <span role="button"> to native <button type="button>. Provides better screen reader
+//   announcements, default :focus-visible outlines, and native Enter/Space handling without
+//   JS boilerplate. CSS resets added for button defaults (padding, border, background).
+// - fetchJson retry: removed _consecutive429s reset from network error catch block so that
+//   transient network blips during 429 backoff don't clear the amber rate-limit indicator.
+// - renderL2Empty guard: distinguishes "no data loaded yet" (cache miss, no popupSource)
+//   from "no base models match current filters" (data exists but all filtered out).
+// - CSS cleanup: removed !important from .filter-popup th sticky position to avoid z-index
+//   stacking conflicts with Chromium's sticky header implementation.
+// - Inference semaphore: _acquireInferenceSlot/_releaseInferenceSlot limit concurrent param
+//   inference to 4 slots across all expanded authors, preventing bulk expansion from creating
+//   an excessively deep rate limiter queue.
 // Design Notes (review items addressed in v260525.31):
 // - Slider tooltip alignment: date-slider From uses align-right (sits left of knob), To
 //   uses align-left (sits right of knob). Param-slider uses centered (no alignment class).
@@ -537,6 +557,18 @@ const _inferredParamIds = new Set();
 const _inferredFromNameIds = new Set();
 const _inferredAttemptedIds = new Set();
 const _deepeningParamIds = new Set();
+// Global semaphore to limit concurrent param inference across all expanded authors,
+// preventing bulk expansion from saturating the rate limiter queue.
+let _inferenceSlots = 4;
+let _inferenceQueueResolve = null;
+function _acquireInferenceSlot() {
+  if (_inferenceSlots > 0) { _inferenceSlots--; return Promise.resolve(); }
+  return new Promise(r => { _inferenceQueueResolve = r; });
+}
+function _releaseInferenceSlot() {
+  if (_inferenceQueueResolve) { const r = _inferenceQueueResolve; _inferenceQueueResolve = null; r(); }
+  else _inferenceSlots++;
+}
 let apiCalls = 0;
 let _consecutive429s = 0;
 const _rateLimitCounter = document.getElementById("api-counter");
@@ -647,8 +679,6 @@ async function fetchJson(url) {
           clearTimeout(timer);
         }
       } catch (err) {
-        _consecutive429s = 0;
-        updateRateLimitUI(false);
         if (retries < MAX_RETRIES) {
           retries++;
           const delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
@@ -958,6 +988,7 @@ function positionPopupCenter(trigger, popup) {
 function schedulePopupShow(popupEl, delay) {
   clearTimeout(_popupTimers.get(popupEl));
   _popupTimers.set(popupEl, setTimeout(() => {
+    if (popupEl._popupTrigger) positionPopupCenter(popupEl._popupTrigger, popupEl);
     popupEl.classList.add("visible");
     const saved = _popupScrollPositions.get(popupEl);
     popupEl.scrollTop = typeof saved === "number" ? saved : 0;
@@ -970,6 +1001,15 @@ function schedulePopupHide(popupEl, delay) {
     popupEl.classList.remove("visible");
   }, delay || CONFIG.DEBOUNCE_MS));
 }
+// Hide all visible popups on scroll/resize to prevent stale positioning.
+function hideAllPopups() {
+  document.querySelectorAll(".filter-popup.visible").forEach(p => {
+    _popupScrollPositions.set(p, p.scrollTop);
+    p.classList.remove("visible");
+  });
+  for (const [, timer] of _popupTimers) clearTimeout(timer);
+  _popupTimers.clear();
+}
 
 // Wires up hover events on both trigger and popup so the popup stays alive when moving between them.
 function wirePopupHover(trigger, popup, makeContent) {
@@ -977,7 +1017,6 @@ function wirePopupHover(trigger, popup, makeContent) {
   let contentReady = false;
   const show = () => {
     if (!contentReady) { makeContent(popup); contentReady = true; }
-    positionPopupCenter(trigger, popup);
     schedulePopupShow(popup);
   };
   const hide = () => schedulePopupHide(popup);
@@ -1033,21 +1072,20 @@ function syncChipSet(selector, isActiveFn) {
   });
 }
 function createFilterChip({ container, dataset, text, className, ariaPressed, onClick }) {
-  const chip = document.createElement("span");
+  const chip = document.createElement("button");
+  chip.type = "button";
   chip.className = className;
   Object.entries(dataset).forEach(([k, v]) => chip.dataset[k] = v);
   chip.textContent = text;
-  chip.tabIndex = 0;
-  chip.role = "button";
   chip.setAttribute("aria-pressed", String(ariaPressed));
   chip.addEventListener("click", onClick);
-  addKeyboardClick(chip);
   container.appendChild(chip);
   return chip;
 }
 function createTaskTag(tag, isActive) {
   const desc = TO_TAGS.find(t => t.tag === tag)?.desc || "";
-  const el = document.createElement("span");
+  const el = document.createElement("button");
+  el.type = "button";
   el.className = "act-tag" + (isActive ? " active" : "");
   el.dataset.tag = tag;
   el.textContent = tag;
@@ -1848,16 +1886,19 @@ function thHtml(c, state, level, colindex) {
 }
 
 function renderL2Empty(idx, author, container, popupSource) {
-  const allBaseModels = popupSource || cacheAccess(author) || [];
+  const cached = cacheAccess(author);
+  const hasData = (popupSource && popupSource.length > 0) || (cached && cached.length > 0);
+  const allBaseModels = popupSource || cached || [];
   RC._levelState.l2.set(author, { idx, author, models: [], allBaseModels });
   if (allBaseModels.length > 0) {
-    container.innerHTML = `<div class="detail-count" style="color:#6e7681"><span id="fp-trigger-l2-empty-${author}" class="filter-popup-trigger" tabindex="0" role="button" aria-haspopup="true">No base models match current filters</span><div id="fp-popup-l2-empty-${author}" class="filter-popup"></div></div>`;
+    container.innerHTML = `<div class="detail-count" style="color:#6e7681"><button type="button" id="fp-trigger-l2-empty-${author}" class="filter-popup-trigger" aria-haspopup="true">No base models match current filters</button><div id="fp-popup-l2-empty-${author}" class="filter-popup"></div></div>`;
     const trigger = document.getElementById(`fp-trigger-l2-empty-${author}`);
     const popup = document.getElementById(`fp-popup-l2-empty-${author}`);
     if (trigger && popup) {
       wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), allBaseModels.length)));
-      addKeyboardClick(trigger);
     }
+  } else if (!hasData) {
+    container.innerHTML = '<div class="detail-count" style="color:#6e7681">No data loaded yet.</div>';
   } else {
     container.innerHTML = '<div class="detail-count" style="color:#6e7681">No base models match current filters.</div>';
   }
@@ -1892,7 +1933,7 @@ function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
     <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none" aria-rowindex="${detailRowIdx}"><td colspan="6"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
   }).join('');
   const hidden = (totalBeforeFilter != null && totalBeforeFilter > sorted.length) ? totalBeforeFilter - sorted.length : 0;
-  html += `</tbody></table><div class="detail-count">${sorted.length} model(s)` + (hidden > 0 ? `, <span id="fp-trigger-l2-${author}" class="filter-popup-trigger" tabindex="0" role="button" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by current filters</span><div id="fp-popup-l2-${author}" class="filter-popup"></div>` : '') + `</div>`;
+  html += `</tbody></table><div class="detail-count">${sorted.length} model(s)` + (hidden > 0 ? `, <button type="button" id="fp-trigger-l2-${author}" class="filter-popup-trigger" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by current filters</button><div id="fp-popup-l2-${author}" class="filter-popup"></div>` : '') + `</div>`;
   return { html, hidden };
 }
 
@@ -1903,7 +1944,6 @@ function wireL2Popups(author, models, allBaseModels, hidden) {
   if (trigger && popup) {
     const displayedIds = new Set(models.map(m => m.id));
     wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, displayedIds, allBaseModels.length)));
-    addKeyboardClick(trigger);
   }
 }
 
@@ -2307,7 +2347,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 const hiddenL4 = quants.length - displayed.length;
   // Sanitize parentId for HTML IDs: replace / with __ to avoid invalid characters.
   const l4SafeId = `${parentId.replace(/\//g, '__')}_${author}`;
-  html += `</tbody></table><div class="detail-count">${displayed.length} model(s)` + (hiddenL4 > 0 ? `, <span id="fp-trigger-l4-${l4SafeId}" class="filter-popup-trigger" tabindex="0" role="button" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">+${hiddenL4} hidden by text filter</span><div id="fp-popup-l4-${l4SafeId}" class="filter-popup"></div>` : '') + `</div>`;
+  html += `</tbody></table><div class="detail-count">${displayed.length} model(s)` + (hiddenL4 > 0 ? `, <button type="button" id="fp-trigger-l4-${l4SafeId}" class="filter-popup-trigger" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">+${hiddenL4} hidden by text filter</button><div id="fp-popup-l4-${l4SafeId}" class="filter-popup"></div>` : '') + `</div>`;
   container.innerHTML = html;
   const l4Key = `${parentId}|${author}`;
   container.dataset.l4Key = l4Key;
@@ -2320,7 +2360,6 @@ const hiddenL4 = quants.length - displayed.length;
     if (trigger && popup) {
       const displayedIds = new Set(displayed.map(q => q.id));
       wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(quants, displayedIds, 200)));
-      addKeyboardClick(trigger);
     }
   }
 
@@ -2501,7 +2540,9 @@ async function deriveVisibleUnknowns() {
     for (let i = 0; i < unknown.length; i += CONFIG.PARAM_BATCH_SIZE) {
       if (gen !== _fetchGeneration) return;
       const batch = unknown.slice(i, i + CONFIG.PARAM_BATCH_SIZE);
-      await Promise.all(batch.map(m => tryResolveModelParam(m, gen, idx, author, container, getFiltered, models.length, models)));
+      await Promise.all(batch.map(m => _acquireInferenceSlot().then(() =>
+        tryResolveModelParam(m, gen, idx, author, container, getFiltered, models.length, models).finally(_releaseInferenceSlot)
+      )));
     }
   }
   if (gen === _fetchGeneration) document.getElementById("status").textContent = "";
@@ -2861,7 +2902,6 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   RenderCoordinator.expandedSections.clear();
   recomputeAndRenderWithoutDerive();
 });
-addKeyboardClick(document.getElementById("clear-cache-btn"));
 document.getElementById("derived-param-chip").addEventListener("click", async () => {
   _derivedParamEnabled = !_derivedParamEnabled;
   const chip = document.getElementById("derived-param-chip");
@@ -2870,7 +2910,6 @@ document.getElementById("derived-param-chip").addEventListener("click", async ()
   chip.setAttribute("aria-checked", String(_derivedParamEnabled));
   if (_derivedParamEnabled) await deriveVisibleUnknowns();
 });
-addKeyboardClick(document.getElementById("derived-param-chip"));
 document.getElementById("hide-missing-param-chip").addEventListener("click", () => {
   _hideMissingParamEnabled = !_hideMissingParamEnabled;
   const chip = document.getElementById("hide-missing-param-chip");
@@ -2882,7 +2921,6 @@ document.getElementById("hide-missing-param-chip").addEventListener("click", () 
   const saved = new Set(RC.expandedSections);
   recomputeAndRenderWithoutDerive(saved);
 });
-addKeyboardClick(document.getElementById("hide-missing-param-chip"));
 
 // ── Init ──
 // Fetch top models per pipeline tag (by downloads + by lastModified, merged + deduped).
@@ -3090,6 +3128,8 @@ function _initApp() {
   });
   sliderResize.observe(document.getElementById("date-slider"));
   sliderResize.observe(document.getElementById("param-slider"));
+  window.addEventListener("scroll", hideAllPopups, { passive: true });
+  window.addEventListener("resize", debounce(hideAllPopups, 100), { passive: true });
   reseedActiveTaskFilters();
   syncFilterChips();
   document.getElementById("l1-author-filter").addEventListener("input", debouncedTextFilter);
@@ -3101,11 +3141,6 @@ function _initApp() {
     if (!fic) return;
     const input = document.getElementById(fic.dataset.for);
     if (input) { input.value = ""; input.dispatchEvent(new Event("input", { bubbles: true })); input.focus(); }
-  });
-  document.getElementById("text-filter-row").addEventListener("keydown", e => {
-    const fic = e.target.closest(".fic");
-    if (!fic) return;
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fic.click(); }
   });
   markDirty();
   document.getElementById("api-counter").textContent = "API Requests: 0";
