@@ -269,12 +269,12 @@
     <div class="ds-track-fill" id="ps-fill"></div>
     <input type="range" id="ps-from" min="0" max="220" value="100" step="1" aria-label="Parameter size start" aria-valuemin="0" aria-valuemax="220" aria-valuenow="100" aria-describedby="ps-slider-desc ps-tooltip-from">
     <input type="range" id="ps-to" min="0" max="220" value="130" step="1" aria-label="Parameter size end" aria-valuemin="0" aria-valuemax="220" aria-valuenow="130" aria-describedby="ps-slider-desc ps-tooltip-to">
-    <div class="ps-tooltip" id="ps-tooltip-from" style="left:0%" aria-hidden="true">10B</div>
-    <div class="ps-tooltip" id="ps-tooltip-to" style="left:100%" aria-hidden="true">40B</div>
+    <div class="ps-tooltip" id="ps-tooltip-from" style="left:0%" aria-hidden="true"></div>
+    <div class="ps-tooltip" id="ps-tooltip-to" style="left:100%" aria-hidden="true"></div>
   </div>
   <div class="ds-labels">
-    <span><span class="ds-l">From:</span> <span class="ds-v" id="ps-from-label">750M</span></span>
-    <span><span class="ds-l">To:</span> <span class="ds-v" id="ps-to-label">&gt;1T</span></span>
+    <span><span class="ds-l">From:</span> <span class="ds-v" id="ps-from-label"></span></span>
+    <span><span class="ds-l">To:</span> <span class="ds-v" id="ps-to-label"></span></span>
   </div>
   <div class="ps-legend" id="ps-legend"></div>
 </div>
@@ -342,7 +342,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260525.31';
+const APP_VERSION = '260526.01';
 // Design Notes (review items addressed in v260525.31):
 // - Slider tooltip alignment: date-slider From uses align-right (sits left of knob), To
 //   uses align-left (sits right of knob). Param-slider uses centered (no alignment class).
@@ -780,7 +780,7 @@ function isNestedQuant(m, knownIds, allFetchedMap) {
   if (!knownIds.has(baseId)) return false;
   // Only suppress if the parent is itself a non-base (quant/derivative).
   // Same-author quants whose parent is a true base model should appear at L2.
-  const parent = allFetchedMap.get ? allFetchedMap.get(baseId) : undefined;
+  const parent = allFetchedMap.get(baseId);
   return parent ? !isBase(parent) : false;
 }
 
