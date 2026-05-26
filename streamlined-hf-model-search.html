@@ -251,7 +251,7 @@
     <span id="ds-slider-desc" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)">Drag left knob for start date, right knob for end date. Knobs cannot cross.</span>
     <div class="ds-track-bg"></div>
     <div class="ds-track-fill" id="ds-fill"></div>
-    <input type="range" id="ds-from" min="0" max="80" value="68" step="1" aria-label="Date range start" aria-valuemin="0" aria-valuemax="80" aria-valuenow="68" aria-describedby="ds-slider-desc ds-tooltip-from">
+    <input type="range" id="ds-from" min="0" max="80" value="79" step="1" aria-label="Date range start" aria-valuemin="0" aria-valuemax="80" aria-valuenow="79" aria-describedby="ds-slider-desc ds-tooltip-from">
     <input type="range" id="ds-to" min="0" max="80" value="80" step="1" aria-label="Date range end" aria-valuemin="0" aria-valuemax="80" aria-valuenow="80" aria-describedby="ds-slider-desc ds-tooltip-to">
     <div class="ps-tooltip align-right" id="ds-tooltip-from" aria-hidden="true"></div>
     <div class="ps-tooltip align-left" id="ds-tooltip-to" aria-hidden="true">Now</div>
@@ -342,7 +342,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260526.03';
+const APP_VERSION = '260526.04';
 // Design Notes (review items addressed in v260525.31):
 // - Slider tooltip alignment: date-slider From uses align-right (sits left of knob), To
 //   uses align-left (sits right of knob). Param-slider uses centered (no alignment class).
@@ -494,6 +494,7 @@ const CONFIG = {
   DAYS_PER_STEP: 14,
   PARAM_BATCH_SIZE: 4,
   DERIVED_BATCH_SIZE: 10,
+  TRENDING_LIMIT: 1000,
   INJECTION_BATCH_SIZE: 8,  // Intentionally exceeds FETCH_CONCURRENCY (5): injection fetches are targeted individual model cards, not broad search queries, so a slightly higher batch size is safe and completes faster.
   PARAM_MIN_GAP: 5,
   AUTHOR_LIMIT: 1000,
@@ -711,7 +712,7 @@ async function fetchUntaggedModels() {
 }
 
 async function fetchTrendingModels() {
-  return fetchJson(`https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=1000&full=true&cardData=true`);
+  return fetchJson(`https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=${CONFIG.TRENDING_LIMIT}&full=true&cardData=true`);
 }
 
 function getBaseModelId(cd) {
@@ -967,7 +968,7 @@ function schedulePopupHide(popupEl, delay) {
   _popupTimers.set(popupEl, setTimeout(() => {
     _popupScrollPositions.set(popupEl, popupEl.scrollTop);
     popupEl.classList.remove("visible");
-  }, delay || 200));
+  }, delay || CONFIG.DEBOUNCE_MS));
 }
 
 // Wires up hover events on both trigger and popup so the popup stays alive when moving between them.
@@ -2120,7 +2121,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
 async function resolveParamFromChildren(modelId) {
   const bits = modelId.split('/');
   const modelName = bits[1];
-  const lim = Math.min(CONFIG.CHILD_LIMIT, 20);
+  const lim = CONFIG.DERIVED_BATCH_SIZE;
   const nameUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${lim}&full=true&cardData=true`;
   const idUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(modelId)}&sort=downloads&direction=-1&limit=${lim}&full=true&cardData=true`;
   const [nameRes, idRes] = await Promise.all([
