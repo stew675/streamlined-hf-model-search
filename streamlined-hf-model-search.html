@@ -344,7 +344,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260526.05';
+const APP_VERSION = '260526.06';
 // Design Notes (review items addressed in v260526.05):
 // - Popup positioning: positionPopupCenter now runs inside schedulePopupShow's setTimeout
 //   callback instead of synchronously on mouseenter, preventing stale getBoundingClientRect()
@@ -1109,8 +1109,9 @@ function handleSortClick(th, level, sortKey, defaultKey, refreshAfter, renderFn)
   if (refreshAfter) refreshAllExpanded();
 }
 
+// 2010-01-01 predates HuggingFace's creation so it is effectively "anytime"
 function sliderValueToDate(val) {
-  if (val === 0) return new Date("2020-01-01");
+  if (val === 0) return new Date("2010-01-01");
   if (val === CONFIG.DATE_SLIDER_MAX) return new Date();
   const d = new Date();
   d.setDate(d.getDate() - (CONFIG.DATE_SLIDER_MAX - val) * CONFIG.DAYS_PER_STEP);
