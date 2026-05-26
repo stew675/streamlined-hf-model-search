@@ -342,7 +342,19 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260525.30';
+const APP_VERSION = '260525.31';
+// Design Notes (review items addressed in v260525.31):
+// - Slider tooltip alignment: date-slider From uses align-right (sits left of knob), To
+//   uses align-left (sits right of knob). Param-slider uses centered (no alignment class).
+//   Fixed per-knob alignment prevents tooltip text from overlapping/mashing together when
+//   knobs are close — dynamic alignment based on position would flip them inward, merging
+//   the text. The fixed offset is intentional; tooltips are hidden entirely on narrow
+//   screens (≤600px CSS media query) where overlap risk is highest.
+// - Expansion tracking: refreshAllExpanded() uses DOM indices (data-l1-idx, data-l2-idx)
+//   to find detail rows. This is safe in the synchronous render pipeline because indices
+//   are always read from the current DOM state after re-render. If rendering is refactored
+//   to async partial updates, replace index-based IDs (d1-${idx}) with stable identifiers
+//   (data-author, data-model) to avoid stale index -> wrong element lookups.
 // Design Notes (review items addressed in v260525.30):
 // - Fix race condition in fetchTasks: now takes `gen` as parameter and checks
 //   `gen !== _fetchGeneration` at entry, in batch loop, and before `fetchedTasks.add(tag)`.
@@ -936,6 +948,9 @@ function positionPopupCenter(trigger, popup) {
   const w = popup._cachedWidth;
   let left = (tRect.left - pRect.left) + (tRect.width / 2) - (w / 2);
   left = Math.max(5, Math.min(left, pRect.width - w - 5));
+  const vRect = document.documentElement.getBoundingClientRect();
+  const popupRight = pRect.left + left + w + 5;
+  if (popupRight > vRect.width) left -= (popupRight - vRect.width);
   popup.style.bottom = 'calc(100% + 6px)';
   popup.style.left = left + 'px';
 }
@@ -2816,15 +2831,15 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   _inferredFromNameIds.clear();
   _inferredAttemptedIds.clear();
   _deepeningParamIds.clear();
-   _injectedBaseIds.clear();
-_canonicalCache = null;
-   _consecutive429s = 0;
-   updateRateLimitUI(false);
-   RenderCoordinator._levelState.l2.clear();
-   RenderCoordinator._levelState.l3.clear();
-   RenderCoordinator._levelState.l4.clear();
-   RenderCoordinator.expandedSections.clear();
-   recomputeAndRenderWithoutDerive();
+  _injectedBaseIds.clear();
+  _canonicalCache = null;
+  _consecutive429s = 0;
+  updateRateLimitUI(false);
+  RenderCoordinator._levelState.l2.clear();
+  RenderCoordinator._levelState.l3.clear();
+  RenderCoordinator._levelState.l4.clear();
+  RenderCoordinator.expandedSections.clear();
+  recomputeAndRenderWithoutDerive();
 });
 addKeyboardClick(document.getElementById("clear-cache-btn"));
 document.getElementById("derived-param-chip").addEventListener("click", async () => {
@@ -3048,7 +3063,11 @@ function _initApp() {
   buildDateSlider();
   buildParamSlider();
   buildParamLegend();
-  const sliderResize = new ResizeObserver(() => { updateDateUI(); updateParamUI(); });
+  let _resizeTimer;
+  const sliderResize = new ResizeObserver(() => {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(() => { updateDateUI(); updateParamUI(); }, 50);
+  });
   sliderResize.observe(document.getElementById("date-slider"));
   sliderResize.observe(document.getElementById("param-slider"));
   reseedActiveTaskFilters();
