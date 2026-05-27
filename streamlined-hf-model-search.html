@@ -345,7 +345,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260526.09';
+const APP_VERSION = '260527.01';
 // Design Notes (review items addressed in v260526.05):
 // - Popup positioning: positionPopupCenter now runs inside schedulePopupShow's setTimeout
 //   callback instead of synchronously on mouseenter, preventing stale getBoundingClientRect()
@@ -1564,7 +1564,7 @@ function applyBarLogic(option, options, activeSet) {
 
 function sortCoerce(v, k) {
   if (["downloads", "likes", "totalDownloads", "totalLikes", "count", "paramB"].includes(k)) return Number(v);
-  if (["created_at", "updated_at", "lastModified"].includes(k)) { const t = new Date(v || 0).getTime(); return t === t ? t : Infinity; }
+  if (k === "created_at" || k === "updated_at" || k.includes("Modified")) { const t = new Date(v || 0).getTime(); return t === t ? t : Infinity; }
   return String(v || "").toLowerCase();
 }
 function sortRows(rows, key, asc, subKey) {
@@ -2154,20 +2154,25 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
     groups[c.author].push(c);
   });
 
-  const groupEntries = Object.entries(groups).map(([author, quants]) => ({
-    author,
-    count: quants.length,
-    totalDownloads: quants.reduce((s, q) => s + q.downloads, 0),
-    quants
-  })).filter(g => { const tf = RC._state.textFilters.l3Author; return !tf || g.author.toLowerCase().includes(tf.toLowerCase()); });
+  const groupEntries = Object.entries(groups).map(([author, quants]) => {
+    const maxLastModified = quants.reduce((max, q) => (!max || q.lastModified > max) ? q.lastModified : max, null);
+    return {
+      author,
+      count: quants.length,
+      totalDownloads: quants.reduce((s, q) => s + q.downloads, 0),
+      maxLastModified,
+      quants
+    };
+  }).filter(g => { const tf = RC._state.textFilters.l3Author; return !tf || g.author.toLowerCase().includes(tf.toLowerCase()); });
 
   const state = RC.getDetailSort(`l3-${parentId}`) || { key: "totalDownloads", asc: false };
   const sorted = sortRows(groupEntries, state.key, state.asc, state.key === "author" ? undefined : "author");
 
   const cols = [
     { key: "author", label: "Quant Author" },
+    { key: "totalDownloads", label: "Downloads", cls: "right", width: 120 },
     { key: "count", label: "Models", cls: "right", width: 75 },
-    { key: "totalDownloads", label: "Downloads", cls: "right", width: 120 }
+    { key: "maxLastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header", width: 125 }
   ];
 
   const parentName = parentId.split("/").slice(1).join("/");
@@ -2182,10 +2187,11 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
     const detailRowIdx = rowIdx + 1;
     return `<tr class="l3-row" data-l3-l2="${l2Idx}" data-l3-model-idx="${modelIdx}" data-l3-parent="${escapeHtml(parentId)}" data-l3-idx="${gIdx}" data-l3-author="${escapeHtml(g.author)}" aria-rowindex="${rowIdx}">
       <td aria-colindex="1"><button type="button" class="toggle" id="t3-${l2Idx}-${modelIdx}-${gIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(g.author)} quants">▶</button><a href="https://huggingface.co/${escapeHtml(g.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(g.author)}</a></td>
-      <td class="models-cell" aria-colindex="2">${g.count}</td>
-      <td class="right" aria-colindex="3">${fmt(g.totalDownloads)}</td>
+      <td class="right" aria-colindex="2">${fmt(g.totalDownloads)}</td>
+      <td class="models-cell" aria-colindex="3">${g.count}</td>
+      <td class="updated-cell" aria-colindex="4">${fmtDate(g.maxLastModified)}</td>
     </tr>
-    <tr class="detail-row" id="d3-${l2Idx}-${modelIdx}-${gIdx}" style="display:none" aria-rowindex="${detailRowIdx}"><td colspan="3" aria-colindex="1"><div class="detail-inner" id="i3-${l2Idx}-${modelIdx}-${gIdx}"></div></td></tr>`;
+    <tr class="detail-row" id="d3-${l2Idx}-${modelIdx}-${gIdx}" style="display:none" aria-rowindex="${detailRowIdx}"><td colspan="4" aria-colindex="1"><div class="detail-inner" id="i3-${l2Idx}-${modelIdx}-${gIdx}"></div></td></tr>`;
   }).join('');
   html += `</tbody></table>`;
   html += `<div class="detail-count">${filtered.length} child model(s) from ${groupEntries.length} author(s)${filtered.length !== children.length ? ` (filtered from ${children.length})` : ''}</div>`;
