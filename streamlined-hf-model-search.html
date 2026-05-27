@@ -91,8 +91,10 @@
 
   .deepening-param { color: #58a6ff; cursor: help; border-bottom: 1px dotted #58a6ff66; }
   .no-param { color: #f85149; cursor: help; }
+  .no-param-maybe { color: #d47722; cursor: help; border-bottom: 1px dotted #d4772266; }
   .derived-param { color: #c084fc; cursor: help; border-bottom: 1px dotted #c084fc66; }
   .name-infer-param { color: #e3b341; cursor: help; border-bottom: 1px dotted #d2992266; }
+  .metadata-param { color: #7ecf7e; cursor: help; border-bottom: 1px dotted #7ecf7e66; }
   .likes-icon { color: #f85149; margin-left: 2px; }
 
  /* Filter bar */
@@ -343,7 +345,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260526.08';
+const APP_VERSION = '260526.09';
 // Design Notes (review items addressed in v260526.05):
 // - Popup positioning: positionPopupCenter now runs inside schedulePopupShow's setTimeout
 //   callback instead of synchronously on mouseenter, preventing stale getBoundingClientRect()
@@ -1163,13 +1165,17 @@ function getParamCount(m) {
   else if (m.gguf && m.gguf.total != null) result = m.gguf.total / 1e9;
   else {
     result = extractParamFromId(m.id);
+    if (result !== null) _inferredFromNameIds.add(m.id);
   }
   _paramCache.set(m.id, result);
   return result;
 }
 function paramBadgeHtml(m) {
   if (m.paramB == null) {
-    return '<span class="no-param" title="No resolvable parameter count data found">—</span>';
+    if (_derivedParamEnabled && _inferredAttemptedIds.has(m.id)) {
+      return '<span class="no-param" title="Infer Missing Params attempted but could not resolve">—</span>';
+    }
+    return '<span class="no-param-maybe" title="No parameter count — enable Infer Missing Params to attempt resolution">—</span>';
   }
   const label = paramValueToLabel(m.paramB);
   if (_deepeningParamIds.has(m.id)) {
@@ -1179,9 +1185,9 @@ function paramBadgeHtml(m) {
     return `<span class="name-infer-param" title="Inferred from model name pattern">${label}</span>`;
   }
   if (_inferredParamIds.has(m.id)) {
-    return `<span class="derived-param" title="Derived from parent or children metadata">${label}</span>`;
+    return `<span class="derived-param" title="Inferred from child model names or data">${label}</span>`;
   }
-  return label;
+  return `<span class="metadata-param" title="Resolved from model metadata">${label}</span>`;
 }
 // Piecewise-linear mapping: 7 segments covering 0..1000B params on a 220-position slider.
 // Dense at low end (0.025B/step up to 1B), coarser above. Chosen over continuous
@@ -2055,12 +2061,17 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
         const cached = _paramCache.get(parentId);
         if (cached === undefined || cached === null) {
           _paramCache.set(parentId, maxChildParam);
+          _inferredParamIds.add(parentId);
           const pauthor = parentId.split("/")[0];
           const st = RC._levelState.l2.get(pauthor);
           if (st) {
             const pm = st.models.find(m => m.id === parentId);
             if (pm && pm.paramB == null) pm.paramB = maxChildParam;
+            const pam = st.allBaseModels.find(m => m.id === parentId);
+            if (pam && pam.paramB == null) pam.paramB = maxChildParam;
           }
+          const af = _allFetched && _allFetched.find(m => m.id === parentId);
+          if (af && af.paramB == null) af.paramB = maxChildParam;
         }
       }
 
@@ -2444,6 +2455,7 @@ async function tryResolveModelParam(m, gen, idx, author, container, getFiltered,
 async function deriveVisibleUnknowns() {
   if (!_derivedParamEnabled) return;
   const gen = _fetchGeneration;
+  let processedAny = false;
   for (const key of RenderCoordinator.expandedSections) {
     if (!key.startsWith(PREFIX_AUTHOR)) continue;
     if (gen !== _fetchGeneration) break;
@@ -2454,6 +2466,7 @@ async function deriveVisibleUnknowns() {
     if (!models) continue;
     const unknown = models.filter(m => m.paramB === null && !_inferredAttemptedIds.has(m.id) && modelPassesAllFilters(m));
     if (unknown.length === 0) continue;
+    processedAny = true;
     const l1Row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
     if (!l1Row) continue;
     const idx = parseInt(l1Row.dataset.l1Idx);
@@ -2467,6 +2480,13 @@ async function deriveVisibleUnknowns() {
         tryResolveModelParam(m, gen, idx, author, container, getFiltered, models.length, models).finally(_releaseInferenceSlot)
       )));
     }
+  }
+  if (gen !== _fetchGeneration) return;
+  // Re-render so models that failed resolution (no success-triggered renderL2) get
+  // updated badges — attempted-but-failed → red, leaving default → orange.
+  if (processedAny) {
+    const saved = new Set(RC.expandedSections);
+    recomputeAndRenderWithoutDerive(saved);
   }
   if (gen === _fetchGeneration) document.getElementById("status").textContent = "";
 }
