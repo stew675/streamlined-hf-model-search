@@ -30,7 +30,7 @@
   .detail-inner table th[data-level="2"] { top: 36px; z-index: 90; }
   .detail-inner table th[data-level="3"] { top: 64px; z-index: 80; }
   .detail-inner table th[data-level="4"] { top: 94px; z-index: 70; }
-  th[tabindex="0"]:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; outline-offset: -2px; }
+  th[tabindex="0"]:focus-visible { outline: 2px solid #58a6ff; outline-offset: -2px; }
    tr > th:not(:last-child), tr > td:not(:last-child) { border-right: 1px solid #21262d; }
   th:hover { background: #1c2129; }
   th.sorted { background: #1c2129; border-bottom-color: #58a6ff; }
@@ -94,7 +94,6 @@
   .derived-param { color: #c084fc; cursor: help; border-bottom: 1px dotted #c084fc66; }
   .name-infer-param { color: #e3b341; cursor: help; border-bottom: 1px dotted #d2992266; }
   .likes-icon { color: #f85149; margin-left: 2px; }
-  .cell-flex { display: flex; align-items: center; }
 
  /* Filter bar */
   #task-bars { display: flex; flex-wrap: wrap; gap: 20px; margin: 8px 0 12px; align-items: center; }
@@ -310,7 +309,7 @@
     <button id="get-quick-results-btn" class="action-btn" title="Fetch top models per pipeline tag (by downloads + lastModified) — no cross-author base model injection. Faster but may miss quantizations whose parent base model is from a different author.">Get Quick Results</button>
     <button id="get-deep-results-btn" class="action-btn" title="Same as Quick, plus resolve cross-author base models referenced by quantizations via individual model API calls. Slower but surfaces more quantizations.">Get Deep Results</button>
   </div>
-  <button type="button" id="clear-cache-btn" title="Clears: in-memory param cache, LRU model cache, inflight fetch state, canonical dedup cache, and inference tracking. Collapses expanded sections (re-expand to reload). Preserves all filters and sliders.">Clear Cache</button>
+  <button type="button" id="clear-cache-btn" title="Clears: in-memory param cache, LRU model cache, inflight fetch state, canonical dedup cache, and inference tracking. Collapses expanded sections (re-expand to reload). Preserves all filters and sliders.">Clear Cache</button><span id="clear-cache-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></span>
   <span id="api-counter-wrap" style="margin-left:auto; min-width: 100px; text-align: right;">
    <span id="api-counter" class="filter-label" tabindex="0" role="button" style="font-variant-numeric: tabular-nums;">API Requests: 0</span>
      <div class="api-counter-tooltip" role="tooltip">Anonymous API requests are rate-limited by Hugging Face (~100 req/min). Counter includes all attempts — successful, retried, and failed. When the counter glows amber, rate limiting is actively throttling requests.</div>
@@ -344,7 +343,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260526.06';
+const APP_VERSION = '260526.08';
 // Design Notes (review items addressed in v260526.05):
 // - Popup positioning: positionPopupCenter now runs inside schedulePopupShow's setTimeout
 //   callback instead of synchronously on mouseenter, preventing stale getBoundingClientRect()
@@ -560,13 +559,13 @@ const _deepeningParamIds = new Set();
 // Global semaphore to limit concurrent param inference across all expanded authors,
 // preventing bulk expansion from saturating the rate limiter queue.
 let _inferenceSlots = 4;
-let _inferenceQueueResolve = null;
+const _inferenceQueue = [];
 function _acquireInferenceSlot() {
   if (_inferenceSlots > 0) { _inferenceSlots--; return Promise.resolve(); }
-  return new Promise(r => { _inferenceQueueResolve = r; });
+  return new Promise(r => { _inferenceQueue.push(r); });
 }
 function _releaseInferenceSlot() {
-  if (_inferenceQueueResolve) { const r = _inferenceQueueResolve; _inferenceQueueResolve = null; r(); }
+  if (_inferenceQueue.length > 0) { const r = _inferenceQueue.shift(); r(); }
   else _inferenceSlots++;
 }
 let apiCalls = 0;
@@ -1028,11 +1027,6 @@ function wirePopupHover(trigger, popup, makeContent) {
 }
 
 // ── Extraction Helpers ──
-function addKeyboardClick(el) {
-  el.addEventListener("keydown", e => {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.click(); }
-  });
-}
 function strictNameMatch(candidateId, modelName) {
   let name = candidateId.split("/").slice(1).join("/");
   do {
@@ -1345,80 +1339,12 @@ const RenderCoordinator = {
     }
   },
 
-  setDetailSort(levelKey, sortKey) {
-    const defaults = { "l2": "downloads", "l3": "totalDownloads", "l4": "downloads" };
-    const prefix = levelKey.split("-")[0];
-    const st = this._state.detailSort[levelKey] || { key: defaults[prefix] || "downloads", asc: false };
-    if (st.key === sortKey) {
-      st.asc = !st.asc;
-    } else {
-      st.key = sortKey;
-      st.asc = false;
-    }
-    this._state.detailSort[levelKey] = st;
-  },
-
   getDetailSort(levelKey) {
     return this._state.detailSort[levelKey];
   },
 
-  toggleExpanded(key) {
-    if (this._state.expandedSections.has(key)) {
-      this._state.expandedSections.delete(key);
-      this._pruneDescendantKeys(key);
-    } else {
-      this._state.expandedSections.add(key);
-    }
-  },
-
-  hasExpanded(key) {
-    return this._state.expandedSections.has(key);
-  },
-
   getExpandedList() {
     return [...this._state.expandedSections];
-  },
-
-  clearExpanded() {
-    this._state.expandedSections.clear();
-  },
-
-  _pruneDescendantKeys(key) {
-    if (key.startsWith(PREFIX_AUTHOR)) {
-      const author = key.slice(PREFIX_AUTHOR.length);
-      for (const k of [...this._state.expandedSections]) {
-        if (k.startsWith(PREFIX_MODEL + author + "/") || k.startsWith(PREFIX_GROUP + author + "/")) {
-          this._state.expandedSections.delete(k);
-        }
-      }
-    } else if (key.startsWith(PREFIX_MODEL)) {
-      const modelId = key.slice(PREFIX_MODEL.length);
-      for (const k of [...this._state.expandedSections]) {
-        if (k.startsWith(PREFIX_GROUP + modelId + "|")) {
-          this._state.expandedSections.delete(k);
-        }
-      }
-    }
-  },
-
-  setTextFilter(level, value) {
-    this._state.textFilters[level] = value.trim();
-  },
-
-  getTextFilter(level) {
-    return this._state.textFilters[level];
-  },
-
-  setLevelState(level, key, value) {
-    this._levelState[level].set(key, value);
-  },
-
-  getLevelState(level, key) {
-    return this._levelState[level].get(key);
-  },
-
-  hasLevelState(level, key) {
-    return this._levelState[level].has(key);
   },
 
   renderL1: null,
@@ -1426,10 +1352,6 @@ const RenderCoordinator = {
   pruneExpiredExpansions: null,
   saveRestoreExpansions: null,
   refreshAllExpanded: null,
-
-  refreshExpanded() {
-    this.refreshAllExpanded();
-  },
 
   get sortKey() { return this._state.l1Sort.key; },
   get sortAsc() { return this._state.l1Sort.asc; },
@@ -1842,8 +1764,8 @@ async function loadAuthorModels(idx, author, container) {
       if (gen !== _fetchGeneration || !container.isConnected) return;
       document.getElementById("status").textContent = "";
       const updated = filterApplied();
-      const ad = _authorData;
-      for (const a of ad) {
+      const authorDataSnap = _authorData;
+      for (const a of authorDataSnap) {
         if (a.author === author) {
           a.count = updated.length;
           a.totalDownloads = updated.reduce((s, m) => s + m.downloads, 0);
@@ -1854,7 +1776,7 @@ async function loadAuthorModels(idx, author, container) {
       const l1Row = document.querySelector(`.l1-row[data-author="${CSS.escape(author)}"]`);
       if (l1Row) {
         const cells = l1Row.querySelectorAll("td");
-        cells[1].textContent = String(updated.length);
+        cells[1].textContent = updated.length;
         cells[2].textContent = fmt(updated.reduce((s, m) => s + m.downloads, 0));
         cells[3].textContent = fmt(updated.reduce((s, m) => s + m.likes, 0));
       }
@@ -2345,7 +2267,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
     </tr>`;
   }).join('');
 
-const hiddenL4 = quants.length - displayed.length;
+  const hiddenL4 = quants.length - displayed.length;
   // Sanitize parentId for HTML IDs: replace / with __ to avoid invalid characters.
   const l4SafeId = `${parentId.replace(/\//g, '__')}_${author}`;
   html += `</tbody></table><div class="detail-count">${displayed.length} model(s)` + (hiddenL4 > 0 ? `, <button type="button" id="fp-trigger-l4-${l4SafeId}" class="filter-popup-trigger" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">+${hiddenL4} hidden by text filter</button><div id="fp-popup-l4-${l4SafeId}" class="filter-popup"></div>` : '') + `</div>`;
@@ -2879,7 +2801,9 @@ document.getElementById("get-deep-results-btn").addEventListener("click", () => 
 document.getElementById("clear-cache-btn").addEventListener("click", () => {
   _fetchGeneration++;
   const el = document.getElementById("clear-cache-btn");
+  const ann = document.getElementById("clear-cache-announce");
   el.textContent = "Cleared!";
+  ann.textContent = "Clear Cache completed";
   setTimeout(() => { el.textContent = "Clear Cache"; }, 1500);
   cache.clear();
   _paramCache.clear();
