@@ -93,7 +93,7 @@
   .no-param { color: #f85149; cursor: help; }
   .no-param-maybe { color: #d47722; cursor: help; border-bottom: 1px dotted #d4772266; }
   .derived-param { color: #c084fc; cursor: help; border-bottom: 1px dotted #c084fc66; }
-  .name-infer-param { color: #e3b341; cursor: help; border-bottom: 1px dotted #d2992266; }
+  .name-infer-param { color: #58a6ff; cursor: help; border-bottom: 1px dotted #58a6ff66; }
   .metadata-param { color: #7ecf7e; cursor: help; border-bottom: 1px dotted #7ecf7e66; }
   .likes-icon { color: #f85149; margin-left: 2px; }
 
@@ -345,7 +345,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260527.01';
+const APP_VERSION = '260527.03';
 // Design Notes (review items addressed in v260526.05):
 // - Popup positioning: positionPopupCenter now runs inside schedulePopupShow's setTimeout
 //   callback instead of synchronously on mouseenter, preventing stale getBoundingClientRect()
@@ -1654,15 +1654,13 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
     await Promise.all(batch.map(async (m) => {
       try {
         const full = await fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`);
-        const idLower = (m.id || "").toLowerCase();
-        const isQuant = RE_Q_EXISTS.test(idLower);
         let p = null;
-        if (isQuant) {
-          p = extractParamFromId(m.id);
-        }
-        if (p === null && full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
+        if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
         if (p === null && full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
-        if (p !== null) { m.paramB = p; _paramCache.set(m.id, p); _deepeningParamIds.add(m.id); }
+        if (p !== null) {
+          m.paramB = p;
+          _paramCache.set(m.id, p);
+        }
       } catch (e) {
         console.warn("Failed to fetch param for", m.id, e);
       }
