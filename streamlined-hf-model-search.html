@@ -345,7 +345,11 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260528.02';
+const APP_VERSION = '260528.03';
+// Design Notes (review items addressed in v260528.03):
+// - API Request Manager optimizations: removed redundant polling timeout from in-flight max
+//   branch (completions already call _dequeueNext), eliminated dead generation check with no
+//   async gap, and fixed Clear Cache promise leak by rejecting all queued items before truncation.
 // Design Notes (review items addressed in v260526.05):
 // - Popup positioning: positionPopupCenter now runs inside schedulePopupShow's setTimeout
 //   callback instead of synchronously on mouseenter, preventing stale getBoundingClientRect()
@@ -651,14 +655,13 @@ function _scheduleDequeue() {
   setTimeout(_dequeueNext, 0);
 }
 
-// Dequeues the next work item from the queue and dispatches it. Recursively calls itself
-// after completion to keep the pipeline flowing. Gated by in-flight count and time window.
+// Dequeues the next work item from the queue and dispatches it. Gated by in-flight count
+// and time window. When in-flight is maxed, relies on completion callbacks to re-enter —
+// no polling timeout needed since every path through _dispatchFetchWithRetry calls back.
 function _dequeueNext() {
   if (_workQueue.length === 0) { _dequeueScheduled = false; return; }
-  if (_inflightCount >= CONFIG.INFLIGHT_MAX) {
-    setTimeout(_dequeueNext, CONFIG.RATE_WINDOW);
-    return;
-  }
+  if (_inflightCount >= CONFIG.INFLIGHT_MAX) return; // completions will re-enter
+
   const now = Date.now();
   const cutoff = now - CONFIG.RATE_WINDOW;
   while (_apiTimestamps.length > 0 && _apiTimestamps[0] < cutoff) {
@@ -673,16 +676,10 @@ function _dequeueNext() {
   // Both gates pass — pop and dispatch.
   const item = _workQueue.shift();
   if (!item) { _dequeueScheduled = false; return; }
-  const gen = _fetchGeneration;
-  if (gen !== _fetchGeneration) {
-    item.reject(new Error("stale generation"));
-    _dequeueNext();
-    return;
-  }
   _apiTimestamps.push(Date.now());
   _inflightCount++;
 
-  _dispatchFetchWithRetry(item, gen, 0);
+  _dispatchFetchWithRetry(item, _fetchGeneration, 0);
 }
 
 // Executes the HTTP fetch with retry logic. On success/failure resolves/rejects the
@@ -2938,6 +2935,7 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   _paramCache.clear();
   _inflightChildren.clear();
   _inflightFetches.clear();
+  for (const item of _workQueue) { item.reject(new Error("stale generation")); }
   _workQueue.length = 0;
   _inflightCount = 0;
   _dequeueScheduled = false;
