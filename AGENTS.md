@@ -10,42 +10,7 @@ When modifying this file, write the new content to a temporary file (e.g. `AGENT
 
 ## DESIGN-LOG.md — Usage for Coding Agents
 
-When making changes to the source code, read `DESIGN-LOG.md` first if your change touches any of: popup behavior, CONFIG values, queue/rate-limiting logic, generation guards, or render pipeline. It contains versioned changelog entries and architecture decisions that explain *why* things work the way they do — preventing you from "fixing" intentional design choices (e.g., rejecting `queueMicrotask` for the queue scheduler, keeping L2/L3/L4 render functions separate). When your change introduces a new design decision or resolves a code review finding, append an entry to DESIGN-LOG.md rather than adding inline comments to the source.
-
-## Data Flow
-
-1. **Init** (Get Results click): Resolve pipeline tags from From/To bars → fire each request independently through queue-based API manager (`_workQueue`, gated by `INFLIGHT_MAX` ≤5 concurrent + rate window ≤4 req/s) → progressive render after each completion via `_onFetchComplete` → also fetch trending (1000) and untagged models → inject cross-author base models from `cardData.base_model` (also through queue, one at a time with per-completion progress updates) → store in `_allFetched` (trimmed to 16,384 by `lastModified` descending).
-2. **Canonical dedup**: `buildCanonicalAuthors()` — when a model name appears under multiple authors, keep only the highest-download variant.
-3. **Orphan/nested suppression**: Quants whose parent exists in `_allFetched` but has no explicit `cardData.base_model` are suppressed from L1 (`isOrphanQuant`, name-based inference). Nested quants pointing to another quant rather than a true base are suppressed (`isNestedQuant`).
-4. **Render**: `computeAuthorData()` applies date/param sliders, From/To/Special/Quant filters, canonical dedup, and orphan/nested suppression → groups by author → renders L1.
-5. **L1 expand** → `loadAuthorModels()`: fetch 1000 author models → filter base models (including same-author fine-tunes) → render L2 → deepen unknown `paramB` in batches of 4 via individual model API.
-6. **L2 expand** → `loadChildren()`: search HF API for children by parent ID + name → match on `cardData.base_model` or quant tags. Same-author fine-tunes at L2 only; cross-author at L3 labeled "finetune". Deduplicated via `_inflightChildren`.
-7. **L3/L4**: Group children by quant author, apply quant/text filters, render sortable table. `_l2ModelFilter` is applied globally in `modelPassesAllFilters()` before author grouping (affects L1 counts); `_l3AuthorFilter`/`_l4ModelFilter` apply only at their respective render levels.
-
-## Non-Obvious State
-
-- `_fetchGeneration` — Monotonically increasing counter incremented by "Get Results" and "Clear Cache". All async functions capture `const gen = _fetchGeneration` at entry and bail if stale — prevents stale renders without AbortController (which can't guard post-fetch side effects like cache writes).
-- `_inflightChildren` — `Map<parentId, {promise, results}>` to deduplicate concurrent L3/L4 fetches; results stored directly in the entry to survive LRU cache eviction.
-- `_inflightFetches` — `Map<url, promise>` to deduplicate concurrent `fetchJson` calls before they reach the queue manager.
-- `_workQueue` — Array of `{ url, resolve, reject }` work items queued by `fetchJson()`. Drained by `_dequeueNext()` gated by in-flight count and rate window.
-- `_inflightCount` — Number of HTTP requests currently executing. Gated at `INFLIGHT_MAX` (5) in `_dequeueNext`.
-- `_dequeueScheduled` — Boolean flag preventing duplicate `_scheduleDequeue` calls; reset when queue drains.
-- `_fetchSeen`, `_fetchCompleted`, `_fetchTotal` — Shared progressive render state initialized by `_initFetchState()` at start of each "Get Results" cycle. Each request's completion handler increments `_fetchCompleted` and triggers re-render via `_onFetchComplete`.
-- `_paramCache` — `Map<modelId, paramB>` persists across renders; cleared only by Clear Cache. Bound by unique models encountered (~1.4MB at 16k entries).
-- `cache` — In-memory LRU (500 entries) keyed by `"{author}"`, `"{author}_models"`, `"children-{parentId}"`. Uses `cacheSet`/`cacheAccess`.
-- `_apiTimestamps` — Sliding window enforcing ≤4 req/s (1 call per 250ms, no burst). Managed inside `_dequeueNext`, not in `fetchJson`.
-- `_injectedBaseIds` — Injections bypass the date slider so recently-updated quants remain reachable via their parent.
-- `sliderFrom/sliderTo` — 0..80 (0=Anytime, 1-79=14-day increments, 80=Now).
-- `paramSliderFrom/paramSliderTo` — 0..220 (piecewise linear 7-segment mapping).
-- `_popupTimers` — `Map<popupEl, timeoutId>` for debounced popup show/hide (150ms show, 200ms hide).
-
-## Backward-Compatible Proxies
-
-Removed in v260525.21 — all callers now access `RenderCoordinator._state`, `_levelState`, and helper methods (`getDetailSort`, `expandedSections`) directly. No indirection remains.
-
-## Render Pipeline
-
-`requestRender()` (batched via `requestAnimationFrame`) → `_doFullRender()`: syncSortState → computeAuthorData → renderL1 → updateArrows → pruneExpiredExpansions → saveRestoreExpansions (only when `saved` non-null; typically passed by `recomputeAndRender`) → refreshAllExpanded (L2→L3→L4 cascade) → [optional] deriveVisibleUnknowns.
+When making changes to the source code, read `DESIGN-LOG.md` first if your change touches any of: popup behavior, CONFIG values, queue/rate-limiting logic, generation guards, render pipeline, data flow, state management, or filtering/injection logic. It contains versioned changelog entries and architecture decisions that explain *why* things work the way they do — preventing you from "fixing" intentional design choices (e.g., rejecting `queueMicrotask` for the queue scheduler, keeping L2/L3/L4 render functions separate). When your change introduces a new design decision or resolves a code review finding, append an entry to DESIGN-LOG.md rather than adding inline comments to the source.
 
 ## Conventions
 
@@ -54,7 +19,7 @@ Removed in v260525.21 — all callers now access `RenderCoordinator._state`, `_l
 - **Event delegation**: One listener per container after `innerHTML` injection (`_delegatedL2`/`_delegatedL3`/`_delegatedL4` flag); state stored in `_lXState` on the container. Toggle `<button type="button">` for native keyboard Enter/Space handling.
 - **ID scheme**: `t{level}-{idx}` (toggles), `d{level}-{idx}` (detail rows), `i{level}-{idx}` (inner containers).
 - **Level discrimination**: `<th>` elements carry `data-level="2|3|4"` so sort handlers reject events from nested levels even after `innerHTML` detaches the target from the DOM.
-- **Generation guard**: All async functions that mutate shared state capture `const gen = _fetchGeneration` at entry and check `if (gen !== _fetchGeneration) return;` before any side-effect. The queue manager checks generation both at dequeue time and post-fetch.
+- **Generation guard**: All async functions that mutate shared state capture `const gen = _fetchGeneration` at entry and check `if (gen !== _fetchGeneration) return;` before any side-effect. The queue manager checks generation both at dequeue time and post-fetch. See DESIGN-LOG.md "Architecture Decisions" for rationale.
 - **CSS.escape**: Any query selector interpolating user-controlled strings (author names, model IDs) must use `CSS.escape()` to prevent broken queries or injection.
 
 ## Testing
@@ -92,16 +57,4 @@ Open in browser, validate:
 - **L1 sort selector**: Uses `#main-table > thead > tr > th` to avoid L2/L3 nested `<th>` triggering. Do NOT delegate to `#main-table thead`.
 - **Param deepening**: Only fires for the single expanded author, in batches of 4, and only for models passing current date/param filters.
 - **Search endpoint limitations**: Search API (`/api/models?search=...`) never returns `safetensors` or `config` data even with `full=true`. Individual model API does — hence deepening for models without B/M suffix.
-- **Queue-based rate limiting**: `fetchJson` pushes work items to `_workQueue`; `_dequeueNext` gates on both in-flight count (`INFLIGHT_MAX`=5) and time window (1 call/250ms = 4 req/s). Failed retries don't increment API counter; only successes and permanent failures do. Retriable errors re-enqueue at tail after backoff delay to compete fairly.
-- **Generation guard**: Always capture `const gen = _fetchGeneration` at the very start of any async function that touches shared state. Check before side-effects. The queue manager checks generation both when dequeuing and post-fetch, rejecting stale items early.
 - **Detached event target**: Capture `const inner = e.target.closest(".detail-inner")` in a variable before any `innerHTML` replacement (which detaches the target, making `closest()` return null). The `data-level` attribute on `<th>` provides a secondary guard.
-- **Same-author fine-tunes**: `isBase()` treats them as base models. `loadChildren()` skips them at L3 and labels cross-author fine-tunes as "finetune".
-- **Parent param inheritance**: GGUF/AWQ/GPTQ quants without B/M suffix get `paramB` from parent via post-deepening pass. Stripping removes trailing `-segment` iteratively until a known parent is found (same author's `baseModels` or `_allFetched`).
-- **Early-exit in param resolution**: `resolveParamFromChildren` stops after 3 non-null results agreeing on the current max (up to `DERIVED_BATCH_SIZE`=10).
-- **Inflight dedup**: `_inflightChildren` entries set synchronously before the first `await`; concurrent callers read results directly from the entry, bypassing evictable LRU cache.
-- **Cache eviction fallback**: When `children-{parentId}` is evicted from LRU cache, L3 falls back to `s.children` from `l3StateMap` (survives eviction).
-- **Clear Cache + generation guard**: Clears all caches and increments `_fetchGeneration` to abort stale async. Unlike `applyFilters`, it collapses all expanded sections (no cached data to restore from). Also resets `_dequeueScheduled` so the queue manager can resume cleanly.
-- **Injection via queue**: `injectBaseModels` fires each unknown base model fetch independently through `fetchJson()` into `_workQueue`. Concurrency is gated by `INFLIGHT_MAX` and rate window — no artificial batching constant needed. Progress updates fire per-completion in `.finally()`, calling `onBatch()` for incremental re-render.
-- **Popup source consistency**: L2/L4 hidden count and popup hidden count must match exactly. `popupSource` passed to `renderL2` must be the same array that `totalBeforeFilter` was computed from (typically `nonQuantBase`).
-- **L2 vs L4 hidden labels**: L2 label says "hidden by current filters" and counts models removed by ALL filters (date, param, pipeline, text, etc.), with popup showing all hidden (no sample cap). L4 says "hidden by text filter" and counts only text-filtered models, popup capped at 200 samples. This difference is intentional: L2 filters are many and layered (sliders + chips + text), while L4 only has the text filter.
-- **Popup ID sanitization**: L4 popup IDs replace `/` with `__` in parentId (`l4SafeId`) to produce valid HTML IDs. Trigger and popup must use the same sanitized key.
