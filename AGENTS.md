@@ -8,6 +8,10 @@ Single-file, zero-dependency HTML/JS app that explores HuggingFace base models i
 
 When modifying this file, write the new content to a temporary file (e.g. `AGENTS.md.new`) and only copy it back to `AGENTS.md` when all edits are done. This minimizes LLM context churn from many small sequential edits against the same file.
 
+## DESIGN-LOG.md — Usage for Coding Agents
+
+When making changes to the source code, read `DESIGN-LOG.md` first if your change touches any of: popup behavior, CONFIG values, queue/rate-limiting logic, generation guards, or render pipeline. It contains versioned changelog entries and architecture decisions that explain *why* things work the way they do — preventing you from "fixing" intentional design choices (e.g., rejecting `queueMicrotask` for the queue scheduler, keeping L2/L3/L4 render functions separate). When your change introduces a new design decision or resolves a code review finding, append an entry to DESIGN-LOG.md rather than adding inline comments to the source.
+
 ## Data Flow
 
 1. **Init** (Get Results click): Resolve pipeline tags from From/To bars → fire each request independently through queue-based API manager (`_workQueue`, gated by `INFLIGHT_MAX` ≤5 concurrent + rate window ≤4 req/s) → progressive render after each completion via `_onFetchComplete` → also fetch trending (1000) and untagged models → inject cross-author base models from `cardData.base_model` (also through queue, one at a time with per-completion progress updates) → store in `_allFetched` (trimmed to 16,384 by `lastModified` descending).

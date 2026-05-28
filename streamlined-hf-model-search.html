@@ -345,98 +345,9 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260528.04';
-// Design Notes (review items addressed in v260528.04):
-// - API counter tooltip: corrected to state retries are NOT counted, matching actual behavior
-//   where incApiCalls only fires on success and permanent failure, not retriable errors.
-// - tryResolveModelParam render coalescing: removed per-model renderL2 + refreshAllExpanded
-//   from success path; data is synced to shared state (_allFetched, _paramCache) and callers
-//   batch-render after all resolves complete (deriveVisibleUnknowns final recomputeAndRender).
-// - Slider UI throttling: input events now route through rAF-gated throttledSliderUI instead
-//   of calling updateDateUI/updateParamUI directly, bounding getBoundingClientRect() to once/frame.
-// - Error boundary: _doFullRender wrapped in try/catch with recovery status message.
-// - DOM ref caching for refreshAllExpanded: _domCache Map stores {row, detailRow, inner, toggle}
-//   per expansion key; populated on expand, cleared after renderL1 (innerHTML replacement),
-//   used as fast-path in refreshAllExpanded with querySelector fallback on stale/miss.
-// Design Notes (review items addressed in v260528.03):
-// - API Request Manager optimizations: removed redundant polling timeout from in-flight max
-//   branch (completions already call _dequeueNext), eliminated dead generation check with no
-//   async gap, and fixed Clear Cache promise leak by rejecting all queued items before truncation.
-// Design Notes (review items addressed in v260526.05):
-// - Popup positioning: positionPopupCenter now runs inside schedulePopupShow's setTimeout
-//   callback instead of synchronously on mouseenter, preventing stale getBoundingClientRect()
-//   values when user scrolls/resizes during the 150ms debounce delay. Scroll/resize listeners
-//   hide all visible popups as additional defense against misalignment.
-// - Accessibility: filter chips, task tags, clear buttons, and popup triggers converted from
-//   <span role="button"> to native <button type="button>. Provides better screen reader
-//   announcements, default :focus-visible outlines, and native Enter/Space handling without
-//   JS boilerplate. CSS resets added for button defaults (padding, border, background).
-// - fetchJson retry: removed _consecutive429s reset from network error catch block so that
-//   transient network blips during 429 backoff don't clear the amber rate-limit indicator.
-// - renderL2Empty guard: distinguishes "no data loaded yet" (cache miss, no popupSource)
-//   from "no base models match current filters" (data exists but all filtered out).
-// - CSS cleanup: removed !important from .filter-popup th sticky position to avoid z-index
-//   stacking conflicts with Chromium's sticky header implementation.
-// - Param deepening and inference now fire independently through fetchJson() — the queue's
-//   INFLIGHT_MAX (5) and rate window (4 req/s) provide sufficient throttling without a
-//   separate semaphore layer that compounded delays.
-// Design Notes (review items addressed in v260525.31):
-// - Slider tooltip alignment: date-slider From uses align-right (sits left of knob), To
-//   uses align-left (sits right of knob). Param-slider uses centered (no alignment class).
-//   Fixed per-knob alignment prevents tooltip text from overlapping/mashing together when
-//   knobs are close — dynamic alignment based on position would flip them inward, merging
-//   the text. The fixed offset is intentional; tooltips are hidden entirely on narrow
-//   screens (≤600px CSS media query) where overlap risk is highest.
-// - Expansion tracking: refreshAllExpanded() uses DOM indices (data-l1-idx, data-l2-idx)
-//   to find detail rows. This is safe in the synchronous render pipeline because indices
-//   are always read from the current DOM state after re-render. If rendering is refactored
-//   to async partial updates, replace index-based IDs (d1-${idx}) with stable identifiers
-//   (data-author, data-model) to avoid stale index -> wrong element lookups.
-// Design Notes (review items addressed in v260525.30):
-// - Fix race condition in fetchTasks: now takes `gen` as parameter and checks
-//   `gen !== _fetchGeneration` at entry, in batch loop, and before `fetchedTasks.add(tag)`.
-//   Prevents stale async operations from marking tasks as "fetched" while the caller
-//   discards the results, which would leave `fetchedTasks` out of sync with `_allFetched`.
-// - Removed dead B/M pattern checks: lines 2913 and 2971 contained B/M pattern matching
-//   that could never execute because the `seen.has(candId)` check on the previous line
-//   would have already broken the loop if true, and the subsequent `if (seen.has(baseId))`
-//   (markLocalParents) or `if (!seen.has(baseId) && bm && ...` (injectBaseModels) would
-//   always be false when reaching that branch.
-// Design Notes (review items addressed in v260525.29):
-// - Fix race condition in markLocalParents: now takes `gen` as a parameter and
-//   checks `gen !== _fetchGeneration` before any state modifications. Prevents
-//   stale async operations from corrupting _injectedBaseIds and model._injected.
-// Design Notes (review items addressed in v260525.28):
-// - Fix regression in markLocalParents: removal of "const gen = _fetchGeneration"
-//   caused "gen === _fetchGeneration" to always be false (gen was undefined),
-//   so _injectedBaseIds was never populated. Parent models outside date range
-//   were incorrectly filtered out even when they had in-range child models.
-// - Also call markLocalParents in loadAuthorModels: ensures parent models fetched
-//   directly from author API (not in _allFetched) are also marked as injected
-//   when they have in-range children.
-// Design Notes (review items addressed in v260525.27):
-// - resolveParamFromChildren: try extractParamFromId on each child's ID before
-//   making the individual API fetch. Most quant child names contain B/M patterns
-//   (e.g. "7B", "13B"), so the individual fetch is now rarely needed. This
-//   dramatically reduces API calls during "Infer Missing Params" processing.
-// Design Notes (review items addressed in v260525.26):
-// - _inflightChildren dedup: fallback to fresh fetch when the inflight promise resolves
-//   with null results (detached-container / error case) to prevent loading hang.
-// - Parent-param backfill from child search results: replaced metadata-based extraction
-//   (which never worked — search API doesn't return safetensors/gguf) with ID-based
-//   B/M pattern matching via extractParamFromId.
-// - Rate limiter: replaced with queue-based API request manager (v260528): callers push
-//   work items via fetchJson(), manager dequeues gated by time-window and in-flight count.
-// - Clear Cache: removed redundant _fetchState flag resets (fetchedUntagged etc.) that
-//   caused unnecessary API calls; now also clears _levelState maps.
-// - Popup headers: "At most N shown" is now dynamic based on actual maxSamples cap.
-// - Dead code removed: unused injectionBatches variable, synchronous generation guards
-//   in markLocalParents (no-op in single-threaded JS).
-// - Accessibility: removed aria-colindex from colspanned detail-row cells.
-// - Proxy indirection removed in v260525.21 — all callers now access RenderCoordinator._state,
-//   _levelState, and helper methods directly. No indirection remains.
-// - CSS variableization: The dark theme is fixed per design intent. No light/dark
-//   toggle is planned. Hardcoded values are intentional for consistency.
+  "use strict";
+const APP_VERSION = '260528.05';
+// See DESIGN-LOG.md — version changelog, architecture decisions, and code review rationale.
 let _allFetched, _authorData, _canonicalAuthor;
 
 const TO_TAGS = [
@@ -543,6 +454,9 @@ const CONFIG = {
   ALL_FETCHED_MAX: 16384,
   INFLIGHT_MAX: 5,  // Max concurrent HTTP requests. Browser per-origin limit is ~6; leaves headroom for favicon etc.
   THUMB_SIZE: 18,
+  POPUP_SHOW_DELAY: 150,   // ms debounce before popup appears on hover
+  POPUP_HIDE_DELAY: 200,   // ms debounce before popup disappears (same as DEBOUNCE_MS)
+  POPUP_MAX_SAMPLES_L4: 200,  // L4 hidden models preview cap; L2 shows all with no cap
 };
 
 // Expansion key prefixes — used for stable identification across re-renders.
@@ -1048,18 +962,19 @@ function positionPopupCenter(trigger, popup) {
 function schedulePopupShow(popupEl, delay) {
   clearTimeout(_popupTimers.get(popupEl));
   _popupTimers.set(popupEl, setTimeout(() => {
+    if (!popupEl.isConnected) return;
     if (popupEl._popupTrigger) positionPopupCenter(popupEl._popupTrigger, popupEl);
     popupEl.classList.add("visible");
     const saved = _popupScrollPositions.get(popupEl);
     popupEl.scrollTop = typeof saved === "number" ? saved : 0;
-  }, delay || 150));
+  }, delay || CONFIG.POPUP_SHOW_DELAY));
 }
 function schedulePopupHide(popupEl, delay) {
   clearTimeout(_popupTimers.get(popupEl));
   _popupTimers.set(popupEl, setTimeout(() => {
     _popupScrollPositions.set(popupEl, popupEl.scrollTop);
     popupEl.classList.remove("visible");
-  }, delay || CONFIG.DEBOUNCE_MS));
+  }, delay || CONFIG.POPUP_HIDE_DELAY));
 }
 // Hide all visible popups on scroll/resize to prevent stale positioning.
 function hideAllPopups() {
@@ -2373,7 +2288,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
     const popup = document.getElementById(`fp-popup-l4-${l4SafeId}`);
     if (trigger && popup) {
       const displayedIds = new Set(displayed.map(q => q.id));
-      wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(quants, displayedIds, 200)));
+      wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(quants, displayedIds, CONFIG.POPUP_MAX_SAMPLES_L4)));
     }
   }
 
@@ -3207,11 +3122,12 @@ function _initApp() {
     clearTimeout(_resizeTimer);
     _resizeTimer = setTimeout(() => { updateDateUI(); updateParamUI(); }, 50);
   });
-  sliderResize.observe(document.getElementById("date-slider"));
-  sliderResize.observe(document.getElementById("param-slider"));
-  window.addEventListener("scroll", hideAllPopups, { passive: true });
-  window.addEventListener("resize", debounce(hideAllPopups, 100), { passive: true });
-  reseedActiveTaskFilters();
+ sliderResize.observe(document.getElementById("date-slider"));
+   sliderResize.observe(document.getElementById("param-slider"));
+   window.addEventListener("scroll", hideAllPopups, { passive: true });
+   window.addEventListener("resize", debounce(hideAllPopups, 100), { passive: true });
+   document.addEventListener("visibilitychange", () => { if (document.hidden) hideAllPopups(); }, { passive: true });
+   reseedActiveTaskFilters();
   syncFilterChips();
   document.getElementById("l1-author-filter").addEventListener("input", debouncedTextFilter);
   document.getElementById("l2-model-filter").addEventListener("input", debouncedTextFilter);
@@ -3234,6 +3150,10 @@ if (document.readyState === 'loading') {
 } else {
   _initApp();
 }
+
+// Dev console: expose fetch generation counter for debugging race conditions.
+window.__HF_SEARCH_GEN = () => _fetchGeneration;
+
 })();
 </script>
 </body>
