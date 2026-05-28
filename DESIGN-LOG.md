@@ -128,7 +128,7 @@ Callers push work items via `fetchJson()`; `_dequeueNext` gates on both in-fligh
 Trimmed to ALL_FETCHED_MAX (16,384) by `lastModified` descending. Injected base models are pinned during trim so recently-updated quants remain reachable via their parent. `_paramCache` persists across renders and is bounded by unique models encountered (~1.4MB at 16k entries).
 
 ### normalizeModel — field stripping
-Intentionally drops: sha, siblings, config, library_name, private, pipeline_tag (re-added above), and all other API fields. The HF API returns ~40 fields per model; keeping only 10 saves ~60% memory in `_allFetched` (16k entries × ~5KB vs ~2KB). Add fields back only when a concrete feature requires them.
+Intentionally drops: sha, siblings, config, library_name, private, and all other API fields. `pipeline_tag` is preserved as-is from the source object (with a safety backfill in `_mergeRequestResult` for edge cases where the API omits it). The HF API returns ~40 fields per model; keeping only 10 saves ~60% memory in `_allFetched` (16k entries × ~5KB vs ~2KB). Add fields back only when a concrete feature requires them.
 
 ### Param slider — piecewise-linear mapping
 7 segments covering 0..1000B params on a 220-position slider. Dense at low end (0.025B/step up to 1B), coarser above. Chosen over continuous log scale because users care about discrete breakpoints (1B, 7B, 13B, 70B, etc.).

@@ -1102,11 +1102,10 @@ function isInDateRange(dateStr) {
   const c = new Date(dateStr);
   return c >= sliderValueToDate(sliderFrom) && c <= sliderValueToDate(sliderTo);
 }
-// Intentionally drops: sha, siblings, config, library_name, private, pipeline_tag
-// (re-added above), and all other API fields. The HF API returns ~40 fields per model;
-// keeping only the 10 above saves ~60% memory in _allFetched (16k entries × ~5KB vs ~2KB).
-// Add fields back only when a concrete feature requires them (e.g., library_name for
-// framework filtering, sha for change detection).
+// Intentionally drops: sha, siblings, config, library_name, private, and all other API fields.
+// The HF API returns ~40 fields per model; keeping only the 10 above saves ~60% memory in
+// _allFetched (16k entries × ~5KB vs ~2KB). Add fields back only when a concrete feature
+// requires them (e.g., library_name for framework filtering, sha for change detection).
 function normalizeModel(m) {
   return {
     id: m.id,
