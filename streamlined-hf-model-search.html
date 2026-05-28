@@ -347,7 +347,7 @@
 <script defer>
 (function() {
   "use strict";
-const APP_VERSION = '260528.06';
+const APP_VERSION = '260528.07';
 // See DESIGN-LOG.md — version changelog, architecture decisions, and code review rationale.
 let _allFetched, _authorData, _canonicalAuthor;
 
@@ -487,6 +487,7 @@ const _inferredParamIds = new Set();
 const _inferredFromNameIds = new Set();
 const _inferredAttemptedIds = new Set();
 const _deepeningParamIds = new Set();
+let _deepenThrottleTimer = null;
 let apiCalls = 0;
 let _consecutive429s = 0;
 const _rateLimitCounter = document.getElementById("api-counter");
@@ -1680,10 +1681,29 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
       },
       (e) => { console.warn("Failed to fetch param for", m.id, e); }
     ).finally(() => {
+      if (gen !== _fetchGeneration) return;
       completed++;
       statusEl.textContent = `Resolving parameters for ${author}… (${completed}/${totalUnk})`;
+      if (completed === totalUnk) {
+        if (_deepenThrottleTimer) { clearTimeout(_deepenThrottleTimer); _deepenThrottleTimer = null; }
+        refreshAuthorL2();
+      } else if (!_deepenThrottleTimer) {
+        _deepenThrottleTimer = setTimeout(() => {
+          _deepenThrottleTimer = null;
+          if (gen !== _fetchGeneration) return;
+          refreshAuthorL2();
+        }, 250);
+      }
     });
   }));
+  function refreshAuthorL2() {
+    const models = cacheAccess(author);
+    if (!models) return;
+    const nqb = models.filter(m => !m._orphanQuant && !m._nestedQuant);
+    const filtered = nqb.filter(m => modelPassesAllFilters(m));
+    renderL2(idx, author, filtered, container, nqb.length, nqb);
+    refreshAllExpanded();
+  }
 }
 
 function inheritParentParams(unknownModels, baseModels) {

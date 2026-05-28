@@ -22,6 +22,12 @@ Design decisions, changelog entries, and architectural rationale for `streamline
 
 ## Version Changelog
 
+### v260528.07 — Throttled progressive L2 render during deepening pass
+- **New**: Module-level `_deepenThrottleTimer` gates deepening renders to at most 1 per 250ms.
+- **Changed**: `deepenBatch` replaces full-page `recomputeAndRenderWithoutDerive()` with `refreshAuthorL2()` — re-renders only the affected author's L2 section via `renderL2` + `refreshAllExpanded`, leaving L1 untouched. No author row position shifts during deepening.
+- **Final completion** clears any pending throttle timer and renders immediately.
+- **Performance**: Avoids re-sorting L1, re-running `computeAuthorData`, and re-rendering unaffected sections. Matches the design intent of the API Transfer Manager (progressive updates without jarring full-page resets).
+
 ### v260528.05 — Code review: deduplication, dead code removal, consistency fixes
 - **Bug fix**: `_trendingAdded` no longer overcounts — `_mergeRequestResult` returns actual models added (not `_fetchSeen` growth, which included filtered-out models).
 - **Dead code removed**: `_fetchTotal` (never read after init), `sortKey`/`sortAsc` module-level vars (use `RC.sortKey`/`RC.sortAsc` getters instead), `syncSortState()` function removed.
