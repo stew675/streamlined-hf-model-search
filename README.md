@@ -6,7 +6,7 @@ A dark-color themed, browser-based, 4-level hierarchical explorer for HuggingFac
 - No server. No install steps. Just open the `streamlined-hf-model-search.html` file in your browser.
 - Uses the public HuggingFace Hub API (`https://huggingface.co/api/models`).
 - No API key required.
-- All API calls are rate-limited to be gentle on the Hugging Face server.
+- All API calls are rate-limited to be gentle on the Hugging Face server via a queue-based request manager (max 5 concurrent, ≤4 req/s).
 
 
 ## Example Output
@@ -115,6 +115,10 @@ The popup features:
 - 200ms hover delay to prevent flicker on accidental mouse passes
 - Stays visible when hovering into the popup so links are clickable
 - Resets scroll position to top each time it opens
+
+### Progressive Rendering
+
+Results appear incrementally as API requests complete. Each independent request (per pipeline tag, sort order, trending, untagged) fires immediately and triggers a re-render on completion. This means you see partial results quickly rather than waiting for all fetches to finish. The status line shows progress as `Fetching models… (completed/total)`.
 
 ### Additional Result Table Features
 
