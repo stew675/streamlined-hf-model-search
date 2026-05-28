@@ -516,7 +516,6 @@ const CONFIG = {
   PARAM_BATCH_SIZE: 4,
   DERIVED_BATCH_SIZE: 10,
   TRENDING_LIMIT: 1000,
-  INJECTION_BATCH_SIZE: 8,
   PARAM_MIN_GAP: 5,
   AUTHOR_LIMIT: 1000,
   CHILD_LIMIT: 1000,
@@ -3054,10 +3053,10 @@ function markLocalParents(all, gen) {
 // Pass 1: scan all date-range models, identify parent IDs that aren't yet in _allFetched.
 //   Marks existing parents as _injected so they bypass the date filter (a parent outside
 //   the date range still needs to remain visible so its child quant models are reachable).
-// Pass 2: fetch unknown parents in batches (INJECTION_BATCH_SIZE), call onBatch() after
-//   each batch for incremental re-render. all.push(...injected) only after all batches
-//   complete — the initial for-loop iterates all.length which is never mutated during
-//   the scan, so there is no infinite loop risk.
+// Pass 2: fetch unknown parents independently through the API manager queue, call onBatch()
+   // after each individual completion for progressive re-render. all.push(...injected) only
+   // after all promises settle — the initial for-loop iterates all.length which is never mutated
+   // during the scan, so there is no infinite loop risk.
 async function injectBaseModels(all, onBatch) {
   const gen = _fetchGeneration;
   if (gen !== _fetchGeneration) return;
@@ -3108,40 +3107,38 @@ async function injectBaseModels(all, onBatch) {
   }
 
   const baseIds = [...fetchQueue.keys()];
-  let total = 0;
-  for (let i = 0; i < baseIds.length; i += CONFIG.INJECTION_BATCH_SIZE) {
-    if (gen !== _fetchGeneration) return;
-    const batch = baseIds.slice(i, i + CONFIG.INJECTION_BATCH_SIZE);
-    total += batch.length;
-    status.textContent = `Resolving base models… (${total})`;
-    const results = await Promise.allSettled(batch.map(async (baseId) => {
-      const raw = await fetchJson(`https://huggingface.co/api/models/${baseId}?full=true`);
-      const full = normalizeModel(raw);
-      full.paramB = getParamCount(full);
-      full._injected = true;
-      return full;
-    }));
-    for (const r of results) {
-      if (r.status === "fulfilled") {
-        const full = r.value;
+  let completed = 0;
+  const totalRequests = baseIds.length;
+  const promises = baseIds.map((baseId) => {
+    return fetchJson(`https://huggingface.co/api/models/${baseId}?full=true`).then(
+      (raw) => {
+        if (gen !== _fetchGeneration) return null;
+        const full = normalizeModel(raw);
+        full.paramB = getParamCount(full);
+        full._injected = true;
         injected.push(full);
         seen.add(full.id);
-        if (gen === _fetchGeneration) _injectedBaseIds.add(full.id);
-      } else {
-        console.warn("Failed to fetch base model", r.reason);
+        _injectedBaseIds.add(full.id);
+      },
+      (err) => {
+        console.warn("Failed to fetch base model", err);
       }
-    }
-    if (gen !== _fetchGeneration) return;
-    if (onBatch) onBatch();
-  }
+    ).finally(() => {
+      if (gen !== _fetchGeneration) return;
+      completed++;
+      status.textContent = `Resolving base models… (${completed}/${totalRequests})`;
+      if (onBatch) onBatch();
+    });
+  });
+  await Promise.all(promises);
 
   if (gen !== _fetchGeneration) return;
   all.push(...injected);
 
-  // Final reconciliation: guarantee every model flagged as _injected is whitelisted 
-  // in _injectedBaseIds. Async batching, generation guards, or Pass 1/Pass 2 races 
-  // can cause flagged parents to slip through earlier set additions. This ensures 
-  // hierarchy integrity so quantizations attach to their true parent even when that 
+  // Final reconciliation: guarantee every model flagged as _injected is whitelisted
+  // in _injectedBaseIds. Generation guards or Pass 1/Pass 2 races can cause flagged
+  // parents to slip through earlier set additions. This ensures
+  // hierarchy integrity so quantizations attach to their true parent even when that
   // parent falls outside the active date range (see modelPassesAllFilters).
   all.forEach(m => { if (m._injected && gen === _fetchGeneration) _injectedBaseIds.add(m.id); });
   status.textContent = "";
