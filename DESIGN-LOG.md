@@ -22,6 +22,15 @@ Design decisions, changelog entries, and architectural rationale for `streamline
 
 ## Version Changelog
 
+### v260528.05 — Code review: deduplication, dead code removal, consistency fixes
+- **Bug fix**: `_trendingAdded` no longer overcounts — `_mergeRequestResult` returns actual models added (not `_fetchSeen` growth, which included filtered-out models).
+- **Dead code removed**: `_fetchTotal` (never read after init), `sortKey`/`sortAsc` module-level vars (use `RC.sortKey`/`RC.sortAsc` getters instead), `syncSortState()` function removed.
+- **Unified section toggle**: `toggleSection()` helper replaces 15-line expand/collapse blocks in L1/L2/L3 event handlers, handling DOM state, `expandedSections` Set, and optional descendant-prefix cascade-delete on collapse.
+- **DOM cache lookup helper**: `_getSectionCached()` replaces repeated cache-hit checks in `refreshAllExpanded`.
+- **Parent-stripping consolidation**: `inferParent()` now used by `markLocalParents` and `injectBaseModels` instead of their own inline copies of the loop.
+- **Consistency**: `handleSortClick` parameter renamed from `sortKey` to `stateKey`. L2 event delegation uses `this` instead of captured `container`. L2/L3 rows now have `row-even`/`row-odd` zebra classes matching L1.
+- **Slider UI dedup**: Skipped (config-object approach reduces readability more than 20-line duplication saves — per DESIGN-LOG.md Code Review Decisions #4 precedent).
+
 ### v260528.04 — Render coalescing, error boundary, DOM cache
 - **API counter tooltip**: Corrected to state retries are NOT counted, matching actual behavior where `incApiCalls` only fires on success and permanent failure, not retriable errors.
 - **tryResolveModelParam render coalescing**: Removed per-model `renderL2` + `refreshAllExpanded` from success path; data is synced to shared state (`_allFetched`, `_paramCache`) and callers batch-render after all resolves complete (`deriveVisibleUnknowns` final `recomputeAndRender`).
@@ -99,7 +108,7 @@ Moved from AGENTS.md. Describes non-obvious state variables and their roles:
 - `_workQueue` — Array of `{ url, resolve, reject }` work items queued by `fetchJson()`. Drained by `_dequeueNext()` gated by in-flight count and rate window.
 - `_inflightCount` — Number of HTTP requests currently executing. Gated at `INFLIGHT_MAX` (5) in `_dequeueNext`.
 - `_dequeueScheduled` — Boolean flag preventing duplicate `_scheduleDequeue` calls; reset when queue drains.
-- `_fetchSeen`, `_fetchCompleted`, `_fetchTotal` — Shared progressive render state initialized by `_initFetchState()` at start of each "Get Results" cycle. Each request's completion handler increments `_fetchCompleted` and triggers re-render via `_onFetchComplete`.
+- `_fetchSeen`, `_fetchCompleted` — Shared progressive render state initialized by `_initFetchState()` at start of each "Get Results" cycle. Each request's completion handler increments `_fetchCompleted` and triggers re-render via `_onFetchComplete`.
 - `_paramCache` — `Map<modelId, paramB>` persists across renders; cleared only by Clear Cache. Bound by unique models encountered (~1.4MB at 16k entries).
 - `cache` — In-memory LRU (500 entries) keyed by `"{author}"`, `"{author}_models"`, `"children-{parentId}"`. Uses `cacheSet`/`cacheAccess`. When `children-{parentId}` is evicted, L3 falls back to `s.children` from `l3StateMap` (survives eviction).
 - `_apiTimestamps` — Sliding window enforcing ≤4 req/s (1 call per 250ms, no burst). Managed inside `_dequeueNext`, not in `fetchJson`.
@@ -152,7 +161,7 @@ Pass 1: scan all date-range models, identify parent IDs not yet in `_allFetched`
 150ms show delay prevents flicker on accidental mouse passes. 200ms hide delay (CONFIG.DEBOUNCE_MS) gives enough time to move from trigger into popup content. Scroll/resize listeners clear all pending timers and hide visible popups as defense against stale positioning.
 
 ### Render Pipeline
-`requestRender()` (batched via `requestAnimationFrame`) → `_doFullRender()`: syncSortState → computeAuthorData → renderL1 → updateArrows → pruneExpiredExpansions → saveRestoreExpansions (only when `saved` non-null; typically passed by `recomputeAndRender`) → refreshAllExpanded (L2→L3→L4 cascade) → [optional] deriveVisibleUnknowns.
+`requestRender()` (batched via `requestAnimationFrame`) → `_doFullRender()`: computeAuthorData → renderL1 → updateArrows → pruneExpiredExpansions → saveRestoreExpansions (only when `saved` non-null; typically passed by `recomputeAndRender`) → refreshAllExpanded (L2→L3→L4 cascade) → [optional] deriveVisibleUnknowns. Sort state accessed directly via `RC.sortKey`/`RC.sortAsc` getters.
 
 ### Same-author fine-tunes
 `isBase()` treats same-author fine-tunes as base models so they appear at L2 under their author. `loadChildren()` skips them at L3 and labels cross-author fine-tunes as "finetune". This prevents duplicate display while preserving the hierarchy.

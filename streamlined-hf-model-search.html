@@ -83,6 +83,7 @@
   tr.l4-row td { padding-left: 32px !important; }
   tr.l4-row td:first-child { padding-left: 64px !important; }
   tr.l4-row:nth-child(even) td { background: #080b10; }
+  tr.l2-row.row-odd td, tr.l3-row.row-odd td { background: #0f1318; }
 
   .badge { display: inline-block; font-size: 0.7rem; padding: 1px 6px; border-radius: 12px;
            background: #1f6feb33; color: #58a6ff; border: 1px solid #1f6feb55; margin: 1px 2px; box-shadow: 0 0 4px #1f6feb22; }
@@ -346,7 +347,7 @@
 <script defer>
 (function() {
   "use strict";
-const APP_VERSION = '260528.05';
+const APP_VERSION = '260528.06';
 // See DESIGN-LOG.md — version changelog, architecture decisions, and code review rationale.
 let _allFetched, _authorData, _canonicalAuthor;
 
@@ -1067,14 +1068,14 @@ function createTaskTag(tag, isActive) {
   });
   return el;
 }
-function handleSortClick(th, level, sortKey, defaultKey, refreshAfter, renderFn) {
+function handleSortClick(th, level, stateKey, defaultKey, refreshAfter, renderFn) {
   if (th.dataset.level !== level) return;
   const key = th.dataset.key;
   if (!key) return;
-  const st = RC.getDetailSort(sortKey) || { key: defaultKey, asc: false };
+  const st = RC.getDetailSort(stateKey) || { key: defaultKey, asc: false };
   if (st.key === key) st.asc = !st.asc;
   else { st.key = key; st.asc = false; }
-  RC._state.detailSort[sortKey] = st;
+  RC._state.detailSort[stateKey] = st;
   renderFn();
   if (refreshAfter) refreshAllExpanded();
 }
@@ -1299,7 +1300,6 @@ const RenderCoordinator = {
       this._savedExpansions = null;
       this._skipDerive = false;
 
-      syncSortState();
       _authorData = computeAuthorData();
       this.renderL1(_authorData);
       _domCache.clear(); // renderL1 replaces innerHTML — all cached DOM refs are now detached
@@ -1354,14 +1354,6 @@ const RenderCoordinator = {
 
 const RC = RenderCoordinator; // short alias used throughout call sites
 
-let sortKey = "totalDownloads";
-let sortAsc = false;
-
-function syncSortState() {
-  sortKey = RenderCoordinator._state.l1Sort.key;
-  sortAsc = RenderCoordinator._state.l1Sort.asc;
-}
-
 const cache = new Map();
 function cacheSet(key, value) {
   if (cache.has(key)) cache.delete(key);
@@ -1386,6 +1378,41 @@ const _domCache = new Map();
 function cacheDomRef(key, ref) { if (ref && ref.row.isConnected) _domCache.set(key, ref); }
 function invalidateDomKey(key) { _domCache.delete(key); }
 function invalidateDomPrefix(prefix) { for (const k of _domCache) if (k[0].startsWith(prefix)) _domCache.delete(k[0]); }
+
+// Unified section toggle: handles expand/collapse DOM and state for all levels.
+// Returns true if section was expanded, false if collapsed.
+// descendantPrefixes is optional — used at L1/L2 to cascade-delete child keys on collapse.
+function toggleSection(detailRow, tog, key, descendantPrefixes) {
+  const expanding = detailRow.style.display === "none";
+  if (expanding) {
+    detailRow.style.display = "";
+    tog.classList.add("open");
+    tog.setAttribute("aria-expanded", "true");
+    RC.expandedSections.add(key);
+  } else {
+    detailRow.style.display = "none";
+    tog.classList.remove("open");
+    tog.setAttribute("aria-expanded", "false");
+    invalidateDomKey(key);
+    RC.expandedSections.delete(key);
+    if (descendantPrefixes) {
+      const prefixes = Array.isArray(descendantPrefixes) ? descendantPrefixes : [descendantPrefixes];
+      prefixes.forEach(p => invalidateDomPrefix(p));
+      for (const k of [...RC.expandedSections]) {
+        if (prefixes.some(p => k.startsWith(p))) RC.expandedSections.delete(k);
+      }
+    }
+  }
+  return expanding;
+}
+
+// Cache-then-query helper for section DOM refs used by refreshAllExpanded phases.
+// Returns cached ref if valid, null otherwise.
+function _getSectionCached(key) {
+  const ref = _domCache.get(key);
+  if (ref && ref.row.isConnected && ref.detailRow.style.display === "none") return ref;
+  return null;
+}
 
 function pruneExpiredExpansions(renderedAuthors) {
   for (const key of [...RenderCoordinator.expandedSections]) {
@@ -1420,7 +1447,6 @@ function recomputeAndRenderWithoutDerive(saved) {
 
 RenderCoordinator.renderL1 = renderMain;
 RenderCoordinator.updateArrows = function() {
-  syncSortState();
   updateArrows();
 };
 RenderCoordinator.pruneExpiredExpansions = pruneExpiredExpansions;
@@ -1585,7 +1611,7 @@ function sortRows(rows, key, asc, subKey) {
 // ── Level 1: Authors ──
 function renderMain(authorData) {
   const tbody = document.getElementById("body");
-  let sorted = sortRows(authorData, sortKey, sortAsc, sortKey === "author" ? undefined : "author");
+  let sorted = sortRows(authorData, RC.sortKey, RC.sortAsc, RC.sortKey === "author" ? undefined : "author");
   const tf1 = RC._state.textFilters.l1Author;
   if (tf1) {
     const f = tf1.toLowerCase();
@@ -1833,8 +1859,9 @@ function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
     const qMethods = getOrphanQuantMethod(m.id);
     const rowIdx = 2 + mIdx * 2;
     const detailRowIdx = rowIdx + 1;
+    const zebra = mIdx % 2 === 0 ? "row-even" : "row-odd";
     const orphanBadge = qMethods.length ? qMethods.map(q => `<span class="badge orphan" title="Parent base model filtered out">${escapeHtml(q.toUpperCase())}</span>`).join(' ') + ' ' : '';
-    return `<tr class="l2-row" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}" aria-rowindex="${rowIdx}">
+    return `<tr class="l2-row ${zebra}" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}" aria-rowindex="${rowIdx}">
       <td class="model-id-cell" aria-colindex="1"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(m.id)}">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
       <td class="center" aria-colindex="2">${escapeHtml(m.pipeline_tag)}</td>
       <td class="center" aria-colindex="3" style="font-size:0.78rem">${paramBadgeHtml(m)}</td>
@@ -1864,13 +1891,13 @@ function setupL2Events(container) {
   container._delegatedL2 = true;
   const l2Click = function(e) {
     const inner = e.target.closest(".detail-inner");
-    if (inner && inner !== container) return;
-    const s = RC._levelState.l2.get(container.dataset.l2Author);
+    if (inner && inner !== this) return;
+    const s = RC._levelState.l2.get(this.dataset.l2Author);
     if (!s) return;
     const th = e.target.closest("thead th");
     if (th) {
       handleSortClick(th, "2", `l2-${s.author}`, "downloads", true, () => {
-        renderL2(s.idx, s.author, s.models, container, s.totalBeforeFilter, s.allBaseModels);
+        renderL2(s.idx, s.author, s.models, this, s.totalBeforeFilter, s.allBaseModels);
       });
       return;
     }
@@ -1883,11 +1910,7 @@ function setupL2Events(container) {
       const inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
       const tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
       const modelKey = `${PREFIX_MODEL}${modelId}`;
-      if (detailRow.style.display === "none") {
-        detailRow.style.display = "";
-        tog.classList.add("open");
-        tog.setAttribute("aria-expanded", "true");
-        RenderCoordinator.expandedSections.add(modelKey);
+      if (toggleSection(detailRow, tog, modelKey, `${PREFIX_GROUP}${modelId}|`)) {
         cacheDomRef(modelKey, { row: tr, detailRow, inner, toggle: tog });
         const key = `children-${modelId}`;
         const cached = cacheAccess(key);
@@ -1896,17 +1919,6 @@ function setupL2Events(container) {
         } else {
           inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
           loadChildren(l2Idx, modelIdx, modelId, inner);
-        }
-        tog?.focus();
-      } else {
-        detailRow.style.display = "none";
-        tog.classList.remove("open");
-        tog.setAttribute("aria-expanded", "false");
-        invalidateDomKey(modelKey);
-        invalidateDomPrefix(PREFIX_GROUP + modelId + "|");
-        RenderCoordinator.expandedSections.delete(modelKey);
-        for (const k of [...RenderCoordinator.expandedSections]) {
-          if (k.startsWith(PREFIX_GROUP + modelId + "|")) RenderCoordinator.expandedSections.delete(k);
         }
         tog?.focus();
       }
@@ -2171,7 +2183,8 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   html += sorted.map((g, gIdx) => {
     const rowIdx = 2 + gIdx * 2;
     const detailRowIdx = rowIdx + 1;
-    return `<tr class="l3-row" data-l3-l2="${l2Idx}" data-l3-model-idx="${modelIdx}" data-l3-parent="${escapeHtml(parentId)}" data-l3-idx="${gIdx}" data-l3-author="${escapeHtml(g.author)}" aria-rowindex="${rowIdx}">
+    const zebra = gIdx % 2 === 0 ? "row-even" : "row-odd";
+    return `<tr class="l3-row ${zebra}" data-l3-l2="${l2Idx}" data-l3-model-idx="${modelIdx}" data-l3-parent="${escapeHtml(parentId)}" data-l3-idx="${gIdx}" data-l3-author="${escapeHtml(g.author)}" aria-rowindex="${rowIdx}">
       <td aria-colindex="1"><button type="button" class="toggle" id="t3-${l2Idx}-${modelIdx}-${gIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(g.author)} quants">▶</button><a href="https://huggingface.co/${escapeHtml(g.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(g.author)}</a></td>
       <td class="right" aria-colindex="2">${fmt(g.totalDownloads)}</td>
       <td class="models-cell" aria-colindex="3">${g.count}</td>
@@ -2211,22 +2224,11 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
         const inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
         const tog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
         const groupKey = `${PREFIX_GROUP}${parentId}|${author}`;
-        if (detailRow.style.display === "none") {
-          detailRow.style.display = "";
-          tog.classList.add("open");
-          tog.setAttribute("aria-expanded", "true");
-          RenderCoordinator.expandedSections.add(groupKey);
+        if (toggleSection(detailRow, tog, groupKey)) {
           cacheDomRef(groupKey, { row: tr, detailRow, inner, toggle: tog });
           const allChildren = cacheAccess(`children-${parentId}`) || s.children || [];
           const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
           renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, inner);
-          tog?.focus();
-        } else {
-          detailRow.style.display = "none";
-          tog.classList.remove("open");
-          tog.setAttribute("aria-expanded", "false");
-          invalidateDomKey(groupKey);
-          RenderCoordinator.expandedSections.delete(groupKey);
           tog?.focus();
         }
       }
@@ -2320,9 +2322,8 @@ function refreshAllExpanded() {
   for (const key of RC.expandedSections) {
     if (!key.startsWith(PREFIX_AUTHOR)) continue;
     const author = key.slice(PREFIX_AUTHOR.length);
-    let ref = _domCache.get(key);
-    let row, detailRow, inner, tog;
-    if (ref && ref.row.isConnected && ref.detailRow.style.display === "none") {
+    let ref = _getSectionCached(key), row, detailRow, inner, tog;
+    if (ref) {
       ({ row, detailRow, inner, tog } = ref);
     } else {
       row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
@@ -2349,9 +2350,8 @@ function refreshAllExpanded() {
   for (const key of RC.expandedSections) {
     if (!key.startsWith(PREFIX_MODEL)) continue;
     const modelId = key.slice(PREFIX_MODEL.length);
-    let ref = _domCache.get(key);
-    let row, detailRow, inner, tog;
-    if (ref && ref.row.isConnected && ref.detailRow.style.display === "none") {
+    let ref = _getSectionCached(key), row, detailRow, inner, tog;
+    if (ref) {
       ({ row, detailRow, inner, tog } = ref);
     } else {
       row = document.querySelector(`tr.l2-row[data-model="${CSS.escape(modelId)}"]`);
@@ -2365,8 +2365,6 @@ function refreshAllExpanded() {
     }
 
     // Skip rows that no longer belong to an active L1 expansion after filter changes.
-    // L2 sections live inside .detail-inner panes; if the parent author was filtered out,
-    // collapsed, or shifted during refresh, re-expanding them would create orphaned UI state.
     if (!row || !row.closest(".detail-inner")) continue;
 
     const l2Idx = parseInt(row.dataset.l2Idx);
@@ -2389,9 +2387,8 @@ function refreshAllExpanded() {
     const parts = key.split("|");
     const modelId = parts[1];
     const groupAuthor = parts.slice(2).join("|");
-    let ref = _domCache.get(key);
-    let row, detailRow, inner, tog;
-    if (ref && ref.row.isConnected && ref.detailRow.style.display === "none") {
+    let ref = _getSectionCached(key), row, detailRow, inner, tog;
+    if (ref) {
       ({ row, detailRow, inner, tog } = ref);
     } else {
       row = document.querySelector(`tr.l3-row[data-l3-parent="${CSS.escape(modelId)}"][data-l3-author="${CSS.escape(groupAuthor)}"]`);
@@ -2561,22 +2558,19 @@ function buildDateSlider() {
 // so independent completion handlers can safely share dedup state without generation mashing.
 let _fetchSeen = null;        // Set of model IDs seen this generation
 let _fetchCompleted = 0;      // Number of completed requests
-let _fetchTotal = 0;          // Total number of pending requests
 
 // Initialize shared fetch state at the start of a new "Get Results" cycle.
 function _initFetchState() {
   _fetchSeen = new Set((_allFetched || []).map(m => m.id));
   if (!_allFetched) _allFetched = [];
   _fetchCompleted = 0;
-  _fetchTotal = 0;
 }
 
 // Normalize, dedup, and push models from a completed request into _allFetched.
 // Triggers progressive render. Returns the count of new (non-deduped) models added.
-function _mergeRequestResult(rawModels, gen, pipelineTag, isTrending, filterFn) {
+function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
   if (gen !== _fetchGeneration) return 0;
   let added = 0;
-  const seenBeforeSeen = _fetchSeen.size;
   for (const m of rawModels.map(normalizeModel)) {
     if (_fetchSeen.has(m.id)) continue;
     _fetchSeen.add(m.id);
@@ -2586,7 +2580,7 @@ function _mergeRequestResult(rawModels, gen, pipelineTag, isTrending, filterFn) 
     _allFetched.push(m);
     added++;
   }
-  return isTrending ? (_fetchSeen.size - seenBeforeSeen) : 0;
+  return added;
 }
 
 // Called by each independent completion handler to update status and trigger render.
@@ -2658,7 +2652,7 @@ function applyFilters(force, deep) {
         promises.push((async () => {
           try {
             const raw = await fetchModels(tag);
-            _mergeRequestResult(raw, gen, tag, false, null);
+            _mergeRequestResult(raw, gen, tag, null);
             fetchedTasks.add(tag);
           } catch (e) {
             console.warn("fetchModels error for", tag, e);
@@ -2671,7 +2665,7 @@ function applyFilters(force, deep) {
         promises.push((async () => {
           try {
             const raw = await fetchRecentModels(tag);
-            _mergeRequestResult(raw, gen, tag, false, null);
+            _mergeRequestResult(raw, gen, tag, null);
             fetchedTasks.add(tag);
           } catch (e) {
             console.warn("fetchRecentModels error for", tag, e);
@@ -2687,7 +2681,7 @@ function applyFilters(force, deep) {
         promises.push((async () => {
           try {
             const raw = await fetchUntaggedModels();
-            _mergeRequestResult(raw, gen, null, false, m => !m.pipeline_tag);
+            _mergeRequestResult(raw, gen, null, m => !m.pipeline_tag);
             fetchedUntagged = true;
           } catch (e) {
             console.warn("fetchUntaggedModels error:", e);
@@ -2703,7 +2697,7 @@ function applyFilters(force, deep) {
         promises.push((async () => {
           try {
             const raw = await fetchTrendingModels();
-            _trendingAdded = _mergeRequestResult(raw, gen, null, true, null);
+            _trendingAdded = _mergeRequestResult(raw, gen, null, null);
             fetchedTrending = true;
           } catch (e) {
             console.warn("fetchTrendingModels error:", e);
@@ -2834,15 +2828,15 @@ function updateArrows() {
   document.querySelectorAll("#main-table thead th").forEach(th => {
     const arrow = th.querySelector(".arrow, .sort-arrow, .arrow-left");
     if (!arrow) return;
-    const active = th.dataset.key === sortKey;
-    arrow.textContent = active ? (sortAsc ? "▲" : "▼") : "";
+    const active = th.dataset.key === RC.sortKey;
+    arrow.textContent = active ? (RC.sortAsc ? "▲" : "▼") : "";
     arrow.className = th.classList.contains("right") ? "arrow-left" : "arrow";
     th.classList.toggle("sorted", active);
-    if (active) th.setAttribute("aria-sort", sortAsc ? "ascending" : "descending");
+    if (active) th.setAttribute("aria-sort", RC.sortAsc ? "ascending" : "descending");
     else th.removeAttribute("aria-sort");
   });
   const ann = document.getElementById("sort-announce");
-  if (ann) ann.textContent = `Sorted by ${sortKey} ${sortAsc ? "ascending" : "descending"}`;
+  if (ann) ann.textContent = `Sorted by ${RC.sortKey} ${RC.sortAsc ? "ascending" : "descending"}`;
 }
 
 document.querySelector("#main-table").addEventListener("click", e => {
@@ -2851,7 +2845,6 @@ document.querySelector("#main-table").addEventListener("click", e => {
   if (th) {
     const key = th.dataset.key;
     RenderCoordinator.setL1Sort(key);
-    syncSortState();
     const savedSort = new Set(RenderCoordinator.getExpandedList());
     renderMain(_authorData);
     updateArrows();
@@ -2867,11 +2860,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
     const inner = document.getElementById(`i1-${idx}`);
     const tog = document.getElementById(`t1-${idx}`);
     const authorKey = `${PREFIX_AUTHOR}${author}`;
-    if (detailRow.style.display === "none") {
-      detailRow.style.display = "";
-      tog.classList.add("open");
-      tog.setAttribute("aria-expanded", "true");
-      RenderCoordinator.expandedSections.add(authorKey);
+    if (toggleSection(detailRow, tog, authorKey, [`${PREFIX_MODEL}${author}/`, `${PREFIX_GROUP}${author}/`])) {
       cacheDomRef(authorKey, { row: tr, detailRow, inner, toggle: tog });
       const baseModels = cacheAccess(author);
       if (!baseModels) {
@@ -2882,20 +2871,6 @@ document.querySelector("#main-table").addEventListener("click", e => {
         const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
 renderL2(idx, author, filtered, inner, nonQuantBase.length, nonQuantBase);
         deriveVisibleUnknowns();
-      }
-      tog?.focus();
-    } else {
-      detailRow.style.display = "none";
-      tog.classList.remove("open");
-      tog.setAttribute("aria-expanded", "false");
-      invalidateDomKey(authorKey);
-      invalidateDomPrefix(PREFIX_MODEL + author + "/");
-      invalidateDomPrefix(PREFIX_GROUP + author + "/");
-      RenderCoordinator.expandedSections.delete(authorKey);
-      for (const key of [...RenderCoordinator.expandedSections]) {
-        if (key.startsWith(PREFIX_MODEL + author + "/") || key.startsWith(PREFIX_GROUP + author + "/")) {
-          RenderCoordinator.expandedSections.delete(key);
-        }
       }
       tog?.focus();
     }
@@ -2985,15 +2960,7 @@ function markLocalParents(all, gen) {
     } else {
       const idLower = m.id.toLowerCase();
       if (!RE_Q_EXISTS.test(idLower)) continue;
-      const bits = m.id.split('/');
-      let name = bits[1];
-      while (name.length > 0) {
-        const dash = name.lastIndexOf('-');
-        if (dash <= 0) break;
-        name = name.substring(0, dash);
-        const candId = bits[0] + '/' + name;
-         if (seen.has(candId)) { baseId = candId; break; }
-      }
+      baseId = inferParent(m.id, seen);
       if (!baseId) continue;
     }
 
@@ -3042,15 +3009,7 @@ async function injectBaseModels(all, onBatch) {
     } else {
       const idLower = m.id.toLowerCase();
       if (!RE_Q_EXISTS.test(idLower)) continue;
-      const bits = m.id.split('/');
-      let name = bits[1];
-      while (name.length > 0) {
-        const dash = name.lastIndexOf('-');
-        if (dash <= 0) break;
-        name = name.substring(0, dash);
-        const candId = bits[0] + '/' + name;
-         if (seen.has(candId)) { baseId = candId; break; }
-      }
+      baseId = inferParent(m.id, seen);
       if (!baseId) continue;
     }
 
@@ -3108,7 +3067,6 @@ function _initApp() {
   document.getElementById("ps-from").max = CONFIG.PARAM_SLIDER_MAX;
   document.getElementById("ps-to").max = CONFIG.PARAM_SLIDER_MAX;
   RenderCoordinator._state.l1Sort = { key: "totalDownloads", asc: false };
-  syncSortState();
   updateArrows();
   buildFilterBar();
   buildFromToBars();
