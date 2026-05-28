@@ -345,7 +345,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260528.01';
+const APP_VERSION = '260528.02';
 // Design Notes (review items addressed in v260526.05):
 // - Popup positioning: positionPopupCenter now runs inside schedulePopupShow's setTimeout
 //   callback instead of synchronously on mouseenter, preventing stale getBoundingClientRect()
@@ -361,9 +361,9 @@ const APP_VERSION = '260528.01';
 //   from "no base models match current filters" (data exists but all filtered out).
 // - CSS cleanup: removed !important from .filter-popup th sticky position to avoid z-index
 //   stacking conflicts with Chromium's sticky header implementation.
-// - Inference semaphore: _acquireInferenceSlot/_releaseInferenceSlot limit concurrent param
-//   inference to 4 slots across all expanded authors, preventing bulk expansion from creating
-//   an excessively deep rate limiter queue.
+// - Param deepening and inference now fire independently through fetchJson() — the queue's
+//   INFLIGHT_MAX (5) and rate window (4 req/s) provide sufficient throttling without a
+//   separate semaphore layer that compounded delays.
 // Design Notes (review items addressed in v260525.31):
 // - Slider tooltip alignment: date-slider From uses align-right (sits left of knob), To
 //   uses align-left (sits right of knob). Param-slider uses centered (no alignment class).
@@ -513,7 +513,6 @@ const CONFIG = {
   MAX_RETRIES: 3,
   DATE_SLIDER_MAX: 80,
   DAYS_PER_STEP: 14,
-  PARAM_BATCH_SIZE: 4,
   DERIVED_BATCH_SIZE: 10,
   TRENDING_LIMIT: 1000,
   PARAM_MIN_GAP: 5,
@@ -557,18 +556,6 @@ const _inferredParamIds = new Set();
 const _inferredFromNameIds = new Set();
 const _inferredAttemptedIds = new Set();
 const _deepeningParamIds = new Set();
-// Global semaphore to limit concurrent param inference across all expanded authors,
-// preventing bulk expansion from saturating the rate limiter queue.
-let _inferenceSlots = 4;
-const _inferenceQueue = [];
-function _acquireInferenceSlot() {
-  if (_inferenceSlots > 0) { _inferenceSlots--; return Promise.resolve(); }
-  return new Promise(r => { _inferenceQueue.push(r); });
-}
-function _releaseInferenceSlot() {
-  if (_inferenceQueue.length > 0) { const r = _inferenceQueue.shift(); r(); }
-  else _inferenceSlots++;
-}
 let apiCalls = 0;
 let _consecutive429s = 0;
 const _rateLimitCounter = document.getElementById("api-counter");
@@ -1711,12 +1698,11 @@ function renderErrorWithRetry(container, message, retryFn) {
 async function deepenBatch(idx, author, container, unknownModels, filterApplied, nonQuantBase, gen) {
   const statusEl = document.getElementById("status");
   const totalUnk = unknownModels.length;
-  for (let i = 0; i < totalUnk; i += CONFIG.PARAM_BATCH_SIZE) {
-    const batch = unknownModels.slice(i, i + CONFIG.PARAM_BATCH_SIZE);
-    statusEl.textContent = `Resolving parameters for ${author}… (${Math.min(i + CONFIG.PARAM_BATCH_SIZE, totalUnk)}/${totalUnk})`;
-    await Promise.all(batch.map(async (m) => {
-      try {
-        const full = await fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`);
+  let completed = 0;
+  await Promise.all(unknownModels.map((m) => {
+    return fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`).then(
+      (full) => {
+        if (gen !== _fetchGeneration) return;
         let p = null;
         if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
         if (p === null && full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
@@ -1724,18 +1710,13 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
           m.paramB = p;
           _paramCache.set(m.id, p);
         }
-      } catch (e) {
-        console.warn("Failed to fetch param for", m.id, e);
-      }
-    }));
-    if (gen !== _fetchGeneration || !container.isConnected) return;
-    const pruned = filterApplied();
-    const detailRow = document.getElementById(`d1-${idx}`);
-    if (detailRow && detailRow.style.display !== "none") {
-      renderL2(idx, author, pruned, container, nonQuantBase.length, nonQuantBase);
-      if (gen === _fetchGeneration) refreshAllExpanded();
-    }
-  }
+      },
+      (e) => { console.warn("Failed to fetch param for", m.id, e); }
+    ).finally(() => {
+      completed++;
+      statusEl.textContent = `Resolving parameters for ${author}… (${completed}/${totalUnk})`;
+    });
+  }));
 }
 
 function inheritParentParams(unknownModels, baseModels) {
@@ -2540,13 +2521,7 @@ async function deriveVisibleUnknowns() {
     const container = document.getElementById(`i1-${idx}`);
     if (!container) continue;
     const getFiltered = () => models.filter(m2 => modelPassesAllFilters(m2));
-    for (let i = 0; i < unknown.length; i += CONFIG.PARAM_BATCH_SIZE) {
-      if (gen !== _fetchGeneration) return;
-      const batch = unknown.slice(i, i + CONFIG.PARAM_BATCH_SIZE);
-      await Promise.all(batch.map(m => _acquireInferenceSlot().then(() =>
-        tryResolveModelParam(m, gen, idx, author, container, getFiltered, models.length, models).finally(_releaseInferenceSlot)
-      )));
-    }
+    await Promise.all(unknown.map(m => tryResolveModelParam(m, gen, idx, author, container, getFiltered, models.length, models)));
   }
   if (gen !== _fetchGeneration) return;
   // Re-render so models that failed resolution (no success-triggered renderL2) get
