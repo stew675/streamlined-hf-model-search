@@ -344,7 +344,7 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260526.07';
+const APP_VERSION = '260528.01';
 // Design Notes (review items addressed in v260526.05):
 // - Popup positioning: positionPopupCenter now runs inside schedulePopupShow's setTimeout
 //   callback instead of synchronously on mouseenter, preventing stale getBoundingClientRect()
@@ -408,8 +408,8 @@ const APP_VERSION = '260526.07';
 // - Parent-param backfill from child search results: replaced metadata-based extraction
 //   (which never worked — search API doesn't return safetensors/gguf) with ID-based
 //   B/M pattern matching via extractParamFromId.
-// - Rate limiter: serialized slot acquisition via _rateSlotPromise chain to eliminate
-//   the check-then-push race between concurrent fetchJson calls.
+// - Rate limiter: replaced with queue-based API request manager (v260528): callers push
+//   work items via fetchJson(), manager dequeues gated by time-window and in-flight count.
 // - Clear Cache: removed redundant _fetchState flag resets (fetchedUntagged etc.) that
 //   caused unnecessary API calls; now also clears _levelState maps.
 // - Popup headers: "At most N shown" is now dynamic based on actual maxSamples cap.
@@ -515,7 +515,7 @@ const CONFIG = {
   PARAM_BATCH_SIZE: 4,
   DERIVED_BATCH_SIZE: 10,
   TRENDING_LIMIT: 1000,
-  INJECTION_BATCH_SIZE: 8,  // Intentionally exceeds FETCH_CONCURRENCY (5): injection fetches are targeted individual model cards, not broad search queries, so a slightly higher batch size is safe and completes faster.
+  INJECTION_BATCH_SIZE: 8,
   PARAM_MIN_GAP: 5,
   AUTHOR_LIMIT: 1000,
   CHILD_LIMIT: 1000,
@@ -526,7 +526,7 @@ const CONFIG = {
   INIT_PARAM_SLIDER_TO: 130,
   CACHE_MAX: 500,
   ALL_FETCHED_MAX: 16384,
-  FETCH_CONCURRENCY: 5,
+  INFLIGHT_MAX: 5,  // Max concurrent HTTP requests. Browser per-origin limit is ~6; leaves headroom for favicon etc.
   THUMB_SIZE: 18,
 };
 
@@ -632,96 +632,160 @@ function matchesTaskFilter(pipelineTag) {
 
 const _apiTimestamps = [];
 const _inflightFetches = new Map();
-let _rateSlotPromise = Promise.resolve();
 
-// Serializes rate-limit slot acquisition so concurrent fetchJson calls cannot both
-// pass the length-check gate and then both push, which would exceed the limit.
-async function acquireRateSlot() {
-  const prev = _rateSlotPromise;
-  _rateSlotPromise = (async () => {
-    await prev;
-    while (true) {
-      const now = Date.now();
-      const cutoff = now - CONFIG.RATE_WINDOW;
-      while (_apiTimestamps.length > 0 && _apiTimestamps[0] < cutoff) {
-        _apiTimestamps.shift();
-      }
-      if (_apiTimestamps.length < CONFIG.RATE_LIMIT) {
-        _apiTimestamps.push(now);
-        return;
-      }
-      const wait = _apiTimestamps[0] + CONFIG.RATE_WINDOW - now + 10;
-      await new Promise(r => setTimeout(r, wait));
-    }
-  })();
-  return _rateSlotPromise;
-}
+// ── API Request Manager ──
+// Queue-based dispatcher: callers push work items via fetchJson(), the manager dequeues
+// at its own pace gated by time-window (≤1 per 250ms) and in-flight count (≤INFLIGHT_MAX).
+// This decouples request creation from execution, bounding concurrent HTTP connections
+// while allowing callers to fire all N requests without batching logic.
+const _workQueue = [];
+let _inflightCount = 0;
+let _dequeueScheduled = false;
 
-// Fetches with URL-level dedup, rate limiting (sliding window), and exponential backoff.
-// URL dedup via _inflightFetches is checked before rate limiting so concurrent requests
-// for the same URL share a single inflight promise instead of each consuming a rate-limit slot.
-async function fetchJson(url) {
+function fetchJson(url) {
   const existing = _inflightFetches.get(url);
   if (existing) return existing;
 
-  const promise = (async () => {
-    let retries = 0;
-    const MAX_RETRIES = CONFIG.MAX_RETRIES;
-    while (true) {
-      await acquireRateSlot();
-      let res;
-      try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT);
-        try {
-          res = await fetch(url, { signal: controller.signal });
-        } finally {
-          clearTimeout(timer);
-        }
-      } catch (err) {
-        if (retries < MAX_RETRIES) {
-          retries++;
-          const delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
-          console.warn(`fetchJson: network error for ${url}, retry ${retries}/${MAX_RETRIES} in ${delay}ms`);
-          await new Promise(r => setTimeout(r, delay));
-          continue;
-        }
-        throw err;
-      }
-      if (res.ok) {
-        _consecutive429s = 0;
-        updateRateLimitUI(false);
-        incApiCalls(1);
-        return res.json();
-      }
-      if ((res.status === 429 || res.status >= 500) && retries < MAX_RETRIES) {
-        retries++;
-        let delay;
-        if (res.status === 429) {
-          _consecutive429s++;
-          updateRateLimitUI(_consecutive429s >= 3);
-          const ra = res.headers.get('Retry-After');
-          delay = ra ? parseInt(ra, 10) * 1000 : Math.min(1000 * Math.pow(2, retries - 1), 30000);
-        } else {
-          _consecutive429s = 0;
-          updateRateLimitUI(false);
-          delay = Math.min(1000 * Math.pow(2, retries - 1), 30000);
-        }
-        await new Promise(r => setTimeout(r, delay));
-        continue;
-      }
-      _consecutive429s = 0;
-      updateRateLimitUI(false);
-      incApiCalls(1);
-      throw new Error(`HTTP ${res.status}`);
-    }
-  })();
+  let resolve, reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  _workQueue.push({ url, resolve, reject });
+  _scheduleDequeue();
 
   _inflightFetches.set(url, promise);
   promise.finally(() => {
     if (_inflightFetches.get(url) === promise) _inflightFetches.delete(url);
   });
   return promise;
+}
+
+function _scheduleDequeue() {
+  if (_dequeueScheduled) return;
+  _dequeueScheduled = true;
+  setTimeout(_dequeueNext, 0);
+}
+
+// Dequeues the next work item from the queue and dispatches it. Recursively calls itself
+// after completion to keep the pipeline flowing. Gated by in-flight count and time window.
+function _dequeueNext() {
+  if (_workQueue.length === 0) { _dequeueScheduled = false; return; }
+  if (_inflightCount >= CONFIG.INFLIGHT_MAX) {
+    setTimeout(_dequeueNext, CONFIG.RATE_WINDOW);
+    return;
+  }
+  const now = Date.now();
+  const cutoff = now - CONFIG.RATE_WINDOW;
+  while (_apiTimestamps.length > 0 && _apiTimestamps[0] < cutoff) {
+    _apiTimestamps.shift();
+  }
+  if (_apiTimestamps.length >= CONFIG.RATE_LIMIT) {
+    const wait = _apiTimestamps[0] + CONFIG.RATE_WINDOW - now + 10;
+    setTimeout(_dequeueNext, Math.max(wait, 1));
+    return;
+  }
+
+  // Both gates pass — pop and dispatch.
+  const item = _workQueue.shift();
+  if (!item) { _dequeueScheduled = false; return; }
+  const gen = _fetchGeneration;
+  if (gen !== _fetchGeneration) {
+    item.reject(new Error("stale generation"));
+    _dequeueNext();
+    return;
+  }
+  _apiTimestamps.push(Date.now());
+  _inflightCount++;
+
+  _dispatchFetchWithRetry(item, gen, 0);
+}
+
+// Executes the HTTP fetch with retry logic. On success/failure resolves/rejects the
+// work item's deferred promise and triggers next dequeue. On retriable error releases
+// its in-flight slot, waits backoff delay, then re-enqueues at tail to compete fairly.
+function _dispatchFetchWithRetry(item, gen, retries) {
+  if (gen !== _fetchGeneration) {
+    _inflightCount--;
+    item.reject(new Error("stale generation"));
+    _dequeueNext();
+    return;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT);
+
+  fetch(item.url, { signal: controller.signal })
+    .then(async res => {
+      clearTimeout(timer);
+      if (gen !== _fetchGeneration) {
+        _inflightCount--;
+        item.reject(new Error("stale generation"));
+        _dequeueNext();
+        return;
+      }
+      if (res.ok) {
+        _consecutive429s = 0;
+        updateRateLimitUI(false);
+        incApiCalls(1);
+        const data = await res.json();
+        if (gen !== _fetchGeneration) {
+          _inflightCount--;
+          item.reject(new Error("stale generation"));
+          _dequeueNext();
+          return;
+        }
+        _inflightCount--;
+        item.resolve(data);
+        _dequeueNext();
+      } else if ((res.status === 429 || res.status >= 500) && retries < CONFIG.MAX_RETRIES) {
+        const nextRetry = retries + 1;
+        let delay;
+        if (res.status === 429) {
+          _consecutive429s++;
+          updateRateLimitUI(_consecutive429s >= 3);
+          const ra = res.headers.get('Retry-After');
+          delay = ra ? parseInt(ra, 10) * 1000 : Math.min(1000 * Math.pow(2, retries), 30000);
+        } else {
+          _consecutive429s = 0;
+          updateRateLimitUI(false);
+          delay = Math.min(1000 * Math.pow(2, retries), 30000);
+        }
+        console.warn(`API ${res.status} for ${item.url}, retry ${nextRetry}/${CONFIG.MAX_RETRIES} in ${delay}ms`);
+        _inflightCount--;
+        setTimeout(() => {
+          _workQueue.push(item);
+          _scheduleDequeue();
+        }, delay);
+        _dequeueNext();
+      } else {
+        _consecutive429s = 0;
+        updateRateLimitUI(false);
+        incApiCalls(1);
+        _inflightCount--;
+        item.reject(new Error(`HTTP ${res.status}`));
+        _dequeueNext();
+      }
+    })
+    .catch(err => {
+      clearTimeout(timer);
+      if (gen !== _fetchGeneration) {
+        _inflightCount--;
+        item.reject(new Error("stale generation"));
+        _dequeueNext();
+        return;
+      }
+      if (retries < CONFIG.MAX_RETRIES) {
+        const delay = Math.min(1000 * Math.pow(2, retries), 30000);
+        console.warn(`Network error for ${item.url}, retry ${retries + 1}/${CONFIG.MAX_RETRIES} in ${delay}ms`);
+        _inflightCount--;
+        setTimeout(() => {
+          _workQueue.push(item);
+          _scheduleDequeue();
+        }, delay);
+        _dequeueNext();
+      } else {
+        _inflightCount--;
+        item.reject(err);
+        _dequeueNext();
+      }
+    });
 }
 
 // Full=true&cardData=true on every fetch: the HF search API never returns safetensors/gguf
@@ -2601,6 +2665,65 @@ function buildDateSlider() {
 // and untagged models, (3) if deep, inject cross-author base models; if quick, skip injection,
 // (4) trim _allFetched to 16k, (5) compute author data and render. If all tasks are already
 // fetched, skips to (5). The deep parameter controls whether injectBaseModels runs.
+// Shared state for progressive fetch rendering. Each "Get Results" creates a fresh context
+// so independent completion handlers can safely share dedup state without generation mashing.
+let _fetchSeen = null;        // Set of model IDs seen this generation
+let _fetchCompleted = 0;      // Number of completed requests
+let _fetchTotal = 0;          // Total number of pending requests
+
+// Initialize shared fetch state at the start of a new "Get Results" cycle.
+function _initFetchState() {
+  _fetchSeen = new Set((_allFetched || []).map(m => m.id));
+  if (!_allFetched) _allFetched = [];
+  _fetchCompleted = 0;
+  _fetchTotal = 0;
+}
+
+// Normalize, dedup, and push models from a completed request into _allFetched.
+// Triggers progressive render. Returns the count of new (non-deduped) models added.
+function _mergeRequestResult(rawModels, gen, pipelineTag, isTrending, filterFn) {
+  if (gen !== _fetchGeneration) return 0;
+  let added = 0;
+  const seenBeforeSeen = _fetchSeen.size;
+  for (const m of rawModels.map(normalizeModel)) {
+    if (_fetchSeen.has(m.id)) continue;
+    _fetchSeen.add(m.id);
+    m.paramB = getParamCount(m);
+    if (!m.pipeline_tag && pipelineTag) m.pipeline_tag = pipelineTag;
+    if (filterFn && !filterFn(m)) continue;
+    _allFetched.push(m);
+    added++;
+  }
+  return isTrending ? (_fetchSeen.size - seenBeforeSeen) : 0;
+}
+
+// Called by each independent completion handler to update status and trigger render.
+function _onFetchComplete(gen, completed, total, savedExpansions) {
+  if (gen !== _fetchGeneration) return;
+  const status = document.getElementById("status");
+  status.textContent = `Fetching models… (${completed}/${total})`;
+  recomputeAndRenderWithoutDerive(savedExpansions);
+}
+
+// Trim _allFetched to ALL_FETCHED_MAX, preserving injected base models.
+function _trimAllFetched() {
+  if (_allFetched.length <= CONFIG.ALL_FETCHED_MAX) return;
+  const pinned = [];
+  const droppable = [];
+  for (const m of _allFetched) {
+    if (_injectedBaseIds.has(m.id)) pinned.push(m);
+    else droppable.push(m);
+  }
+  droppable.sort((a, b) => {
+    const da = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+    const db = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+    return db !== da ? db - da : (b.id || '').localeCompare(a.id || '');
+  });
+  const room = CONFIG.ALL_FETCHED_MAX - pinned.length;
+  droppable.length = Math.max(0, Math.min(droppable.length, room));
+  _allFetched = droppable.concat(pinned);
+}
+
 function applyFilters(force, deep) {
   if (!needsUpdate && !force) return;
   needsUpdate = false;
@@ -2620,122 +2743,130 @@ function applyFilters(force, deep) {
   const newTasks = tasks.filter(t => !fetchedTasks.has(t));
   const needUntagged = activeSpecialFilters.has("include untagged") && !fetchedUntagged;
   const reenable = () => { quickBtn.disabled = false; deepBtn.disabled = false; };
-  // Always enter the async path when deep=true (injection may be needed even if all
-  // tasks are already fetched — e.g. Quick was clicked first and now the user upgrades).
-  // Also enter when there are new tasks to fetch or untagged models needed.
-  if (newTasks.length > 0 || needUntagged || !fetchedTrending || deep) {
-    (async () => {
-      document.getElementById("main-table").setAttribute("aria-busy", "true");
-      try {
-        const status = document.getElementById("status");
-        let all;
-        if (newTasks.length > 0 || needUntagged || !fetchedTrending) {
-          status.textContent = `Fetching models…`;
-          _trendingAdded = 0;
-          const seen = new Set((_allFetched || []).map(m => m.id));
-          all = [...(_allFetched || [])];
-           if (newTasks.length > 0) {
-             const fresh = await fetchTasks(newTasks, gen);
-            for (const m of fresh) {
-              if (!seen.has(m.id)) { seen.add(m.id); all.push(m); }
-            }
-          }
-          if (gen !== _fetchGeneration) return;
-          if (needUntagged) {
-            const raw = await fetchUntaggedModels();
-            for (const m of raw.filter(x => !x.pipeline_tag).map(normalizeModel)) {
-              if (!seen.has(m.id)) { seen.add(m.id); all.push(m); }
-            }
-            fetchedUntagged = true;
-          }
-          if (gen !== _fetchGeneration) return;
-          if (!fetchedTrending) {
-            try {
-              const beforeSeen = seen.size;
-              const trendRaw = await fetchTrendingModels();
-              for (const m of trendRaw.map(normalizeModel)) {
-                if (!seen.has(m.id)) { seen.add(m.id); all.push(m); }
-              }
-              _trendingAdded = seen.size - beforeSeen;
-              fetchedTrending = true;
-            } catch (e) {
-              console.warn("fetchTrendingModels error:", e);
-              document.getElementById("status").textContent += ' (trending unavailable)';
-            }
-          }
-          if (gen !== _fetchGeneration) return;
-          _allFetched = all;
-          recomputeAndRender(savedExpansions);
-        } else {
-          all = _allFetched || [];
-        }
-        if (deep) {
-          status.textContent = `Rendered ${_authorData.length} authors, resolving base models…`;
-          try {
-            await injectBaseModels(all, (() => {
-              let renderCounter = 0;
-              return () => {
-                renderCounter++;
-                if (gen !== _fetchGeneration) return;
-                if (renderCounter % 2 !== 0) return;
-                const saved = new Set(RC.expandedSections);
-                recomputeAndRender(saved);
-              };
-            })());
-          } catch (e) {
-            console.warn("Base model injection error:", e);
-          }
-        } else {
-          // Quick mode: mark parents already in _allFetched so quants outside the date
-          // range still keep their parent visible (the data is already in hand — no API
-          // calls needed, just a local scan).
-          // _injectedBaseIds is intentionally NOT cleared here — models injected during
-          // a prior deep fetch should persist across quick re-fetches since upstream data
-          // is static and re-injecting would waste API calls. Clear Cache or a fresh deep
-          // fetch resets the set (injectBaseModels calls .clear()).
-           markLocalParents(all, gen);
-        }
-        if (all.length > CONFIG.ALL_FETCHED_MAX) {
-          if (gen !== _fetchGeneration) return;
-          // Keep injected base models (pinned) regardless of date, then fill remaining
-          // capacity with the most recently-modified non-injected models. This prevents
-          // cross-author parent models (which may have old lastModified dates) from being
-          // silently dropped, which would orphan their child quantizations.
-          const pinned = [];
-          const droppable = [];
-          for (const m of all) {
-            if (_injectedBaseIds.has(m.id)) pinned.push(m);
-            else droppable.push(m);
-          }
-          droppable.sort((a, b) => {
-            const da = a.lastModified ? new Date(a.lastModified).getTime() : 0;
-            const db = b.lastModified ? new Date(b.lastModified).getTime() : 0;
-            return db !== da ? db - da : (b.id || '').localeCompare(a.id || '');
-          });
-          const room = CONFIG.ALL_FETCHED_MAX - pinned.length;
-          droppable.length = Math.max(0, Math.min(droppable.length, room));
-          all = droppable.concat(pinned);
-          _allFetched = all;
-        }
-        // Re-render unconditionally — injectBaseModels may have marked existing models
-        // as _injected (bypassing the date filter via _injectedBaseIds), which changes
-        // the output of computeAuthorData() even when no new models were fetched.
-        if (gen !== _fetchGeneration) return;
-        recomputeAndRender(savedExpansions);
-        status.textContent = "";
-      } catch (e) {
-        console.warn("applyFilters error:", e);
-        document.getElementById("status").textContent = "Error: " + e.message;
-      } finally {
-        reenable();
-        document.getElementById("main-table").setAttribute("aria-busy", "false");
-      }
-    })();
-   } else {
+
+  // Fast path: no new data needed, just re-render with current filters.
+  if (newTasks.length === 0 && !needUntagged && fetchedTrending && !deep) {
     markLocalParents(_allFetched || [], gen);
     reenable();
     recomputeAndRender(savedExpansions);
+    return;
   }
+
+  // Async path: fire all requests independently with progressive rendering.
+  (async () => {
+    document.getElementById("main-table").setAttribute("aria-busy", "true");
+    try {
+      _initFetchState();
+      const promises = [];
+      let totalRequests = 0;
+
+      // Fire each task's sorts as independent requests — no pairing, no batching.
+      for (const tag of newTasks) {
+        totalRequests++;
+        promises.push((async () => {
+          try {
+            const raw = await fetchModels(tag);
+            _mergeRequestResult(raw, gen, tag, false, null);
+            fetchedTasks.add(tag);
+          } catch (e) {
+            console.warn("fetchModels error for", tag, e);
+          } finally {
+            _onFetchComplete(gen, ++_fetchCompleted, totalRequests, savedExpansions);
+          }
+        })());
+
+        totalRequests++;
+        promises.push((async () => {
+          try {
+            const raw = await fetchRecentModels(tag);
+            _mergeRequestResult(raw, gen, tag, false, null);
+            fetchedTasks.add(tag);
+          } catch (e) {
+            console.warn("fetchRecentModels error for", tag, e);
+          } finally {
+            _onFetchComplete(gen, ++_fetchCompleted, totalRequests, savedExpansions);
+          }
+        })());
+      }
+
+      // Fire untagged as independent request.
+      if (needUntagged) {
+        totalRequests++;
+        promises.push((async () => {
+          try {
+            const raw = await fetchUntaggedModels();
+            _mergeRequestResult(raw, gen, null, false, m => !m.pipeline_tag);
+            fetchedUntagged = true;
+          } catch (e) {
+            console.warn("fetchUntaggedModels error:", e);
+          } finally {
+            _onFetchComplete(gen, ++_fetchCompleted, totalRequests, savedExpansions);
+          }
+        })());
+      }
+
+      // Fire trending as independent request.
+      if (!fetchedTrending) {
+        totalRequests++;
+        promises.push((async () => {
+          try {
+            const raw = await fetchTrendingModels();
+            _trendingAdded = _mergeRequestResult(raw, gen, null, true, null);
+            fetchedTrending = true;
+          } catch (e) {
+            console.warn("fetchTrendingModels error:", e);
+          } finally {
+            _onFetchComplete(gen, ++_fetchCompleted, totalRequests, savedExpansions);
+          }
+        })());
+      }
+
+      // Wait for all requests to complete before post-processing.
+      await Promise.allSettled(promises);
+      if (gen !== _fetchGeneration) return;
+
+      // Post-fetch processing: trim, inject/mark parents, final render.
+      _trimAllFetched();
+
+      if (deep) {
+        const status = document.getElementById("status");
+        status.textContent = `Resolving base models…`;
+        try {
+          await injectBaseModels(_allFetched, (() => {
+            let renderCounter = 0;
+            return () => {
+              renderCounter++;
+              if (gen !== _fetchGeneration) return;
+              if (renderCounter % 2 !== 0) return;
+              const saved = new Set(RC.expandedSections);
+              recomputeAndRender(saved);
+            };
+          })());
+        } catch (e) {
+          console.warn("Base model injection error:", e);
+        }
+      } else {
+        // Quick mode: mark parents already in _allFetched so quants outside the date
+        // range still keep their parent visible (the data is already in hand — no API
+        // calls needed, just a local scan).
+        // _injectedBaseIds is intentionally NOT cleared here — models injected during
+        // a prior deep fetch should persist across quick re-fetches since upstream data
+        // is static and re-injecting would waste API calls. Clear Cache or a fresh deep
+        // fetch resets the set (injectBaseModels calls .clear()).
+        markLocalParents(_allFetched, gen);
+      }
+
+      if (gen !== _fetchGeneration) return;
+      recomputeAndRender(savedExpansions);
+      document.getElementById("status").textContent = "";
+    } catch (e) {
+      console.warn("applyFilters error:", e);
+      document.getElementById("status").textContent = "Error: " + e.message;
+    } finally {
+      reenable();
+      document.getElementById("main-table").setAttribute("aria-busy", "false");
+    }
+  })();
 }
 
 function updateDateUI() {
@@ -2891,6 +3022,9 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   _paramCache.clear();
   _inflightChildren.clear();
   _inflightFetches.clear();
+  _workQueue.length = 0;
+  _inflightCount = 0;
+  _dequeueScheduled = false;
   for (const [el, timer] of _popupTimers) { clearTimeout(timer); }
   _popupTimers.clear();
   _inferredParamIds.clear();
@@ -2930,49 +3064,6 @@ document.getElementById("hide-missing-param-chip").addEventListener("click", () 
 });
 
 // ── Init ──
-// Fetch top models per pipeline tag (by downloads + by lastModified, merged + deduped).
-// Concurrency capped at 5 to avoid saturating the browser's connection pool.
-async function fetchTasks(tasks, gen) {
-  if (gen !== _fetchGeneration) return [];
-  const status = document.getElementById("status");
-  const seen = new Set();
-  const allFetched = [];
-  const CONCURRENCY = CONFIG.FETCH_CONCURRENCY;
-  for (let start = 0; start < tasks.length; start += CONCURRENCY) {
-    if (gen !== _fetchGeneration) return [];
-    const batch = tasks.slice(start, start + CONCURRENCY);
-    status.textContent = `Fetching ${batch.join(", ")}… (${Math.min(start + CONCURRENCY, tasks.length)}/${tasks.length})`;
-    const results = await Promise.allSettled(batch.map(async tag => {
-      const downloadsModels = await fetchModels(tag);
-      const recentModels = await fetchRecentModels(tag);
-      return { tag, combined: [...downloadsModels, ...recentModels] };
-    }));
-    const failedTasks = [];
-    results.forEach((r, i) => { if (r.status === "rejected") failedTasks.push(batch[i]); });
-    if (failedTasks.length > 0) {
-      status.textContent = `Fetched ${results.length - failedTasks.length}/${results.length} tasks. Failed: ${failedTasks.join(", ")}.`;
-    }
-    for (const r of results) {
-      if (gen !== _fetchGeneration) return [];
-      if (r.status === "rejected") {
-        console.warn("fetchTasks: task failed", r.reason);
-        continue;
-      }
-      const { tag, combined } = r.value;
-      for (const m of combined) {
-        if (seen.has(m.id)) continue;
-        seen.add(m.id);
-        const norm = normalizeModel(m);
-        norm.paramB = getParamCount(norm);
-        if (!norm.pipeline_tag) norm.pipeline_tag = tag;
-        allFetched.push(norm);
-      }
-      fetchedTasks.add(tag);
-    }
-  }
-  return allFetched;
-}
-
 // Local-only parent marking: scan all date-range models and mark any parent that
 // already exists in `all` as `_injected` (bypassing the date filter). No API calls.
 // Used by Quick mode to surface parents of visible quants without fetching new models.
