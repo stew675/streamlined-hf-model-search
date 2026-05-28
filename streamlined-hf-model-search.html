@@ -314,7 +314,7 @@
   <button type="button" id="clear-cache-btn" title="Clears: in-memory param cache, LRU model cache, inflight fetch state, canonical dedup cache, and inference tracking. Collapses expanded sections (re-expand to reload). Preserves all filters and sliders.">Clear Cache</button><span id="clear-cache-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></span>
   <span id="api-counter-wrap" style="margin-left:auto; min-width: 100px; text-align: right;">
    <span id="api-counter" class="filter-label" tabindex="0" role="button" style="font-variant-numeric: tabular-nums;">API Requests: 0</span>
-     <div class="api-counter-tooltip" role="tooltip">Anonymous API requests are rate-limited by Hugging Face (~100 req/min). Counter includes all attempts — successful, retried, and failed. When the counter glows amber, rate limiting is actively throttling requests.</div>
+     <div class="api-counter-tooltip" role="tooltip">Anonymous API requests are rate-limited by Hugging Face (~100 req/min). Counter includes successful and permanently-failed requests only — retries are not counted. When the counter glows amber, rate limiting is actively throttling requests.</div>
   </span>
   <span id="rate-limit-notice" style="display:none; padding:3px 10px; background:#d2992233; border:1px solid #d2992266; border-radius:6px; margin-left:8px; font-size:0.72rem; color:#e3b341; white-space:nowrap;">⚠️ Rate limited — backoff applied</span>
 </div>
@@ -345,7 +345,19 @@
 
 <script defer>
 (function() {
-const APP_VERSION = '260528.03';
+const APP_VERSION = '260528.04';
+// Design Notes (review items addressed in v260528.04):
+// - API counter tooltip: corrected to state retries are NOT counted, matching actual behavior
+//   where incApiCalls only fires on success and permanent failure, not retriable errors.
+// - tryResolveModelParam render coalescing: removed per-model renderL2 + refreshAllExpanded
+//   from success path; data is synced to shared state (_allFetched, _paramCache) and callers
+//   batch-render after all resolves complete (deriveVisibleUnknowns final recomputeAndRender).
+// - Slider UI throttling: input events now route through rAF-gated throttledSliderUI instead
+//   of calling updateDateUI/updateParamUI directly, bounding getBoundingClientRect() to once/frame.
+// - Error boundary: _doFullRender wrapped in try/catch with recovery status message.
+// - DOM ref caching for refreshAllExpanded: _domCache Map stores {row, detailRow, inner, toggle}
+//   per expansion key; populated on expand, cleared after renderL1 (innerHTML replacement),
+//   used as fast-path in refreshAllExpanded with querySelector fallback on stale/miss.
 // Design Notes (review items addressed in v260528.03):
 // - API Request Manager optimizations: removed redundant polling timeout from in-flight max
 //   branch (completions already call _dequeueNext), eliminated dead generation check with no
@@ -1367,20 +1379,27 @@ const RenderCoordinator = {
   },
 
   _doFullRender() {
-    const saved = this._savedExpansions;
-    const skipDerive = this._skipDerive;
-    this._savedExpansions = null;
-    this._skipDerive = false;
+    try {
+      const saved = this._savedExpansions;
+      const skipDerive = this._skipDerive;
+      this._savedExpansions = null;
+      this._skipDerive = false;
 
-    syncSortState();
-    _authorData = computeAuthorData();
-    this.renderL1(_authorData);
-    this.updateArrows();
-    this.pruneExpiredExpansions(new Set(_authorData.map(a => a.author)));
-    if (saved) this.saveRestoreExpansions(saved);
-    this.refreshAllExpanded();
-    
-    if (!skipDerive) deriveVisibleUnknowns();
+      syncSortState();
+      _authorData = computeAuthorData();
+      this.renderL1(_authorData);
+      _domCache.clear(); // renderL1 replaces innerHTML — all cached DOM refs are now detached
+      this.updateArrows();
+      this.pruneExpiredExpansions(new Set(_authorData.map(a => a.author)));
+      if (saved) this.saveRestoreExpansions(saved);
+      this.refreshAllExpanded();
+
+      if (!skipDerive) deriveVisibleUnknowns();
+    } catch (e) {
+      console.error("Render failed", e);
+      const status = document.getElementById("status");
+      if (status) status.textContent = "Render error. Click Get Results to recover.";
+    }
   },
 
   setL1Sort(key) {
@@ -1446,11 +1465,22 @@ function cacheAccess(key) {
 
 const _inflightChildren = new Map();
 
+// DOM reference cache for expanded sections — avoids repeated querySelector/getElementById
+// lookups in refreshAllExpanded. Keyed by expansion key (a|author, m|modelId, g|parentId|groupAuthor).
+// Entries invalidated on collapse and after re-render (innerHTML replacement detaches old refs).
+const _domCache = new Map();
+function cacheDomRef(key, ref) { if (ref && ref.row.isConnected) _domCache.set(key, ref); }
+function invalidateDomKey(key) { _domCache.delete(key); }
+function invalidateDomPrefix(prefix) { for (const k of _domCache) if (k[0].startsWith(prefix)) _domCache.delete(k[0]); }
+
 function pruneExpiredExpansions(renderedAuthors) {
   for (const key of [...RenderCoordinator.expandedSections]) {
     if (!key.startsWith(PREFIX_AUTHOR)) continue;
     const author = key.slice(PREFIX_AUTHOR.length);
     if (!renderedAuthors.has(author)) {
+      invalidateDomKey(key);
+      invalidateDomPrefix(PREFIX_MODEL + author + "/");
+      invalidateDomPrefix(PREFIX_GROUP + author + "/");
       RenderCoordinator.expandedSections.delete(key);
       for (const child of [...RenderCoordinator.expandedSections]) {
         if (child.startsWith(PREFIX_MODEL + author + "/") || child.startsWith(PREFIX_GROUP + author + "/")) {
@@ -1944,6 +1974,7 @@ function setupL2Events(container) {
         tog.classList.add("open");
         tog.setAttribute("aria-expanded", "true");
         RenderCoordinator.expandedSections.add(modelKey);
+        cacheDomRef(modelKey, { row: tr, detailRow, inner, toggle: tog });
         const key = `children-${modelId}`;
         const cached = cacheAccess(key);
         if (cached) {
@@ -1957,6 +1988,8 @@ function setupL2Events(container) {
         detailRow.style.display = "none";
         tog.classList.remove("open");
         tog.setAttribute("aria-expanded", "false");
+        invalidateDomKey(modelKey);
+        invalidateDomPrefix(PREFIX_GROUP + modelId + "|");
         RenderCoordinator.expandedSections.delete(modelKey);
         for (const k of [...RenderCoordinator.expandedSections]) {
           if (k.startsWith(PREFIX_GROUP + modelId + "|")) RenderCoordinator.expandedSections.delete(k);
@@ -2269,6 +2302,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
           tog.classList.add("open");
           tog.setAttribute("aria-expanded", "true");
           RenderCoordinator.expandedSections.add(groupKey);
+          cacheDomRef(groupKey, { row: tr, detailRow, inner, toggle: tog });
           const allChildren = cacheAccess(`children-${parentId}`) || s.children || [];
           const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
           renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, inner);
@@ -2277,6 +2311,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
           detailRow.style.display = "none";
           tog.classList.remove("open");
           tog.setAttribute("aria-expanded", "false");
+          invalidateDomKey(groupKey);
           RenderCoordinator.expandedSections.delete(groupKey);
           tog?.focus();
         }
@@ -2371,13 +2406,21 @@ function refreshAllExpanded() {
   for (const key of RC.expandedSections) {
     if (!key.startsWith(PREFIX_AUTHOR)) continue;
     const author = key.slice(PREFIX_AUTHOR.length);
-    const row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
-    if (!row) continue;
-    const idx = parseInt(row.dataset.l1Idx);
-    const detailRow = document.getElementById(`d1-${idx}`);
-    const inner = document.getElementById(`i1-${idx}`);
-    const tog = document.getElementById(`t1-${idx}`);
+    let ref = _domCache.get(key);
+    let row, detailRow, inner, tog;
+    if (ref && ref.row.isConnected && ref.detailRow.style.display === "none") {
+      ({ row, detailRow, inner, tog } = ref);
+    } else {
+      row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
+      if (!row) continue;
+      const idx = parseInt(row.dataset.l1Idx);
+      detailRow = document.getElementById(`d1-${idx}`);
+      inner = document.getElementById(`i1-${idx}`);
+      tog = document.getElementById(`t1-${idx}`);
+      cacheDomRef(key, { row, detailRow, inner, toggle: tog });
+    }
     if (!detailRow || detailRow.style.display !== "none") continue;
+    const idx = parseInt(row.dataset.l1Idx);
     detailRow.style.display = "";
     if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
     const models = cacheAccess(author);
@@ -2392,19 +2435,28 @@ function refreshAllExpanded() {
   for (const key of RC.expandedSections) {
     if (!key.startsWith(PREFIX_MODEL)) continue;
     const modelId = key.slice(PREFIX_MODEL.length);
-    const row = document.querySelector(`tr.l2-row[data-model="${CSS.escape(modelId)}"]`);
-    if (!row) continue;
-    const l2Idx = parseInt(row.dataset.l2Idx);
-    const modelIdx = parseInt(row.dataset.modelIdx);
+    let ref = _domCache.get(key);
+    let row, detailRow, inner, tog;
+    if (ref && ref.row.isConnected && ref.detailRow.style.display === "none") {
+      ({ row, detailRow, inner, tog } = ref);
+    } else {
+      row = document.querySelector(`tr.l2-row[data-model="${CSS.escape(modelId)}"]`);
+      if (!row) continue;
+      const l2Idx = parseInt(row.dataset.l2Idx);
+      const modelIdx = parseInt(row.dataset.modelIdx);
+      detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
+      inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
+      tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
+      cacheDomRef(key, { row, detailRow, inner, toggle: tog });
+    }
 
     // Skip rows that no longer belong to an active L1 expansion after filter changes.
     // L2 sections live inside .detail-inner panes; if the parent author was filtered out,
     // collapsed, or shifted during refresh, re-expanding them would create orphaned UI state.
     if (!row || !row.closest(".detail-inner")) continue;
 
-    const detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
-    const inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
-    const tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
+    const l2Idx = parseInt(row.dataset.l2Idx);
+    const modelIdx = parseInt(row.dataset.modelIdx);
     if (!detailRow || detailRow.style.display !== "none") continue;
     detailRow.style.display = "";
     if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
@@ -2423,14 +2475,26 @@ function refreshAllExpanded() {
     const parts = key.split("|");
     const modelId = parts[1];
     const groupAuthor = parts.slice(2).join("|");
-    const row = document.querySelector(`tr.l3-row[data-l3-parent="${CSS.escape(modelId)}"][data-l3-author="${CSS.escape(groupAuthor)}"]`);
+    let ref = _domCache.get(key);
+    let row, detailRow, inner, tog;
+    if (ref && ref.row.isConnected && ref.detailRow.style.display === "none") {
+      ({ row, detailRow, inner, tog } = ref);
+    } else {
+      row = document.querySelector(`tr.l3-row[data-l3-parent="${CSS.escape(modelId)}"][data-l3-author="${CSS.escape(groupAuthor)}"]`);
+      if (!row || !row.closest(".detail-inner")) continue;
+      const l2Idx = parseInt(row.dataset.l3L2);
+      const modelIdx = parseInt(row.dataset.l3ModelIdx);
+      const gIdx = parseInt(row.dataset.l3Idx);
+      detailRow = document.getElementById(`d3-${l2Idx}-${modelIdx}-${gIdx}`);
+      inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
+      tog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
+      cacheDomRef(key, { row, detailRow, inner, toggle: tog });
+    }
+
     if (!row || !row.closest(".detail-inner")) continue;
     const l2Idx = parseInt(row.dataset.l3L2);
     const modelIdx = parseInt(row.dataset.l3ModelIdx);
     const gIdx = parseInt(row.dataset.l3Idx);
-    const detailRow = document.getElementById(`d3-${l2Idx}-${modelIdx}-${gIdx}`);
-    const inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
-    const tog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
     if (!detailRow || detailRow.style.display !== "none") continue;
     detailRow.style.display = "";
     if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
@@ -2485,10 +2549,8 @@ async function tryResolveModelParam(m, gen, idx, author, container, getFiltered,
   const af = _allFetched && _allFetched.find(x => x.id === m.id);
   if (af) af.paramB = resolved;
   if (gen !== _fetchGeneration) return true;
-  if (!container || !container.isConnected) return true;
-  const filtered = getFiltered();
-  renderL2(idx, author, filtered, container, totalBeforeFilter, popupSource);
-  if (gen === _fetchGeneration) refreshAllExpanded();
+  // Skip per-model renderL2 + refreshAllExpanded — data is already synced to shared state
+  // (_allFetched, _paramCache). Callers batch-render after all resolves complete.
   return true;
 }
 
@@ -2554,10 +2616,15 @@ function enforceToGap(fromEl, toEl, minGap, max) {
   }
   clampRange(fromEl, toEl, minGap, max);
 }
+let _uiRafId = null;
+function throttledSliderUI() {
+  if (_uiRafId) return;
+  _uiRafId = requestAnimationFrame(() => { updateDateUI(); updateParamUI(); _uiRafId = null; });
+}
 function setupSliderEvents(from, to, minGap, max, read, updateUI, markDirty) {
-  from.addEventListener("input", () => { enforceFromGap(from, to, minGap, max); read(); updateUI(); });
+  from.addEventListener("input", () => { enforceFromGap(from, to, minGap, max); read(); throttledSliderUI(); });
   from.addEventListener("change", () => { enforceFromGap(from, to, minGap, max); read(); markDirty(); });
-  to.addEventListener("input", () => { enforceToGap(from, to, minGap, max); read(); updateUI(); });
+  to.addEventListener("input", () => { enforceToGap(from, to, minGap, max); read(); throttledSliderUI(); });
   to.addEventListener("change", () => { enforceToGap(from, to, minGap, max); read(); markDirty(); });
 }
 
@@ -2891,6 +2958,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
       tog.classList.add("open");
       tog.setAttribute("aria-expanded", "true");
       RenderCoordinator.expandedSections.add(authorKey);
+      cacheDomRef(authorKey, { row: tr, detailRow, inner, toggle: tog });
       const baseModels = cacheAccess(author);
       if (!baseModels) {
         inner.innerHTML = '<div class="detail-loading" role="status">Fetching base models…</div>';
@@ -2906,6 +2974,9 @@ renderL2(idx, author, filtered, inner, nonQuantBase.length, nonQuantBase);
       detailRow.style.display = "none";
       tog.classList.remove("open");
       tog.setAttribute("aria-expanded", "false");
+      invalidateDomKey(authorKey);
+      invalidateDomPrefix(PREFIX_MODEL + author + "/");
+      invalidateDomPrefix(PREFIX_GROUP + author + "/");
       RenderCoordinator.expandedSections.delete(authorKey);
       for (const key of [...RenderCoordinator.expandedSections]) {
         if (key.startsWith(PREFIX_MODEL + author + "/") || key.startsWith(PREFIX_GROUP + author + "/")) {
