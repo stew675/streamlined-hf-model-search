@@ -90,9 +90,9 @@
   .badge.deriv { background: #23863633; color: #3fb950; border-color: #23863655; box-shadow: 0 0 4px #23863622; }
   .badge.orphan { background: #d2992233; color: #e3b341; border-color: #d2992255; box-shadow: 0 0 4px #d2992222; }
 
-  .deepening-param { color: #58a6ff; cursor: help; border-bottom: 1px dotted #58a6ff66; }
+  .deepening-param { color: #d29922; cursor: help; border-bottom: 1px dotted #d2992266; }
   .no-param { color: #f85149; cursor: help; }
-  .no-param-maybe { color: #d47722; cursor: help; border-bottom: 1px dotted #d4772266; }
+  .no-param-maybe { color: #d29922; cursor: help; border-bottom: 1px dotted #d2992266; }
   .derived-param { color: #c084fc; cursor: help; border-bottom: 1px dotted #c084fc66; }
   .name-infer-param { color: #58a6ff; cursor: help; border-bottom: 1px dotted #58a6ff66; }
   .metadata-param { color: #7ecf7e; cursor: help; border-bottom: 1px dotted #7ecf7e66; }
@@ -347,7 +347,7 @@
 <script defer>
 (function() {
   "use strict";
-const APP_VERSION = '260528.07';
+const APP_VERSION = '260528.08';
 // See DESIGN-LOG.md — version changelog, architecture decisions, and code review rationale.
 let _allFetched, _authorData, _canonicalAuthor;
 
@@ -1153,14 +1153,14 @@ function paramBadgeHtml(m) {
     return '<span class="no-param-maybe" title="No parameter count — enable Infer Missing Params to attempt resolution">—</span>';
   }
   const label = paramValueToLabel(m.paramB);
-  if (_deepeningParamIds.has(m.id)) {
-    return `<span class="deepening-param" title="Resolved via direct API fetch">${label}</span>`;
-  }
   if (_inferredFromNameIds.has(m.id)) {
     return `<span class="name-infer-param" title="Inferred from model name pattern">${label}</span>`;
   }
   if (_inferredParamIds.has(m.id)) {
     return `<span class="derived-param" title="Inferred from child model names or data">${label}</span>`;
+  }
+  if (_deepeningParamIds.has(m.id)) {
+    return `<span class="deepening-param" title="Resolved via direct API fetch">${label}</span>`;
   }
   return `<span class="metadata-param" title="Resolved from model metadata">${label}</span>`;
 }
@@ -1667,6 +1667,7 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
   const statusEl = document.getElementById("status");
   const totalUnk = unknownModels.length;
   let completed = 0;
+  unknownModels.forEach(m => _deepeningParamIds.add(m.id));
   await Promise.all(unknownModels.map((m) => {
     return fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`).then(
       (full) => {
@@ -1677,6 +1678,7 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
         if (p !== null) {
           m.paramB = p;
           _paramCache.set(m.id, p);
+          _deepeningParamIds.delete(m.id);
         }
       },
       (e) => { console.warn("Failed to fetch param for", m.id, e); }
@@ -1686,6 +1688,7 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
       statusEl.textContent = `Resolving parameters for ${author}… (${completed}/${totalUnk})`;
       if (completed === totalUnk) {
         if (_deepenThrottleTimer) { clearTimeout(_deepenThrottleTimer); _deepenThrottleTimer = null; }
+        if (gen === _fetchGeneration) document.getElementById("status").textContent = "";
         refreshAuthorL2();
       } else if (!_deepenThrottleTimer) {
         _deepenThrottleTimer = setTimeout(() => {
@@ -1699,10 +1702,31 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
   function refreshAuthorL2() {
     const models = cacheAccess(author);
     if (!models) return;
+    inheritParentParams(unknownModels, models);
     const nqb = models.filter(m => !m._orphanQuant && !m._nestedQuant);
     const filtered = nqb.filter(m => modelPassesAllFilters(m));
     renderL2(idx, author, filtered, container, nqb.length, nqb);
     refreshAllExpanded();
+    const l1Row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
+    if (l1Row) {
+      const cells = l1Row.querySelectorAll("td");
+      cells[1].textContent = filtered.length;
+      cells[2].textContent = fmt(filtered.reduce((s, m) => s + m.downloads, 0));
+      cells[3].textContent = fmt(filtered.reduce((s, m) => s + m.likes, 0));
+    }
+    if (_derivedParamEnabled) {
+      const stillUnknown = filtered.filter(m => m.paramB === null && !_inferredAttemptedIds.has(m.id));
+      if (stillUnknown.length > 0) {
+        deriveRemainingUnknowns(stillUnknown, gen, idx, author, container,
+          () => nqb.filter(m => modelPassesAllFilters(m)), nqb)
+          .then(() => {
+            if (gen === _fetchGeneration) {
+              const saved = new Set(RC.expandedSections);
+              recomputeAndRenderWithoutDerive(saved);
+            }
+          });
+      }
+    }
   }
 }
 
@@ -1727,6 +1751,21 @@ async function deriveRemainingUnknowns(stillUnknown, gen, idx, author, container
   for (const m of stillUnknown) {
     if (gen !== _fetchGeneration || !container.isConnected) return;
     await tryResolveModelParam(m, gen, idx, author, container, filterApplied, nonQuantBase.length, nonQuantBase);
+  }
+}
+
+function refreshAuthorL2Section(idx, author, container) {
+  const baseModels = cacheAccess(author);
+  if (!baseModels) return;
+  const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
+  const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
+  renderL2(idx, author, filtered, container, nonQuantBase.length, nonQuantBase);
+  const freshUnknowns = filtered.filter(m => m.paramB === null && !_deepeningParamIds.has(m.id));
+  if (freshUnknowns.length > 0) {
+    const gen = _fetchGeneration;
+    deepenBatch(idx, author, container, freshUnknowns,
+      () => nonQuantBase.filter(m => modelPassesAllFilters(m)),
+      nonQuantBase, gen);
   }
 }
 
@@ -1783,44 +1822,7 @@ async function loadAuthorModels(idx, author, container) {
     }
 
     if (gen !== _fetchGeneration || !container.isConnected) return;
-    renderL2(idx, author, dated, container, nonQuantBase.length, nonQuantBase);
-
-    const unknownModels = dated.filter(m => m.paramB === null);
-    if (unknownModels.length > 0) {
-      await deepenBatch(idx, author, container, unknownModels, filterApplied, nonQuantBase, gen);
-      if (gen !== _fetchGeneration || !container.isConnected) return;
-      inheritParentParams(unknownModels, baseModels);
-      if (_derivedParamEnabled) {
-        const stillUnknown = unknownModels.filter(m => m.paramB === null && !_inferredAttemptedIds.has(m.id));
-        if (stillUnknown.length > 0) {
-          await deriveRemainingUnknowns(stillUnknown, gen, idx, author, container, filterApplied, nonQuantBase);
-        }
-      }
-      if (gen !== _fetchGeneration || !container.isConnected) return;
-      document.getElementById("status").textContent = "";
-      const updated = filterApplied();
-      const authorDataSnap = _authorData;
-      for (const a of authorDataSnap) {
-        if (a.author === author) {
-          a.count = updated.length;
-          a.totalDownloads = updated.reduce((s, m) => s + m.downloads, 0);
-          a.totalLikes = updated.reduce((s, m) => s + m.likes, 0);
-          break;
-        }
-      }
-      const l1Row = document.querySelector(`.l1-row[data-author="${CSS.escape(author)}"]`);
-      if (l1Row) {
-        const cells = l1Row.querySelectorAll("td");
-        cells[1].textContent = updated.length;
-        cells[2].textContent = fmt(updated.reduce((s, m) => s + m.downloads, 0));
-        cells[3].textContent = fmt(updated.reduce((s, m) => s + m.likes, 0));
-      }
-      const detailRow = document.getElementById(`d1-${idx}`);
-      if (detailRow && detailRow.style.display !== "none") {
-        renderL2(idx, author, updated, container, nonQuantBase.length, nonQuantBase);
-        if (gen === _fetchGeneration) refreshAllExpanded();
-      }
-    }
+    refreshAuthorL2Section(idx, author, container);
   } catch (err) {
     renderErrorWithRetry(container, userFriendlyError(err), () => {
       if (container.isConnected) loadAuthorModels(idx, author, container);
@@ -2358,12 +2360,7 @@ function refreshAllExpanded() {
     const idx = parseInt(row.dataset.l1Idx);
     detailRow.style.display = "";
     if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
-    const models = cacheAccess(author);
-    if (models) {
-     const nonQuantBase = models.filter(m => !m._orphanQuant && !m._nestedQuant);
-      const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
-      renderL2(idx, author, filtered, inner, nonQuantBase.length, nonQuantBase);
-    }
+    refreshAuthorL2Section(idx, author, inner);
   }
 
   // Phase 2: re-expand L2 model rows
@@ -2882,15 +2879,11 @@ document.querySelector("#main-table").addEventListener("click", e => {
     const authorKey = `${PREFIX_AUTHOR}${author}`;
     if (toggleSection(detailRow, tog, authorKey, [`${PREFIX_MODEL}${author}/`, `${PREFIX_GROUP}${author}/`])) {
       cacheDomRef(authorKey, { row: tr, detailRow, inner, toggle: tog });
-      const baseModels = cacheAccess(author);
-      if (!baseModels) {
+      if (cacheAccess(author)) {
+        refreshAuthorL2Section(idx, author, inner);
+      } else {
         inner.innerHTML = '<div class="detail-loading" role="status">Fetching base models…</div>';
         loadAuthorModels(idx, author, inner);
-      } else {
-        const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
-        const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
-renderL2(idx, author, filtered, inner, nonQuantBase.length, nonQuantBase);
-        deriveVisibleUnknowns();
       }
       tog?.focus();
     }

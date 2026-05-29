@@ -22,6 +22,17 @@ Design decisions, changelog entries, and architectural rationale for `streamline
 
 ## Version Changelog
 
+### v260528.08 — Unified author expansion: refreshAuthorL2Section
+- **New**: `refreshAuthorL2Section(idx, author, container)` — single entry point for rendering an author's L2 section, filtering by current filters, and triggering deepening for newly visible models with unknown params. Called from three sites that previously had inline render+deepen logic.
+- **Changed**: `deepenBatch` now tracks deepened models via `_deepeningParamIds.add(m.id)` before firing each fetch (prevents concurrent double-fetching). `refreshAuthorL2()` inside `deepenBatch` now runs `inheritParentParams` and `deriveRemainingUnknowns` (with post-inference re-render via `.then()`), eliminating the post-deepen block in `loadAuthorModels`.
+- **Changed**: `loadAuthorModels` no longer has its own render+deepen+inference block — delegates entirely to `refreshAuthorL2Section`.
+- **Changed**: `refreshAllExpanded` Phase 1 uses `refreshAuthorL2Section` instead of inlined `cacheAccess`+filter+`renderL2`. Ensures models that become visible after filter/slider changes get deepened.
+- **Changed**: L1 click cached branch uses `refreshAuthorL2Section` instead of inlined render + `deriveVisibleUnknowns`.
+- **Bug fix**: `_deepeningParamIds` is now properly populated (was declared but never written), so the `deepening-param` badge finally displays.
+- **Bug fix**: Status text is cleared when `deepenBatch` completes all its fetches.
+- **Removed**: ~40 lines of duplicated render/deepen/inference/L1-count-update code from `loadAuthorModels`.
+- **Note**: Replaces three independent code paths (initial expand, cached expand, filter re-render) with one unified function.
+
 ### v260528.07 — Throttled progressive L2 render during deepening pass
 - **New**: Module-level `_deepenThrottleTimer` gates deepening renders to at most 1 per 250ms.
 - **Changed**: `deepenBatch` replaces full-page `recomputeAndRenderWithoutDerive()` with `refreshAuthorL2()` — re-renders only the affected author's L2 section via `renderL2` + `refreshAllExpanded`, leaving L1 untouched. No author row position shifts during deepening.
