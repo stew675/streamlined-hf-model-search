@@ -1726,7 +1726,7 @@ function inheritParentParams(unknownModels, baseModels) {
 function _updateL2ParamCell(m) {
   const row = document.querySelector(`tr.l2-row[data-model="${CSS.escape(m.id)}"]`);
   if (row) {
-    const cell = row.querySelector("td:nth-child(4)");
+    const cell = row.querySelector("td:nth-child(3)");
     if (cell) cell.innerHTML = paramBadgeHtml(m);
   }
 }
