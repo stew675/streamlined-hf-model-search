@@ -22,6 +22,19 @@ Design decisions, changelog entries, and architectural rationale for `streamline
 
 ## Version Changelog
 
+### v260528.09 — Derive consolidation: inline tryResolveModelParam, remove derive* layers
+- **Changed**: `.no-param-maybe` color from `#d47722` (orange) to `#d29922` (amber) for better visual distinction from `.no-param` red.
+- **Integrated**: `tryResolveModelParam` now called inline inside `deepenBatch`'s per-model fetch handler when metadata (safetensors/gguf) is absent and `_derivedParamEnabled` is on — no separate derive orchestration pass needed.
+- **Added**: `refreshAllExpanded(force)` — `force` parameter bypasses the Phase 1 visibility guard so `refreshAuthorL2Section` runs for all expanded authors regardless of open state. Used by chip toggle.
+- **Added**: Inline `tryResolveModelParam` loop in `refreshAuthorL2Section` for already-deepened-but-uninferred models when chip is toggled on. Catches models that were deepened before the chip was enabled.
+- **Removed**: `deriveRemainingUnknowns()` — dead code; its sequential `tryResolveModelParam` iteration replaced by inline call in `deepenBatch` per-model handler + inline loop in `refreshAuthorL2Section`.
+- **Removed**: `deriveVisibleUnknowns()` — dead code; both callers (chip toggle, `_doFullRender`) now rely on `refreshAuthorL2Section` to handle derive inline.
+- **Removed**: `_skipDerive` machinery — `skipDerive` parameter on `requestRender`, `_skipDerive` property, and `if (!skipDerive) deriveVisibleUnknowns()` call in `_doFullRender` all gone.
+- **Simplified**: `recomputeAndRenderWithoutDerive` no longer passes a second arg (function name retained for readability).
+- **Simplified**: Chip toggle handler is now synchronous; calls `refreshAllExpanded(true)` instead of `await deriveVisibleUnknowns()`.
+- **Simplified**: `refreshAuthorL2()` inside `deepenBatch` no longer has a `_derivedParamEnabled` block — `tryResolveModelParam` already ran inline during the fetch.
+- **Data flow**: All param resolution now flows through a single unified path: `refreshAuthorL2Section` → `deepenBatch` (fresh unknowns, with inline `tryResolveModelParam` fallback when metadata fails + chip on) or inline `tryResolveModelParam` loop (already-deepened models, chip on). No separate derive-vs-deepen distinction remains.
+
 ### v260528.08 — Unified author expansion: refreshAuthorL2Section
 - **New**: `refreshAuthorL2Section(idx, author, container)` — single entry point for rendering an author's L2 section, filtering by current filters, and triggering deepening for newly visible models with unknown params. Called from three sites that previously had inline render+deepen logic.
 - **Changed**: `deepenBatch` now tracks deepened models via `_deepeningParamIds.add(m.id)` before firing each fetch (prevents concurrent double-fetching). `refreshAuthorL2()` inside `deepenBatch` now runs `inheritParentParams` and `deriveRemainingUnknowns` (with post-inference re-render via `.then()`), eliminating the post-deepen block in `loadAuthorModels`.
@@ -178,7 +191,7 @@ Pass 1: scan all date-range models, identify parent IDs not yet in `_allFetched`
 150ms show delay prevents flicker on accidental mouse passes. 200ms hide delay (CONFIG.DEBOUNCE_MS) gives enough time to move from trigger into popup content. Scroll/resize listeners clear all pending timers and hide visible popups as defense against stale positioning.
 
 ### Render Pipeline
-`requestRender()` (batched via `requestAnimationFrame`) → `_doFullRender()`: computeAuthorData → renderL1 → updateArrows → pruneExpiredExpansions → saveRestoreExpansions (only when `saved` non-null; typically passed by `recomputeAndRender`) → refreshAllExpanded (L2→L3→L4 cascade) → [optional] deriveVisibleUnknowns. Sort state accessed directly via `RC.sortKey`/`RC.sortAsc` getters.
+`requestRender()` (batched via `requestAnimationFrame`) → `_doFullRender()`: computeAuthorData → renderL1 → updateArrows → pruneExpiredExpansions → saveRestoreExpansions (only when `saved` non-null; typically passed by `recomputeAndRender`) → refreshAllExpanded (L2→L3→L4 cascade). Sort state accessed directly via `RC.sortKey`/`RC.sortAsc` getters. Infer-missing-params resolved inline within `refreshAuthorL2Section` → `deepenBatch` per-model handler when metadata fails and chip is on; no separate derive pass.
 
 ### Same-author fine-tunes
 `isBase()` treats same-author fine-tunes as base models so they appear at L2 under their author. `loadChildren()` skips them at L3 and labels cross-author fine-tunes as "finetune". This prevents duplicate display while preserving the hierarchy.

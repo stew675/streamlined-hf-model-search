@@ -347,7 +347,7 @@
 <script defer>
 (function() {
   "use strict";
-const APP_VERSION = '260528.08';
+const APP_VERSION = '260529.01';
 // See DESIGN-LOG.md — version changelog, architecture decisions, and code review rationale.
 let _allFetched, _authorData, _canonicalAuthor;
 
@@ -1281,11 +1281,9 @@ const RenderCoordinator = {
   
   _renderScheduled: false,
   _savedExpansions: null,
-  _skipDerive: false,
 
-  requestRender(savedExpansions = null, skipDerive = false) {
+  requestRender(savedExpansions = null) {
     if (savedExpansions) this._savedExpansions = savedExpansions;
-    this._skipDerive = skipDerive;
     if (this._renderScheduled) return;
     this._renderScheduled = true;
     requestAnimationFrame(() => {
@@ -1297,9 +1295,7 @@ const RenderCoordinator = {
   _doFullRender() {
     try {
       const saved = this._savedExpansions;
-      const skipDerive = this._skipDerive;
       this._savedExpansions = null;
-      this._skipDerive = false;
 
       _authorData = computeAuthorData();
       this.renderL1(_authorData);
@@ -1308,8 +1304,6 @@ const RenderCoordinator = {
       this.pruneExpiredExpansions(new Set(_authorData.map(a => a.author)));
       if (saved) this.saveRestoreExpansions(saved);
       this.refreshAllExpanded();
-
-      if (!skipDerive) deriveVisibleUnknowns();
     } catch (e) {
       console.error("Render failed", e);
       const status = document.getElementById("status");
@@ -1443,7 +1437,7 @@ function recomputeAndRender(saved) {
   RenderCoordinator.requestRender(saved, false);
 }
 function recomputeAndRenderWithoutDerive(saved) {
-  RenderCoordinator.requestRender(saved, true);
+  RenderCoordinator.requestRender(saved);
 }
 
 RenderCoordinator.renderL1 = renderMain;
@@ -1679,6 +1673,9 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
           m.paramB = p;
           _paramCache.set(m.id, p);
           _deepeningParamIds.delete(m.id);
+        } else if (_derivedParamEnabled && !_inferredAttemptedIds.has(m.id)) {
+          return tryResolveModelParam(m, gen, idx, author, container,
+            filterApplied, nonQuantBase.length, nonQuantBase);
         }
       },
       (e) => { console.warn("Failed to fetch param for", m.id, e); }
@@ -1714,19 +1711,6 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
       cells[2].textContent = fmt(filtered.reduce((s, m) => s + m.downloads, 0));
       cells[3].textContent = fmt(filtered.reduce((s, m) => s + m.likes, 0));
     }
-    if (_derivedParamEnabled) {
-      const stillUnknown = filtered.filter(m => m.paramB === null && !_inferredAttemptedIds.has(m.id));
-      if (stillUnknown.length > 0) {
-        deriveRemainingUnknowns(stillUnknown, gen, idx, author, container,
-          () => nqb.filter(m => modelPassesAllFilters(m)), nqb)
-          .then(() => {
-            if (gen === _fetchGeneration) {
-              const saved = new Set(RC.expandedSections);
-              recomputeAndRenderWithoutDerive(saved);
-            }
-          });
-      }
-    }
   }
 }
 
@@ -1747,12 +1731,6 @@ function inheritParentParams(unknownModels, baseModels) {
   }
 }
 
-async function deriveRemainingUnknowns(stillUnknown, gen, idx, author, container, filterApplied, nonQuantBase) {
-  for (const m of stillUnknown) {
-    if (gen !== _fetchGeneration || !container.isConnected) return;
-    await tryResolveModelParam(m, gen, idx, author, container, filterApplied, nonQuantBase.length, nonQuantBase);
-  }
-}
 
 function refreshAuthorL2Section(idx, author, container) {
   const baseModels = cacheAccess(author);
@@ -1766,6 +1744,25 @@ function refreshAuthorL2Section(idx, author, container) {
     deepenBatch(idx, author, container, freshUnknowns,
       () => nonQuantBase.filter(m => modelPassesAllFilters(m)),
       nonQuantBase, gen);
+  }
+  if (_derivedParamEnabled) {
+    const deepenedNotInferred = filtered.filter(m =>
+      m.paramB === null && _deepeningParamIds.has(m.id) && !_inferredAttemptedIds.has(m.id));
+    if (deepenedNotInferred.length > 0) {
+      const gen = _fetchGeneration;
+      const getFiltered = () => nonQuantBase.filter(m2 => modelPassesAllFilters(m2));
+      (async () => {
+        for (const m of deepenedNotInferred) {
+          if (gen !== _fetchGeneration) return;
+          await tryResolveModelParam(m, gen, idx, author, container,
+            getFiltered, nonQuantBase.length, nonQuantBase);
+        }
+        if (gen === _fetchGeneration) {
+          const saved = new Set(RC.expandedSections);
+          recomputeAndRenderWithoutDerive(saved);
+        }
+      })();
+    }
   }
 }
 
@@ -2339,7 +2336,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 // Three phases because L1 must exist before L2 can be found inside it, etc.
 // expandedSections keys use stable identifiers (a|author, m|modelId, g|parentId|author)
 // so restoration is robust even if DOM indices shift after re-render.
-function refreshAllExpanded() {
+function refreshAllExpanded(force) {
   // Phase 1: re-expand L1 author rows
   for (const key of RC.expandedSections) {
     if (!key.startsWith(PREFIX_AUTHOR)) continue;
@@ -2356,10 +2353,14 @@ function refreshAllExpanded() {
       tog = document.getElementById(`t1-${idx}`);
       cacheDomRef(key, { row, detailRow, inner, toggle: tog });
     }
-    if (!detailRow || detailRow.style.display !== "none") continue;
+    if (!detailRow) continue;
+    const currentlyHidden = detailRow.style.display === "none";
+    if (!force && !currentlyHidden) continue;
+    if (currentlyHidden) {
+      detailRow.style.display = "";
+      if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
+    }
     const idx = parseInt(row.dataset.l1Idx);
-    detailRow.style.display = "";
-    if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
     refreshAuthorL2Section(idx, author, inner);
   }
 
@@ -2482,43 +2483,7 @@ async function tryResolveModelParam(m, gen, idx, author, container, getFiltered,
   return true;
 }
 
-// Called on every re-render when _derivedParamEnabled is true. Safe to re-run:
-// _inferredAttemptedIds tracks already-attempted models (both successes and failures),
-// so models that failed to resolve are skipped on subsequent passes without re-fetching.
-// New unknowns (e.g. from newly-fetched or freshly-expanded sections) are automatically
-// picked up and resolved on the next render cycle.
-async function deriveVisibleUnknowns() {
-  if (!_derivedParamEnabled) return;
-  const gen = _fetchGeneration;
-  let processedAny = false;
-  for (const key of RenderCoordinator.expandedSections) {
-    if (!key.startsWith(PREFIX_AUTHOR)) continue;
-    if (gen !== _fetchGeneration) break;
-    const author = key.slice(PREFIX_AUTHOR.length);
-    const l2State = RC._levelState.l2.get(author);
-    if (!l2State) continue;
-    const models = l2State.allBaseModels;
-    if (!models) continue;
-    const unknown = models.filter(m => m.paramB === null && !_inferredAttemptedIds.has(m.id) && modelPassesAllFilters(m));
-    if (unknown.length === 0) continue;
-    processedAny = true;
-    const l1Row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
-    if (!l1Row) continue;
-    const idx = parseInt(l1Row.dataset.l1Idx);
-    const container = document.getElementById(`i1-${idx}`);
-    if (!container) continue;
-    const getFiltered = () => models.filter(m2 => modelPassesAllFilters(m2));
-    await Promise.all(unknown.map(m => tryResolveModelParam(m, gen, idx, author, container, getFiltered, models.length, models)));
-  }
-  if (gen !== _fetchGeneration) return;
-  // Re-render so models that failed resolution (no success-triggered renderL2) get
-  // updated badges — attempted-but-failed → red, leaving default → orange.
-  if (processedAny) {
-    const saved = new Set(RC.expandedSections);
-    recomputeAndRenderWithoutDerive(saved);
-  }
-  if (gen === _fetchGeneration) document.getElementById("status").textContent = "";
-}
+
 
 function clampRange(fromEl, toEl, minGap, max) {
   const fv = parseInt(fromEl.value);
@@ -2930,13 +2895,13 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   RenderCoordinator.expandedSections.clear();
   recomputeAndRenderWithoutDerive();
 });
-document.getElementById("derived-param-chip").addEventListener("click", async () => {
+document.getElementById("derived-param-chip").addEventListener("click", () => {
   _derivedParamEnabled = !_derivedParamEnabled;
   const chip = document.getElementById("derived-param-chip");
   chip.classList.toggle("active", _derivedParamEnabled);
   chip.classList.toggle("inactive", !_derivedParamEnabled);
   chip.setAttribute("aria-checked", String(_derivedParamEnabled));
-  if (_derivedParamEnabled) await deriveVisibleUnknowns();
+  if (_derivedParamEnabled) refreshAllExpanded(true);
 });
 document.getElementById("hide-missing-param-chip").addEventListener("click", () => {
   _hideMissingParamEnabled = !_hideMissingParamEnabled;
@@ -2944,8 +2909,8 @@ document.getElementById("hide-missing-param-chip").addEventListener("click", () 
   chip.classList.toggle("active", _hideMissingParamEnabled);
   chip.classList.toggle("inactive", !_hideMissingParamEnabled);
   chip.setAttribute("aria-checked", String(_hideMissingParamEnabled));
-  // Cosmetic-only re-render: skip deriveVisibleUnknowns to avoid re-inferring
-  // already-resolved models.
+  // Cosmetic-only re-render: infer-missing-params already handled inline
+  // within refreshAuthorL2Section for newly-visible models.
   const saved = new Set(RC.expandedSections);
   recomputeAndRenderWithoutDerive(saved);
 });
