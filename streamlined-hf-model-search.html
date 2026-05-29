@@ -306,7 +306,7 @@
 </div>
 <div id="sort-announce" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></div>
 <div id="button-row">
-  <button type="button" id="derived-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" style="margin-right:auto; user-select:none" title="When enabled, models with unknown parameter counts will first try a Base Model regex from the model name, then search their children (2 search API calls per model) and fetch individual child model cards (up to 10 per model; stops early after 3 agreeing results) to infer the parent's parameter count.">Infer Missing Params</button>
+  <button type="button" id="derived-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" style="margin-right:auto; user-select:none" title="When enabled, models without a known parameter counts will undergo a deeper attempt to resolve them by searching any child models.  This results in up to 12 additional API calls per model, stopping early after 3 agreeing child results.">Infer Missing Params</button>
   <button type="button" id="hide-missing-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" style="user-select:none" title="When enabled, models without a known parameter count are hidden from display.">Hide Missing Params</button>
   <div id="button-center">
     <button id="get-quick-results-btn" class="action-btn" title="Fetch top models per pipeline tag (by downloads + lastModified) — no cross-author base model injection. Faster but may miss quantizations whose parent base model is from a different author.">Get Quick Results</button>
@@ -347,7 +347,7 @@
 <script defer>
 (function() {
   "use strict";
-const APP_VERSION = '260529.02';
+const APP_VERSION = '260529.03';
 // See DESIGN-LOG.md — version changelog, architecture decisions, and code review rationale.
 let _allFetched, _authorData, _canonicalAuthor;
 
