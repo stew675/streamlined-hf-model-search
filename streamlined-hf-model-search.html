@@ -1675,7 +1675,10 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
           _deepeningParamIds.delete(m.id);
         } else if (_derivedParamEnabled && !_inferredAttemptedIds.has(m.id)) {
           return tryResolveModelParam(m, gen, idx, author, container,
-            filterApplied, nonQuantBase.length, nonQuantBase);
+            filterApplied, nonQuantBase.length, nonQuantBase)
+            .then(resolved => {
+              if (resolved && gen === _fetchGeneration) _updateL2ParamCell(m);
+            });
         }
       },
       (e) => { console.warn("Failed to fetch param for", m.id, e); }
@@ -1730,7 +1733,13 @@ function inheritParentParams(unknownModels, baseModels) {
     }
   }
 }
-
+function _updateL2ParamCell(m) {
+  const row = document.querySelector(`tr.l2-row[data-model="${CSS.escape(m.id)}"]`);
+  if (row) {
+    const cell = row.querySelector("td:nth-child(4)");
+    if (cell) cell.innerHTML = paramBadgeHtml(m);
+  }
+}
 
 function refreshAuthorL2Section(idx, author, container) {
   const baseModels = cacheAccess(author);
@@ -1754,13 +1763,11 @@ function refreshAuthorL2Section(idx, author, container) {
       (async () => {
         for (const m of deepenedNotInferred) {
           if (gen !== _fetchGeneration) return;
-          await tryResolveModelParam(m, gen, idx, author, container,
+          const resolved = await tryResolveModelParam(m, gen, idx, author, container,
             getFiltered, nonQuantBase.length, nonQuantBase);
+          if (resolved && gen === _fetchGeneration) _updateL2ParamCell(m);
         }
-        if (gen === _fetchGeneration) {
-          const saved = new Set(RC.expandedSections);
-          recomputeAndRenderWithoutDerive(saved);
-        }
+        if (gen === _fetchGeneration) document.getElementById("status").textContent = "";
       })();
     }
   }
