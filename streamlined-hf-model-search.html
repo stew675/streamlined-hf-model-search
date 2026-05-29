@@ -347,7 +347,7 @@
 <script defer>
 (function() {
   "use strict";
-const APP_VERSION = '260529.01';
+const APP_VERSION = '260529.02';
 // See DESIGN-LOG.md — version changelog, architecture decisions, and code review rationale.
 let _allFetched, _authorData, _canonicalAuthor;
 
@@ -1703,17 +1703,7 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
     const models = cacheAccess(author);
     if (!models) return;
     inheritParentParams(unknownModels, models);
-    const nqb = models.filter(m => !m._orphanQuant && !m._nestedQuant);
-    const filtered = nqb.filter(m => modelPassesAllFilters(m));
-    renderL2(idx, author, filtered, container, nqb.length, nqb);
-    refreshAllExpanded();
-    const l1Row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
-    if (l1Row) {
-      const cells = l1Row.querySelectorAll("td");
-      cells[1].textContent = filtered.length;
-      cells[2].textContent = fmt(filtered.reduce((s, m) => s + m.downloads, 0));
-      cells[3].textContent = fmt(filtered.reduce((s, m) => s + m.likes, 0));
-    }
+    _rerenderAuthorL2(idx, author, container);
   }
 }
 
@@ -1741,6 +1731,22 @@ function _updateL2ParamCell(m) {
   }
 }
 
+function _rerenderAuthorL2(idx, author, container) {
+  const models = cacheAccess(author);
+  if (!models) return;
+  const nqb = models.filter(m2 => !m2._orphanQuant && !m2._nestedQuant);
+  const filtered = nqb.filter(m2 => modelPassesAllFilters(m2));
+  renderL2(idx, author, filtered, container, nqb.length, nqb);
+  refreshAllExpanded();
+  const l1Row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
+  if (l1Row) {
+    const cells = l1Row.querySelectorAll("td");
+    cells[1].textContent = filtered.length;
+    cells[2].textContent = fmt(filtered.reduce((s, m2) => s + m2.downloads, 0));
+    cells[3].textContent = fmt(filtered.reduce((s, m2) => s + m2.likes, 0));
+  }
+}
+
 function refreshAuthorL2Section(idx, author, container) {
   const baseModels = cacheAccess(author);
   if (!baseModels) return;
@@ -1759,15 +1765,19 @@ function refreshAuthorL2Section(idx, author, container) {
       m.paramB === null && _deepeningParamIds.has(m.id) && !_inferredAttemptedIds.has(m.id));
     if (deepenedNotInferred.length > 0) {
       const gen = _fetchGeneration;
+      inheritParentParams(deepenedNotInferred, nonQuantBase);
       const getFiltered = () => nonQuantBase.filter(m2 => modelPassesAllFilters(m2));
       (async () => {
         for (const m of deepenedNotInferred) {
           if (gen !== _fetchGeneration) return;
+          if (m.paramB != null) continue; // resolved by inheritParentParams above
           const resolved = await tryResolveModelParam(m, gen, idx, author, container,
             getFiltered, nonQuantBase.length, nonQuantBase);
           if (resolved && gen === _fetchGeneration) _updateL2ParamCell(m);
         }
-        if (gen === _fetchGeneration) document.getElementById("status").textContent = "";
+        if (gen !== _fetchGeneration) return;
+        _rerenderAuthorL2(idx, author, container);
+        document.getElementById("status").textContent = "";
       })();
     }
   }

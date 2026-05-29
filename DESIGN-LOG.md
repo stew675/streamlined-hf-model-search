@@ -22,6 +22,15 @@ Design decisions, changelog entries, and architectural rationale for `streamline
 
 ## Version Changelog
 
+### v260529.02 — Shared _rerenderAuthorL2 helper, filter-staleness cleanup
+- **Added**: `_rerenderAuthorL2(idx, author, container)` — shared helper for re-reading cached author models, filtering, calling `renderL2`, `refreshAllExpanded()`, and updating L1 counts. Used by both `deepenBatch`'s `refreshAuthorL2()` and the inline derive loop.
+- **Added**: `_updateL2ParamCell(m)` — shared helper for immediate per-model param cell update after resolve. Used in both `deepenBatch` per-model handler and inline derive loop.
+- **Added**: Post-resolve re-render in inline derive loop — after all models are resolved, calls `_rerenderAuthorL2` to remove models whose new param falls outside the slider/filter range.
+- **Added**: `inheritParentParams` call in inline derive loop before the `tryResolveModelParam` loop — catches cheap name-stripping cases without API calls.
+- **Changed**: `deepenBatch`'s `refreshAuthorL2()` simplified to `inheritParentParams` + `_rerenderAuthorL2`.
+- **Removed**: Redundant post-resolve `recomputeAndRenderWithoutDerive` from inline derive loop (replaced by targeted `_rerenderAuthorL2`).
+- **Removed**: Inline L2 re-render + L1 count update blocks from both paths — replaced by `_rerenderAuthorL2` calls.
+
 ### v260528.09 — Derive consolidation: inline tryResolveModelParam, remove derive* layers
 - **Changed**: `.no-param-maybe` color from `#d47722` (orange) to `#d29922` (amber) for better visual distinction from `.no-param` red.
 - **Integrated**: `tryResolveModelParam` now called inline inside `deepenBatch`'s per-model fetch handler when metadata (safetensors/gguf) is absent and `_derivedParamEnabled` is on — no separate derive orchestration pass needed.
