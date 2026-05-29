@@ -1677,7 +1677,10 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
           return tryResolveModelParam(m, gen, idx, author, container,
             filterApplied, nonQuantBase.length, nonQuantBase)
             .then(resolved => {
-              if (resolved && gen === _fetchGeneration) _updateL2ParamCell(m);
+	      if (resolved && gen === _fetchGeneration) {
+	        _updateL2ParamCell(m);
+                _rerenderAuthorL2(idx, author, container);
+	      }
             });
         }
       },
@@ -1773,10 +1776,12 @@ function refreshAuthorL2Section(idx, author, container) {
           if (m.paramB != null) continue; // resolved by inheritParentParams above
           const resolved = await tryResolveModelParam(m, gen, idx, author, container,
             getFiltered, nonQuantBase.length, nonQuantBase);
-          if (resolved && gen === _fetchGeneration) _updateL2ParamCell(m);
+	  if (resolved && gen === _fetchGeneration) {
+	    _updateL2ParamCell(m);
+            _rerenderAuthorL2(idx, author, container);
+	  }
         }
         if (gen !== _fetchGeneration) return;
-        _rerenderAuthorL2(idx, author, container);
         document.getElementById("status").textContent = "";
       })();
     }
