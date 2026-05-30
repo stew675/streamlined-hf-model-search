@@ -488,7 +488,6 @@ const _inferredFromNameIds = new Set();
 const _inferredAttemptedIds = new Set();
 const _deepeningParamIds = new Set();
 const _deepeningAuthors = new Set(); // Guards against concurrent deepening of same author
-let _deepenThrottleTimer = null;
 let apiCalls = 0;
 let _consecutive429s = 0;
 const _rateLimitCounter = document.getElementById("api-counter");
@@ -1756,13 +1755,11 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
       completed++;
       UI.setStatus(`Resolving parameters for ${author}… (${completed}/${totalUnk})`);
       if (completed === totalUnk) {
-        if (_deepenThrottleTimer) { clearTimeout(_deepenThrottleTimer); _deepenThrottleTimer = null; }
         UI.setStatus("");
         inheritParentParams(unknownModels, (cacheAccess(author) || []).concat(nonQuantBase));
-        _schedulePostDeepenRender(author, gen);
-      } else if (completed % 4 === 0) {
-        _schedulePostDeepenRender(author, gen);
       }
+      // Call unconditionally — _filterBoundaryChange + RAF coalescing prevent wasted renders
+      _schedulePostDeepenRender(author, gen);
     });
   }));
 }
@@ -2657,14 +2654,11 @@ function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
 }
 
 // Called by each independent completion handler to update status and trigger render.
-// Throttles structural renders: every 3 requests, or on final completion.
+// RAF coalescing in requestRender() handles burst protection — no modulo gate needed.
 function _onFetchComplete(gen, completed, total, savedExpansions) {
   if (gen !== _fetchGeneration) return;
   UI.setStatus(`Fetching models… (${completed}/${total})`);
-  const shouldRebuild = completed % 3 === 0 || completed === total;
-  if (shouldRebuild) {
-    recomputeAndRenderWithoutDerive(savedExpansions);
-  }
+  recomputeAndRenderWithoutDerive(savedExpansions);
 }
 
 // Trim _allFetched to ALL_FETCHED_MAX, preserving injected base models.
