@@ -1,0 +1,3210 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HuggingFace Base Models</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='80'>🔍</text></svg>">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #c9d1d9; padding: 24px; }
+  h1 { font-size: 1.4rem; margin-bottom: 4px; color: #e6edf3; text-align: center; }
+  #status { font-size: 0.85rem; color: #8b949e; min-height: 1.2em; }
+  #status-bar { display: flex; margin-bottom: 12px; }
+  #version { color: #8b949e; font-size: 0.85rem; margin-left: auto; }
+  #main-table, .detail-inner table { width: 100%; border-collapse: collapse; font-size: 0.85rem; table-layout: fixed; }
+  th.right, td.right { white-space: nowrap; }
+  .updated-cell { padding-left: 10px; text-align: left; white-space: nowrap; }
+  .updated-header { text-align: center !important; }
+  td.models-cell { padding-right: 20px; text-align: right; }
+  /* L1 column widths */
+  #main-table > thead > tr > th:nth-child(2),
+  #main-table > tbody > tr > td:nth-child(2) { width: 130px; }
+  #main-table > thead > tr > th:nth-child(3),
+  #main-table > tbody > tr > td:nth-child(3) { width: 160px; }
+  #main-table > thead > tr > th:nth-child(4),
+  #main-table > tbody > tr > td:nth-child(4) { width: 120px; }
+  th { background: #161b22; padding: 8px 10px; text-align: left; cursor: pointer;
+        user-select: none; border-bottom: 2px solid #30363d; position: sticky; transition: background 0.15s, border-color 0.15s; }
+  #main-table > thead > tr > th { top: 0; z-index: 100; }
+  .detail-inner table th[data-level="2"] { top: 36px; z-index: 90; }
+  .detail-inner table th[data-level="3"] { top: 64px; z-index: 80; }
+  .detail-inner table th[data-level="4"] { top: 94px; z-index: 70; }
+  th[tabindex="0"]:focus-visible { outline: 2px solid #58a6ff; outline-offset: -2px; }
+   tr > th:not(:last-child), tr > td:not(:last-child) { border-right: 1px solid #21262d; }
+  th:hover { background: #1c2129; }
+  th.sorted { background: #1c2129; border-bottom-color: #58a6ff; }
+  th .arrow { margin-left: 4px; font-size: 0.7rem; color: #58a6ff; }
+  td { padding: 6px 10px; border-bottom: 1px solid #21262d; transition: background 0.1s; }
+  tr.l1-row.row-even td { background: #0d1117; }
+  tr.l1-row.row-odd td { background: #0f1318; }
+  a { color: #58a6ff; text-decoration: none; transition: color 0.15s; }
+  a:hover { text-decoration: underline; color: #79c0ff; }
+  .right { text-align: right; }
+  th.right { text-align: right; }
+  th.center, td.center { text-align: center; }
+  .detail-inner td.center { text-align: center !important; padding-left: 8px !important; padding-right: 8px !important; }
+  .arrow-left { margin-right: 4px; font-size: 0.7rem; color: #58a6ff; }
+  .task { text-align: left; white-space: nowrap; }
+  #count { font-size: 0.85rem; color: #8b949e; margin-top: 8px; }
+
+  .toggle { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; min-width: 24px; color: #8b949e; margin-right: 4px; font-size: 0.82rem; transition: transform 0.15s, color 0.15s; flex-shrink: 0; border: none; background: none; cursor: pointer; padding: 0; font: inherit; line-height: 1; }
+  .toggle:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; border-radius: 2px; }
+  .toggle.open { transform: rotate(90deg); color: #58a6ff; }
+
+  tr.l1-row td { cursor: pointer; font-weight: 600; }
+  tr.l1-row:hover td { background: #1a2030; }
+
+  tr.detail-row td { padding: 0; background: #010409; }
+  tr.detail-row, .l1-row, .l2-row, .l3-row, .l4-row { scroll-margin-top: 50px; }
+  .detail-inner { padding: 8px 12px 12px 16px; overflow: visible; }
+  .detail-inner table { font-size: 0.8rem; }
+  .detail-inner th { font-size: 0.75rem; padding: 5px 8px; background: #161b22; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+  .detail-inner th:hover { background: #1a2030; }
+  .detail-inner th.sorted { background: #1a2030; border-bottom-color: #58a6ff; }
+  .detail-inner td { padding: 4px 8px; font-size: 0.8rem; }
+  .detail-loading { color: #8b949e; font-style: italic; padding: 8px 0; }
+  .detail-error { color: #f85149; padding: 8px 0; }
+  .retry-btn { margin-left: 12px; padding: 2px 14px; font-size: 0.78rem; font-weight: 600;
+    border-radius: 10px; cursor: pointer; background: #21262d; color: #c9d1d9;
+    border: 1px solid #30363d; font-family: inherit; transition: background 0.15s, border-color 0.15s; }
+  .retry-btn:hover { background: #30363d; border-color: #58a6ff; }
+  .detail-count { font-size: 0.75rem; color: #8b949e; margin-top: 4px; position: relative; }
+
+  tr.l2-row td { cursor: pointer; padding-left: 32px !important; }
+  tr.l2-row:hover td { background: #1a2030; }
+  tr.l2-row td:first-child { padding-left: 32px !important; }
+  tr.l2-row.inferring td,
+  tr.l2-row.inferring.row-odd td { background: #d2992233; transition: background 0.15s; }
+
+  tr.l3-row td { cursor: pointer; padding-left: 48px !important; font-weight: 500; }
+  tr.l3-row:hover td { background: #1a2030; }
+  tr.l3-row td:first-child { padding-left: 48px !important; }
+
+  tr.l4-row td { padding-left: 32px !important; }
+  tr.l4-row td:first-child { padding-left: 64px !important; }
+  tr.l4-row:nth-child(even) td { background: #080b10; }
+  tr.l2-row.row-odd td, tr.l3-row.row-odd td { background: #0f1318; }
+
+  .badge { display: inline-block; font-size: 0.7rem; padding: 1px 6px; border-radius: 12px;
+           background: #1f6feb33; color: #58a6ff; border: 1px solid #1f6feb55; margin: 1px 2px; box-shadow: 0 0 4px #1f6feb22; }
+  .badge.deriv { background: #23863633; color: #3fb950; border-color: #23863655; box-shadow: 0 0 4px #23863622; }
+  .badge.orphan { background: #d2992233; color: #e3b341; border-color: #d2992255; box-shadow: 0 0 4px #d2992222; }
+
+  .deepening-param { color: #d29922; cursor: help; border-bottom: 1px dotted #d2992266; }
+  .no-param { color: #f85149; cursor: help; }
+  .no-param-maybe { color: #d29922; cursor: help; border-bottom: 1px dotted #d2992266; }
+  .derived-param { color: #c084fc; cursor: help; border-bottom: 1px dotted #c084fc66; }
+  .child-data-param { color: #b8860b; cursor: help; border-bottom: 1px dotted #b8860b66; }
+  .parent-inherit-param { color: #e6edf3; cursor: help; border-bottom: 1px dotted #e6edf366; }
+  .name-infer-param { color: #58a6ff; cursor: help; border-bottom: 1px dotted #58a6ff66; }
+  .metadata-param { color: #7ecf7e; cursor: help; border-bottom: 1px dotted #7ecf7e66; }
+  .likes-icon { color: #f85149; margin-left: 2px; }
+
+ /* Filter bar */
+  #task-bars { display: flex; flex-wrap: wrap; gap: 20px; margin: 8px 0 12px; align-items: center; }
+  #from-bar, #to-bar { flex: 0 0 auto; }
+  #filter-bar, #from-bar, #to-bar, #special-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  #main-table .model-id-cell { min-width: 0; width: 100%; }
+  #main-table .model-id-cell a { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+  #filter-row { display: flex; flex-wrap: nowrap; align-items: center; }
+  #filter-bar { flex: 1 1 auto; min-width: 0; }
+.chip-group .filter-chip, #button-row .filter-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem;
+                          padding: 5px 12px; min-height: 24px; border-radius: 14px; cursor: pointer; user-select: none;
+                          background: #161b22; border: 1px solid #30363d; transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; }
+   .chip-group .filter-chip:hover, #button-row .filter-chip:hover { background: #1c2129; color: #c9d1d9; }
+   .chip-group .filter-chip.active, #button-row .filter-chip.active { color: #58a6ff; border-color: #58a6ff; box-shadow: 0 0 6px #1f6feb33; }
+   .chip-group .filter-chip.inactive, #button-row .filter-chip.inactive { color: #8b949e; border-color: #484f58; }
+   .chip-group .filter-label, .chip-group h3 { color: #8b949e; font-size: 0.78rem; margin-right: 4px; font-weight: 600; display: inline; }
+  .task-bar-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; align-items: center; }
+   .task-bar-row .filter-label, .task-bar-row h3 { color: #8b949e; font-size: 0.78rem; margin-right: 4px; font-weight: 600; display: inline; }
+   .task-bar-row .act-tag { display: inline-block; font-size: 0.72rem; padding: 3px 10px; min-height: 24px; border-radius: 10px;
+      cursor: pointer; user-select: none; background: #161b22; border: 1px solid #30363d;
+      transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; color: #8b949e; }
+   .task-bar-row .act-tag:hover { background: #1c2129; color: #c9d1d9; }
+   .task-bar-row .act-tag.active { color: #58a6ff; border-color: #58a6ff; background: #1f6feb22; box-shadow: 0 0 6px #1f6feb33; }
+   #button-row { display: flex; align-items: center; margin: 8px auto 12px; }
+   #button-center { display: flex; justify-content: center; gap: 12px; flex: 1; }
+   .action-btn { display: flex; align-items: center; justify-content: center; width: fit-content;
+     padding: 6px 20px; font-size: 0.82rem; font-weight: 600; border-radius: 14px; cursor: pointer;
+     user-select: none; background: #21262d; color: #6e7681; border: 1px solid #30363d; font-family: inherit;
+     transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; }
+   .action-btn.ready { background: #238636; color: #fff; border-color: #2ea043; cursor: pointer; box-shadow: 0 0 8px #23863666; }
+    .action-btn.ready:hover { background: #2ea043; box-shadow: 0 0 12px #2ea04388; }
+   a[target="_blank"]::after { content: " ↗"; font-size: 0.72em; }
+   .action-btn:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+  .filter-chip:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+   .filter-chip, .act-tag { padding: 0; border: none; background: none; font: inherit; cursor: pointer; color: inherit; line-height: normal; }
+   .act-tag:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+    .action-btn:disabled { pointer-events: none; opacity: 0.5; }
+
+  #text-filter-row { display: flex; gap: 10px; margin: 0 0 10px; align-items: center; flex-wrap: wrap; }
+  #text-filter-row input { background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+    padding: 4px 10px; font-size: 0.8rem; color: #c9d1d9; width: 180px; outline: none;
+    transition: border-color 0.15s; font-family: inherit; }
+  #text-filter-row input:focus { border-color: #58a6ff; }
+  #text-filter-row input::placeholder { color: #6e7681; }
+  #text-filter-row label { color: #8b949e; font-size: 0.78rem; }
+  #text-filter-row .fiw { position: relative; display: inline-flex; align-items: center; }
+  #text-filter-row .fiw input { padding-right: 20px; }
+  #text-filter-row .fic { position: absolute; right: 5px; cursor: pointer; color: #8b949e; font-size: 16px; line-height: 1;
+    user-select: none; display: none; width: 24px; height: 24px; align-items: center; justify-content: center; padding: 0; border: none; background: none; }
+  #text-filter-row .fic:hover { color: #f85149; }
+  #text-filter-row .fic:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; border-radius: 4px; }
+  #text-filter-row .fiw input:not(:placeholder-shown) + .fic { display: block; }
+
+  /* Range sliders */
+  #date-slider, #param-slider { margin: 8px 0 6px; padding: 8px 14px 10px; background: #161b22; border: 1px solid #30363d; border-radius: 8px; }
+  #date-slider .ds-title, #param-slider .ds-title { font-size: 0.78rem; color: #8b949e; margin-bottom: 4px; font-weight: 600; }
+  .ds-track-wrap { position: relative; height: 28px; overflow: visible; }
+  .ds-track-bg, .ds-track-fill { position: absolute; top: 11px; height: 6px; border-radius: 3px; pointer-events: none; }
+  .ds-track-bg { left: 0; right: 0; background: #30363d; }
+  .ds-track-fill { background: #b8860b; z-index: 1; }
+  .ds-track-wrap input[type=range] { position: absolute; width: 100%; top: 2px; height: 24px; margin: 0;
+    -webkit-appearance: none; appearance: none; background: transparent; pointer-events: none; }
+  #ds-from, #ps-from { z-index: 3; }
+  #ds-to, #ps-to { z-index: 2; }
+  .ds-track-wrap input[type=range]::-webkit-slider-runnable-track { height: 6px; background: transparent; border-radius: 3px; pointer-events: none; }
+  .ds-track-wrap input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 18px; width: 18px; border-radius: 50%;
+    cursor: pointer; pointer-events: auto; border: 2px solid #0d1117; margin-top: -6px; }
+  #ds-from::-moz-range-thumb, #ds-from::-webkit-slider-thumb,
+  #ps-from::-moz-range-thumb, #ps-from::-webkit-slider-thumb { background: #3fb950; }
+  #ds-to::-moz-range-thumb, #ds-to::-webkit-slider-thumb,
+  #ps-to::-moz-range-thumb, #ps-to::-webkit-slider-thumb { background: #da3633; }
+  .ds-track-wrap input[type=range]::-moz-range-track { height: 6px; background: transparent; border-radius: 3px; pointer-events: none; }
+  .ds-track-wrap input[type=range]::-moz-range-thumb { height: 18px; width: 18px; border-radius: 50%;
+    cursor: pointer; pointer-events: auto; border: 2px solid #0d1117; }
+  .ds-labels { display: flex; justify-content: space-between; font-size: 0.72rem; margin-top: 2px; }
+  .ds-labels .ds-l { color: #8b949e; }
+  .ds-labels .ds-v { color: #58a6ff; font-weight: 500; }
+  .ps-tooltip { position: absolute; top: -18px; transform: translateX(-50%); background: #1c2129;
+    color: #b8860b; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;
+    border: 1px solid #30363d; white-space: nowrap; pointer-events: none; z-index: 5; }
+  .ps-tooltip::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -4px;
+    border: 4px solid transparent; border-top-color: #30363d; }
+  .ps-tooltip.align-right { transform: translateX(-100%); }
+  .ps-tooltip.align-left { transform: translateX(-9px); }
+  .ps-tooltip.align-right::after { left: auto; right: 4px; margin-left: 0; }
+  .ps-tooltip.align-left::after { left: 9px; margin-left: 0; }
+  .ps-legend { position: relative; height: 18px; }
+  .ps-legend-tick { position: absolute; top: 0; transform: translateX(-50%); width: 1px; height: 5px; background: #6e7681; }
+  .ps-legend-label { position: absolute; top: 6px; left: 50%; transform: translateX(-50%);
+    font-size: 0.62rem; color: #8b949e; white-space: nowrap; }
+  #api-counter-wrap { position: relative; display: inline-flex; align-items: center; }
+  .api-counter-tooltip {
+    display: none; position: absolute; bottom: calc(100% + 10px); right: 0;
+    background: #1c2129; color: #e3b341; border: 1px solid #d2992266;
+    border-radius: 6px; padding: 8px 12px; font-size: 0.75rem;
+    white-space: normal; width: 480px; z-index: 10; pointer-events: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5); line-height: 1.4; text-align: left;
+  }
+  #api-counter-wrap:hover .api-counter-tooltip,
+  #api-counter-wrap:focus-within .api-counter-tooltip { display: block; }
+  .api-counter-tooltip::after {
+    content: ""; position: absolute; top: 100%; right: 16px;
+    border: 6px solid transparent; border-top-color: #d2992266;
+  }
+  @keyframes api-counter-flash {
+    0%, 100% { color: #e3b341; }
+    50% { color: #d29922; }
+  }
+  #api-counter.rate-limited { animation: api-counter-flash 1s ease-in-out infinite; }
+  #clear-cache-btn { display: inline-flex; align-items: center; justify-content: center;
+    padding: 6px 20px; font-size: 0.82rem; font-weight: 600; border-radius: 14px;
+    cursor: pointer; user-select: none; background: #2d1515; border: 1px solid #4a2020;
+    color: #f87171; font-family: inherit; transition: background 0.15s, border-color 0.15s; margin-right: 16px; }
+  #clear-cache-btn:hover { background: #4a2020; border-color: #f8717166; }
+  #clear-cache-btn:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+  #clear-cache-btn:active { background: #5a2020; }
+  .skip-link { position: absolute; top: -100%; left: 8px; padding: 8px 16px; background: #58a6ff; color: #0d1117; z-index: 100; font-weight: 600; border-radius: 6px; }
+  .skip-link:focus { top: 8px; }
+  #scope-notice { font-size: 0.75rem; color: #8b949e; padding: 6px 10px; margin: 6px 0; background: #161b22; border: 1px solid #30363d; border-radius: 6px; text-align: center; }
+  #scope-notice a { color: #58a6ff; }
+  .filter-popup-trigger { cursor: help; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; padding: 0; border: none; background: none; font: inherit; color: inherit; }
+  .filter-popup-trigger:hover { color: #c9d1d9; }
+  .filter-popup-trigger:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; border-radius: 2px; }
+  .filter-popup { display: none; position: absolute; z-index: 1000; /* Note: isolation is intentionally NOT used — it breaks stacking context with sticky table headers, causing popups to render behind them */
+    background: #1c2129; border: 1px solid #30363d; border-radius: 6px; padding: 0;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.6); max-height: 300px; overflow-y: auto; width: 65%; min-width: 320px; }
+  .filter-popup.visible { display: block; }
+.filter-popup table { width: 100%; font-size: 0.75rem; border-collapse: collapse; margin: 0; table-layout: auto !important; }
+  .filter-popup th { background: #161b22; padding: 4px 8px; font-size: 0.7rem; cursor: pointer; position: sticky; top: 20px; border-bottom: 1px solid #30363d; white-space: nowrap; z-index: 1; user-select: none; min-height: 24px; }
+  .filter-popup th:hover { background: #1c2129; }
+  .filter-popup td { padding: 3px 8px; border-bottom: none !important; font-size: 0.75rem; border-right: 1px solid #21262d !important; }
+  .filter-popup td:last-child { border-right: none !important; }
+  .filter-popup tr:hover td { background: transparent; cursor: default; }
+  .filter-popup .model-id-cell { max-width: none !important; width: auto !important; }
+  .filter-popup .model-id-cell a { display: inline !important; max-width: none !important; overflow: visible !important; white-space: normal !important; text-overflow: clip !important; vertical-align: baseline !important; }
+.filter-popup .fp-header { position: sticky; top: 0; background: #161b22; padding: 4px 10px; font-size: 0.75rem; font-weight: 600; color: #e6edf3; border-bottom: 1px solid #30363d; z-index: 2; text-align: center; }
+  .filter-popup .fp-footer { position: sticky; bottom: 0; background: #1c2129; padding: 4px 10px; color: #8b949e; font-size: 0.72rem; font-style: italic; border-top: 1px solid #21262d; text-align: center; z-index: 2; }
+  .filter-popup .fp-note { padding: 4px 10px; color: #8b949e; font-size: 0.72rem; font-style: italic; border-top: 1px solid #21262d; text-align: center; }
+
+  @media (max-width: 480px) { .filter-popup { width: 90% !important; min-width: unset; } }
+  @media (max-width: 600px) { .ps-tooltip { display: none !important; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: 0s !important; }
+  }
+</style>
+</head>
+<body>
+<a href="#main-table" class="skip-link">Skip to main content</a>
+<h1><span aria-hidden="true">🔍</span> A Streamlined Hugging Face Model Search</h1>
+<main>
+<div id="status-bar"><div id="status" aria-live="polite">Fetching models…</div><span id="version"></span></div>
+<div id="date-slider">
+  <h2 class="ds-title">Date Range</h2>
+  <div class="ds-track-wrap" role="group" aria-label="Date range filter">
+    <span id="ds-slider-desc" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)">Drag left knob for start date, right knob for end date. Knobs cannot cross.</span>
+    <div class="ds-track-bg"></div>
+    <div class="ds-track-fill" id="ds-fill"></div>
+    <input type="range" id="ds-from" min="0" max="80" value="79" step="1" aria-label="Date range start" aria-valuemin="0" aria-valuemax="80" aria-valuenow="79" aria-describedby="ds-slider-desc ds-tooltip-from">
+    <input type="range" id="ds-to" min="0" max="80" value="80" step="1" aria-label="Date range end" aria-valuemin="0" aria-valuemax="80" aria-valuenow="80" aria-describedby="ds-slider-desc ds-tooltip-to">
+    <div class="ps-tooltip align-right" id="ds-tooltip-from" aria-hidden="true"></div>
+    <div class="ps-tooltip align-left" id="ds-tooltip-to" aria-hidden="true">Now</div>
+  </div>
+  <div class="ds-labels">
+    <span><span class="ds-l">From:</span> <span class="ds-v" id="ds-from-label"></span></span>
+    <span><span class="ds-l">To:</span> <span class="ds-v" id="ds-to-label">Now</span></span>
+  </div>
+</div>
+<div id="param-slider">
+  <h2 class="ds-title">Parameter Size</h2>
+  <div class="ds-track-wrap" role="group" aria-label="Parameter size range filter">
+    <span id="ps-slider-desc" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)">Drag left knob for minimum parameters, right knob for maximum. Knobs cannot cross.</span>
+    <div class="ds-track-bg"></div>
+    <div class="ds-track-fill" id="ps-fill"></div>
+    <input type="range" id="ps-from" min="0" max="220" value="100" step="1" aria-label="Parameter size start" aria-valuemin="0" aria-valuemax="220" aria-valuenow="100" aria-describedby="ps-slider-desc ps-tooltip-from">
+    <input type="range" id="ps-to" min="0" max="220" value="130" step="1" aria-label="Parameter size end" aria-valuemin="0" aria-valuemax="220" aria-valuenow="130" aria-describedby="ps-slider-desc ps-tooltip-to">
+    <div class="ps-tooltip" id="ps-tooltip-from" style="left:0%" aria-hidden="true"></div>
+    <div class="ps-tooltip" id="ps-tooltip-to" style="left:100%" aria-hidden="true"></div>
+  </div>
+  <div class="ds-labels">
+    <span><span class="ds-l">From:</span> <span class="ds-v" id="ps-from-label"></span></span>
+    <span><span class="ds-l">To:</span> <span class="ds-v" id="ps-to-label"></span></span>
+  </div>
+  <div class="ps-legend" id="ps-legend"></div>
+</div>
+<div id="task-bars">
+<div class="chip-group" id="from-bar" role="group" aria-label="Input modality filters">
+  <h3 class="filter-label">From PipeLine Classes:</h3>
+</div>
+<div class="chip-group" id="to-bar" role="group" aria-label="Output modality filters">
+  <h3 class="filter-label">To PipeLine Classes:</h3>
+</div>
+<div class="chip-group" id="special-bar" role="group" aria-label="Special filters">
+  <h3 class="filter-label">Untagged PipeLines:</h3>
+</div>
+</div>
+<div id="activated-types" class="task-bar-row">
+  <h3 class="filter-label">Activated Pipeline Tags:</h3>
+</div>
+<div id="available-types" class="task-bar-row">
+  <h3 class="filter-label">Available Pipeline Tags:</h3>
+</div>
+<div id="filter-row">
+<div class="chip-group" id="filter-bar" role="group" aria-label="Quantization type filters">
+  <h3 class="filter-label">Quant Types:</h3>
+</div>
+</div>
+<div id="sort-announce" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></div>
+<div id="button-row">
+  <button type="button" id="derived-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" style="margin-right:auto; user-select:none" title="When enabled, models without a known parameter counts will undergo a deeper attempt to resolve them by searching any child models.  This results in up to 12 additional API calls per model, stopping early after 3 agreeing child results.">Infer Missing Params</button>
+  <button type="button" id="hide-missing-param-chip" class="filter-chip inactive" role="checkbox" aria-checked="false" style="user-select:none" title="When enabled, models without a known parameter count are hidden from display.">Hide Missing Params</button>
+  <div id="button-center">
+    <button id="get-quick-results-btn" class="action-btn" title="Fetch top models per pipeline tag (by downloads + lastModified) — no cross-author base model injection. Faster but may miss quantizations whose parent base model is from a different author.">Get Quick Results</button>
+    <button id="get-deep-results-btn" class="action-btn" title="Same as Quick, plus resolve cross-author base models referenced by quantizations via individual model API calls. Slower but surfaces more quantizations.">Get Deep Results</button>
+  </div>
+  <button type="button" id="clear-cache-btn" title="Clears: in-memory param cache, LRU model cache, inflight fetch state, canonical dedup cache, and inference tracking. Collapses expanded sections (re-expand to reload). Preserves all filters and sliders.">Clear Cache</button><span id="clear-cache-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></span>
+  <span id="api-counter-wrap" style="margin-left:auto; min-width: 100px; text-align: right;">
+   <span id="api-counter" class="filter-label" tabindex="0" role="button" style="font-variant-numeric: tabular-nums;">API Requests: 0</span>
+     <div class="api-counter-tooltip" role="tooltip">Anonymous API requests are rate-limited by Hugging Face (~100 req/min). Counter includes successful and permanently-failed requests only — retries are not counted. When the counter glows amber, rate limiting is actively throttling requests.</div>
+  </span>
+  <span id="rate-limit-notice" style="display:none; padding:3px 10px; background:#d2992233; border:1px solid #d2992266; border-radius:6px; margin-left:8px; font-size:0.72rem; color:#e3b341; white-space:nowrap;">⚠️ Rate limited — backoff applied</span>
+</div>
+<div id="text-filter-row">
+   <label for="l1-author-filter"><b>L1 Author:</b></label>
+<span class="fiw"><input type="text" id="l1-author-filter" placeholder="All authors (pinned top)" title="Pins matching authors to the top of L1; does not hide non-matching authors." autocomplete="off"><button type="button" class="fic" data-for="l1-author-filter" aria-label="Clear">✕</button></span>
+    <label for="l2-model-filter"><b>L2 Model ID:</b></label>
+    <span class="fiw"><input type="text" id="l2-model-filter" placeholder="Any base model" title="Filters base models across all authors. L1 counts will update to reflect only matching models." autocomplete="off"><button type="button" class="fic" data-for="l2-model-filter" aria-label="Clear">✕</button></span>
+    <label for="l3-author-filter"><b>L3 Author:</b></label>
+    <span class="fiw"><input type="text" id="l3-author-filter" placeholder="Any quant author" title="Filters quant authors within already-expanded L2 sections." autocomplete="off"><button type="button" class="fic" data-for="l3-author-filter" aria-label="Clear">✕</button></span>
+    <label for="l4-model-filter"><b>L4 Model ID:</b></label>
+    <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" title="Filters individual quant models within already-expanded L3 sections." autocomplete="off"><button type="button" class="fic" data-for="l4-model-filter" aria-label="Clear">✕</button></span>
+</div>
+<div id="scope-notice">Top 500 by downloads + top 500 by recent updates per pipeline tag, plus 1000 trending models — broader coverage of popular and recently active models. Older or niche models may not appear; use <a href="https://huggingface.co/models" target="_blank" rel="noopener noreferrer" aria-label="Hugging Face Search (opens in new tab)">HF Search</a> for full coverage.</div>
+<table id="main-table" aria-label="Authors and base model counts">
+  <thead>
+    <tr>
+      <th data-key="author" scope="col" tabindex="0">Base Model Authors<span class="arrow"></span></th>
+      <th data-key="count" class="right" scope="col" tabindex="0"><span class="sort-arrow"></span>Base Models</th>
+      <th data-key="totalDownloads" class="right" scope="col" tabindex="0"><span class="sort-arrow"></span>Total Downloads</th>
+      <th data-key="totalLikes" class="right" scope="col" tabindex="0"><span class="sort-arrow"></span>Total Likes</th>
+    </tr>
+  </thead>
+  <tbody id="body"></tbody>
+</table>
+<div id="count"></div>
+</main>
+
+<script defer>
+(function() {
+  "use strict";
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 1: Configuration & Constants
+// ═══════════════════════════════════════════════════════════════
+
+// ── App Version ──
+const APP_VERSION = '260530.09';
+// See DESIGN.md — architecture decisions, data flow, and configuration reference.
+let _allFetched = [];
+let _authorData = [];
+let _canonicalAuthor = {};
+
+// ── Pipeline Tag Definitions ──
+const TO_TAGS = [
+  // Audio
+  { tag: "automatic-speech-recognition", from: ["audio"], to: "text", desc: "Transcribe speech to text" },
+  { tag: "audio-classification", from: ["audio"], to: "text", desc: "Classify audio by sound type" },
+  { tag:   "voice-activity-detection", from: ["audio"], to: "audio", desc: "Detect when speech is present" },
+  { tag: "audio-to-audio", from: ["audio"], to: "audio", desc: "Transform input audio to output audio" },
+  { tag: "audio-text-to-text", from: ["audio", "text"], to: "text", desc: "Generate text from speech + text prompt" },
+  // Text → *
+  { tag: "text-to-speech", from: ["text"], to: "speech", desc: "Generate spoken audio from text" },
+  { tag: "text-to-audio", from: ["text"], to: "audio", desc: "Generate audio from text description" },
+  { tag: "text-to-image", from: ["text"], to: "image", desc: "Generate image from text prompt" },
+  { tag: "text-to-video", from: ["text"], to: "video", desc: "Generate video from text prompt" },
+  { tag: "text-to-3d", from: ["text"], to: "3d", desc: "Generate 3D assets from text" },
+  { tag: "text-generation", from: ["text"], to: "text", desc: "Generate continuing text from a prompt" },
+  { tag: "text-classification", from: ["text"], to: "text", desc: "Assign label/class to input text" },
+  { tag: "token-classification", from: ["text"], to: "text", desc: "Label individual tokens (NER, POS)" },
+  { tag: "question-answering", from: ["text"], to: "text", desc: "Answer a question given a context passage" },
+  { tag: "zero-shot-classification", from: ["text"], to: "text", desc: "Classify text into arbitrary labels" },
+  { tag: "translation", from: ["text"], to: "text", desc: "Translate text between languages" },
+  { tag: "summarization", from: ["text"], to: "text", desc: "Condense long text into a summary" },
+  { tag: "fill-mask", from: ["text"], to: "text", desc: "Predict masked tokens in text" },
+  { tag: "sentence-similarity", from: ["text"], to: "text", desc: "Score semantic similarity of sentences" },
+  { tag: "feature-extraction", from: ["text"], to: "text", desc: "Produce embedding vectors from text" },
+  { tag: "text-ranking", from: ["text"], to: "text", desc: "Rank documents by relevance to a query" },
+  { tag: "unconditional-image-generation", from: ["text"], to: "image", desc: "Generate image without text prompt" },
+  // Image → *
+  { tag: "image-to-text", from: ["image"], to: "text", desc: "Describe or caption an image" },
+  { tag: "image-classification", from: ["image"], to: "text", desc: "Assign label/class to an image" },
+  { tag: "object-detection", from: ["image"], to: "text", desc: "Detect objects with bounding boxes" },
+  { tag: "image-segmentation", from: ["image"], to: "text", desc: "Segment image into regions by object" },
+  { tag: "zero-shot-image-classification", from: ["image"], to: "text", desc: "Classify image into arbitrary labels" },
+  { tag: "zero-shot-object-detection", from: ["image"], to: "text", desc: "Detect objects by arbitrary text labels" },
+  { tag: "image-to-image", from: ["image"], to: "image", desc: "Transform an input image (style, enhance)" },
+  { tag: "depth-estimation", from: ["image"], to: "image", desc: "Predict depth map from a single image" },
+  { tag: "mask-generation", from: ["image"], to: "image", desc: "Generate segmentation mask for an image" },
+  { tag: "image-feature-extraction", from: ["image"], to: "image", desc: "Produce embedding vectors from images" },
+  { tag: "keypoint-detection", from: ["image"], to: "image", desc: "Detect key body/key-points in image" },
+  { tag: "image-to-video", from: ["image"], to: "video", desc: "Generate video from a single image" },
+  { tag: "image-to-3d", from: ["image"], to: "3d", desc: "Generate 3D assets from an image" },
+  // Video → *
+  { tag: "video-classification", from: ["video"], to: "text", desc: "Assign label/class to a video" },
+  { tag: "video-to-video", from: ["video"], to: "video", desc: "Transform an input video to output video" },
+  { tag: "video-text-to-text", from: ["video", "text"], to: "text", desc: "Generate text from video + text prompt" },
+  // Multimodal
+  { tag: "image-text-to-text", from: ["image", "text"], to: "text", desc: "Generate text from image + text prompt" },
+  { tag: "visual-question-answering", from: ["image", "text"], to: "text", desc: "Answer questions about an image" },
+  { tag: "document-question-answering", from: ["image", "text"], to: "text", desc: "Answer questions from a document image" },
+  { tag: "visual-document-retrieval", from: ["image", "text"], to: "text", desc: "Retrieve documents from image queries" },
+  { tag: "image-text-to-image", from: ["image", "text"], to: "image", desc: "Generate image from image + text prompt" },
+  { tag: "image-text-to-video", from: ["image", "text"], to: "video", desc: "Generate video from image + text prompt" },
+  { tag: "any-to-any", from: ["any"], to: "any", desc: "Process any input modality to any output" }
+];
+
+// ── Filter Options ──
+const FROM_OPTIONS = ["text", "image", "audio", "video", "any", "all"];
+const TO_OPTIONS = ["text", "speech", "audio", "image", "video", "3d", "any", "all"];
+const activeFromFilters = new Set(["text", "image", "any"]);
+const activeToFilters = new Set(["text", "any"]);
+const SPECIAL_DISPLAY = ["include untagged"];
+const UNTAGGED_SENTINEL = '__untagged__';
+
+// ── Default Active Tags ──
+const DEFAULT_ACTIVE_TAGS = new Set([
+  "any-to-any",
+  "audio-to-audio",
+  "audio-text-to-text",
+  "automatic-speech-recognition",
+  "image-text-to-text",
+  "image-text-to-image",
+  "image-text-to-video",
+  "image-to-image",
+  "image-to-text",
+  "image-to-video",
+  "image-to-3d",
+  "text-generation",
+  "text-to-audio",
+  "text-to-image",
+  "text-to-speech",
+  "text-to-video",
+  "text-to-3d",
+  "video-classification",
+  "video-text-to-text",
+  "video-to-video"
+]);
+const activeSpecialFilters = new Set();
+
+// ── Application Configuration ──
+const CONFIG = {
+  LIMIT: 500,
+  PARAM_SLIDER_MAX: 220,
+  RATE_LIMIT: 1,   // 1 call per 250ms window = 4 req/s = 240 req/min. Tested in practice
+  RATE_WINDOW: 250,// at up to 8 req/s with no 429s; 4 req/s is a safe long-term rate.
+  FETCH_TIMEOUT: 60000,
+  MAX_RETRIES: 3,
+  DATE_SLIDER_MAX: 80,
+  DAYS_PER_STEP: 14,
+  DERIVED_BATCH_SIZE: 10,
+  TRENDING_LIMIT: 1000,
+  PARAM_MIN_GAP: 5,
+  AUTHOR_LIMIT: 1000,
+  CHILD_LIMIT: 1000,
+  DEBOUNCE_MS: 200,
+  INIT_SLIDER_FROM: 79,
+  INIT_SLIDER_TO: 80,
+  INIT_PARAM_SLIDER_FROM: 100,
+  INIT_PARAM_SLIDER_TO: 130,
+  CACHE_MAX: 500,
+  ALL_FETCHED_MAX: 16384,
+  INFLIGHT_MAX: 5,  // Max concurrent HTTP requests. Browser per-origin limit is ~6; leaves headroom for favicon etc.
+  THUMB_SIZE: 18,
+  POPUP_SHOW_DELAY: 150,   // ms debounce before popup appears on hover
+  POPUP_HIDE_DELAY: 200,   // ms debounce before popup disappears (same as DEBOUNCE_MS)
+  POPUP_MAX_SAMPLES_L4: 200,  // L4 hidden models preview cap; L2 shows all with no cap
+};
+
+// ── Expansion Key Prefixes ──
+// Expansion key prefixes — used for stable identification across re-renders.
+// a|author / m|modelId / g|parentId|groupAuthor
+const PREFIX_AUTHOR = 'a|';
+const PREFIX_MODEL = 'm|';
+const PREFIX_GROUP = 'g|';
+
+// ── Quantization Patterns ──
+const Q_METHODS = ["awq", "gptq", "bitsandbytes", "eetq", "aqlm", "gguf", "exl2", "marlin", "mlx", "bnb", "fp4", "fp8", "nf4", "int8", "int4", "q8", "q4"];
+const _Q_PATTERN = Q_METHODS.join("|");
+const RE_Q_EXISTS = new RegExp(`\\b(?:${_Q_PATTERN})\\b`, 'i');
+const RE_Q_MATCH = new RegExp(`\\b(?:${_Q_PATTERN})\\b`, 'gi');
+const RE_Q_STRIP = new RegExp(`-(?:${_Q_PATTERN})$`, 'i');
+const RE_B_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Bb](?![a-zA-Z])/;
+const RE_M_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Mm](?![a-zA-Z])/;
+
+// ── Filter Display Constants ──
+const FILTER_DISPLAY = ["awq", "fp4", "fp8", "finetune", "gguf", "mlx", "safetensors", "others"];
+const activeFilters = new Set(["finetune", "gguf", "safetensors"]);
+const activeTaskFilters = new Set();
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 2: State Management & Cache
+// ═══════════════════════════════════════════════════════════════
+
+// ── Fetch Tracking State ──
+const fetchedTasks = new Set();
+let fetchedUntagged = false;
+let fetchedTrending = false;
+let _trendingAdded = 0;
+
+// ── Generation Counter & Guards ──
+// Generation counter: monotonic tick on every "Get Results" click.
+// All async functions capture gen at entry and bail if stale before touching shared state.
+// Chosen over AbortController because it guards post-fetch side effects (render, cache write)
+// not just the fetch itself. AbortController would need a parallel mechanism anyway.
+let _fetchGeneration = 0;
+
+// ── Injection & Inference Tracking ──
+// Injected base models bypass the date filter. Cleared on deep re-fetch (injectBaseModels)
+// and Clear Cache, but intentionally NOT cleared on quick re-fetch: models that were
+// previously injected should remain visible since upstream data is static and re-injecting
+// would waste API calls without changing results.
+const _injectedBaseIds = new Set();
+let _derivedParamEnabled = false;
+let _hideMissingParamEnabled = false;
+const _paramSource = new Map(); // modelId → 'name'|'parent_inherit'|'child_name'|'child_api'|'deepen'|'metadata'
+const _inferredAttemptedIds = new Set();
+const _deepeningParamIds = new Set(); // In-flight guard for models currently being deepened
+const _deepeningAuthors = new Set(); // Guards against concurrent deepening of same author
+
+// ── API Counter & Rate Limit UI ──
+let apiCalls = 0;
+let _totalBytesReceived = 0;
+let _consecutive429s = 0;
+const _rateLimitCounter = document.getElementById("api-counter");
+const _rateLimitNotice = document.getElementById("rate-limit-notice");
+function updateRateLimitUI(isLimited) {
+  if (isLimited) {
+    _rateLimitCounter.classList.add("rate-limited");
+    _rateLimitNotice.style.display = "";
+  } else {
+    _rateLimitCounter.classList.remove("rate-limited");
+    _rateLimitNotice.style.display = "none";
+  }
+}
+function _formatBytes(n) {
+  if (n < 1024) return n + " B";
+  const kb = n / 1024;
+  if (kb < 1024) return kb.toFixed(1) + " KB";
+  const mb = kb / 1024;
+  if (mb < 1024) return mb.toFixed(1) + " MB";
+  return (mb / 1024).toFixed(1) + " GB";
+}
+function incApiCalls(n) { apiCalls += n; document.getElementById("api-counter").textContent = "API Requests: " + String(apiCalls) + " / " + _formatBytes(_totalBytesReceived); }
+
+// ── Dirty Flag ──
+let needsUpdate = false;
+// ── Deferred (API-triggering) filter path ──
+// Chip/special filters (activeFilters, activeTaskFilters, etc.) modify state and set
+// needsUpdate = true, requiring an explicit "Get Results" click to trigger applyFilters().
+// This path may issue API fetches for new pipeline tags and is therefore deferred.
+function markDirty() { needsUpdate = true; document.getElementById("get-quick-results-btn").classList.add("ready"); document.getElementById("get-deep-results-btn").classList.add("ready"); }
+
+// ── Slider Position State ──
+let sliderFrom = CONFIG.INIT_SLIDER_FROM;
+let sliderTo = CONFIG.INIT_SLIDER_TO;
+let paramSliderFrom = CONFIG.INIT_PARAM_SLIDER_FROM;
+let paramSliderTo = CONFIG.INIT_PARAM_SLIDER_TO;
+
+// ── Generation Guard Helpers ──
+function isStale(gen) { return gen !== _fetchGeneration; }
+function bailQueueItem(item, cleanup) {
+  if (cleanup) cleanup();
+  item.reject(new Error("stale generation"));
+}
+
+// ── Queue State (API Request Manager) ──
+const _apiTimestamps = [];
+const _inflightFetches = new Map();
+
+// ── API Request Manager ──
+// Queue-based dispatcher: callers push work items via fetchJson(), the manager dequeues
+// at its own pace gated by time-window (≤1 per 250ms) and in-flight count (≤INFLIGHT_MAX).
+// This decouples request creation from execution, bounding concurrent HTTP connections
+// while allowing callers to fire all N requests without batching logic.
+const _workQueue = [];
+let _inflightCount = 0;
+let _dequeueScheduled = false;
+
+// ── Canonical Dedup Cache ──
+let _canonicalCache = null;
+
+// ── Popup Timer State ──
+const _popupTimers = new Map(); // el → timeout handle
+const _popupScrollPositions = new WeakMap(); // el → scrollTop, restored across open/close cycles
+
+// ── Parameter Cache ──
+const _paramCache = new Map();
+
+// ── Render Coordinator ──
+const RenderCoordinator = {
+  _state: {
+    l1Sort: { key: "totalDownloads", asc: false },
+    detailSort: {},
+    expandedSections: new Set(),
+    textFilters: {
+      l1Author: "",
+      l2Model: "",
+      l3Author: "",
+      l4Model: ""
+    }
+  },
+  
+  _levelState: {
+    l2: new Map(),
+    l3: new Map(),
+    l4: new Map()
+  },
+  
+  _renderScheduled: false,
+  _savedExpansions: null,
+  _isRendering: false, // Hard guard against re-entrant execution
+  _skipL1Sort: false,
+
+  requestRender(savedExpansions = null, skipL1Sort = false) {
+    if (savedExpansions) this._savedExpansions = savedExpansions;
+    this._skipL1Sort = skipL1Sort;
+    if (this._renderScheduled || this._isRendering) return; // Coalesce & block re-entry
+    this._renderScheduled = true;
+    requestAnimationFrame(() => {
+      this._renderScheduled = false;
+      this._doFullRender();
+    });
+  },
+
+  _doFullRender() {
+    if (this._isRendering) return; // Safety net
+    this._isRendering = true;
+    try {
+      const saved = this._savedExpansions;
+      this._savedExpansions = null;
+      const skipSort = this._skipL1Sort;
+      this._skipL1Sort = false;
+
+      _authorData = computeAuthorData();
+      this.renderL1(_authorData, skipSort);
+      _domCache.clear(); // renderL1 replaces innerHTML — all cached DOM refs are now detached
+      this.updateArrows();
+      this.pruneExpiredExpansions(new Set(_authorData.map(a => a.author)));
+      if (saved) this.saveRestoreExpansions(saved);
+      // Sync-only structural expansion. No async (deepening) inside structural pass.
+      this.refreshAllExpanded(null, false);
+    } catch (e) {
+      console.error("Render failed", e);
+      UI.setStatus("Render error. Click Get Results to recover.");
+    } finally {
+      this._isRendering = false;
+    }
+    // Schedule async deepening pass for expanded sections after sync render completes
+    if (RC.expandedSections.size > 0) {
+      requestAnimationFrame(() => this._asyncDeepenPass());
+    }
+  },
+
+  _asyncDeepenPass() {
+    if (this._isRendering) return; // Don't recurse into structural render
+    // Deepening happens inside refreshAuthorL2Section which has its own
+    // generation guard (_fetchGeneration capture at entry). No additional
+    // guard needed here since this pass is synchronous iteration only.
+    // Phase 1: deepen each expanded author
+    for (const key of RC.expandedSections) {
+      if (!key.startsWith(PREFIX_AUTHOR)) continue;
+      const author = key.slice(PREFIX_AUTHOR.length);
+      const l1Row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
+      if (!l1Row) continue;
+      const idx = parseInt(l1Row.dataset.l1Idx);
+      const inner = document.getElementById(`i1-${idx}`);
+      if (!inner?.isConnected) continue;
+      // Only deepen if L2 data is cached (loadAuthorModels already ran)
+      if (cacheAccess(author)) {
+        refreshAuthorL2Section(idx, author, inner);
+      }
+    }
+  },
+
+  setL1Sort(key) {
+    if (this._state.l1Sort.key === key) {
+      this._state.l1Sort.asc = !this._state.l1Sort.asc;
+    } else {
+      this._state.l1Sort.key = key;
+      this._state.l1Sort.asc = false;
+    }
+  },
+
+  getDetailSort(levelKey) {
+    return this._state.detailSort[levelKey];
+  },
+
+  getExpandedList() {
+    return [...this._state.expandedSections];
+  },
+
+  renderL1: null,
+  updateArrows: null,
+  pruneExpiredExpansions: null,
+  saveRestoreExpansions: null,
+  refreshAllExpanded: null,
+
+  get sortKey() { return this._state.l1Sort.key; },
+  get sortAsc() { return this._state.l1Sort.asc; },
+  get detailSort() { return this._state.detailSort; },
+  get expandedSections() { return this._state.expandedSections; },
+  get l2StateMap() { return this._levelState.l2; },
+  get l3StateMap() { return this._levelState.l3; },
+  get l4StateMap() { return this._levelState.l4; },
+  get _l1AuthorFilter() { return this._state.textFilters.l1Author; },
+  get _l2ModelFilter() { return this._state.textFilters.l2Model; },
+  get _l3AuthorFilter() { return this._state.textFilters.l3Author; },
+  get _l4ModelFilter() { return this._state.textFilters.l4Model; },
+};
+
+const RC = RenderCoordinator; // short alias used throughout call sites
+
+// ── Progressive UI Layer ──
+const UI = {
+  statusEl: document.getElementById("status"),
+
+  setStatus(text) { this.statusEl.textContent = text; },
+
+  // Targeted cell badge update — no structural render
+  updateCellBadge(modelId, html) {
+    const row = document.querySelector(`tr.l2-row[data-model="${CSS.escape(modelId)}"]`);
+    if (!row?.isConnected) return;
+    const cell = row.querySelector("td:nth-child(3)");
+    if (cell) cell.innerHTML = html;
+  },
+
+  // Batch progressive micro-updates to avoid layout thrashing
+  _pendingUpdates: [],
+  _flushScheduled: false,
+
+  queueUpdate(fn) {
+    this._pendingUpdates.push(fn);
+    if (!this._flushScheduled) {
+      this._flushScheduled = true;
+      requestAnimationFrame(() => this._flush());
+    }
+  },
+
+  _flush() {
+    this._flushScheduled = false;
+    const batch = this._pendingUpdates.splice(0, 50);
+    for (const fn of batch) fn();
+    if (this._pendingUpdates.length > 0) requestAnimationFrame(() => this._flush());
+  }
+};
+
+// ── LRU Cache ──
+const cache = new Map();
+function cacheSet(key, value) {
+  if (cache.has(key)) cache.delete(key);
+  // Evict oldest entry (Map insertion order; cacheAccess promotes by delete+re-set, so first key = LRU)
+  if (cache.size >= CONFIG.CACHE_MAX) cache.delete(cache.keys().next().value);
+  cache.set(key, value);
+}
+function cacheAccess(key) {
+  if (!cache.has(key)) return undefined;
+  const v = cache.get(key);
+  cache.delete(key);
+  cache.set(key, v);
+  return v;
+}
+
+// ── Inflight Children Dedup ──
+const _inflightChildren = new Map();
+
+
+// ── DOM Reference Cache ──
+const _domCache = new Map();
+function cacheDomRef(key, ref) { if (ref && ref.row.isConnected) _domCache.set(key, ref); }
+function invalidateDomKey(key) { _domCache.delete(key); }
+function invalidateDomPrefix(prefix) { for (const k of _domCache) if (k[0].startsWith(prefix)) _domCache.delete(k[0]); }
+
+// ── Filter Boundary Tracking ──
+const _lastFilteredCounts = new Map(); // author → count
+
+// ── State Reset (Clear Cache) ──
+function resetAppState() {
+  _fetchGeneration++;
+  cache.clear();
+  _paramCache.clear();
+  _inflightChildren.clear();
+  _inflightFetches.clear();
+  for (const item of _workQueue) { item.reject(new Error("stale generation")); }
+  _workQueue.length = 0;
+  _inflightCount = 0;
+  _dequeueScheduled = false;
+  for (const [el, timer] of _popupTimers) { clearTimeout(timer); }
+  _popupTimers.clear();
+  _paramSource.clear();
+  _inferredAttemptedIds.clear();
+  _deepeningParamIds.clear();
+  _injectedBaseIds.clear();
+  _canonicalCache = null;
+  _consecutive429s = 0;
+  apiCalls = 0;
+  _totalBytesReceived = 0;
+  _trendingAdded = 0;
+  fetchedTrending = false;
+  _lastFilteredCounts.clear();
+  updateRateLimitUI(false);
+  RenderCoordinator._levelState.l2.clear();
+  RenderCoordinator._levelState.l3.clear();
+  RenderCoordinator._levelState.l4.clear();
+  RenderCoordinator.expandedSections.clear();
+}
+
+// ── Slider RAF Throttling ──
+let _uiRafId = null;
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 3: API & Data Fetching
+// ═══════════════════════════════════════════════════════════════
+
+// ── Queue-based API Request Manager ──
+//   fetchJson → _scheduleDequeue → _dequeueNext → _dispatchFetchWithRetry
+function fetchJson(url) {
+  const existing = _inflightFetches.get(url);
+  if (existing) return existing;
+
+  let resolve, reject;
+  const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+  _workQueue.push({ url, resolve, reject });
+  _scheduleDequeue();
+
+  _inflightFetches.set(url, promise);
+  promise.finally(() => {
+    if (_inflightFetches.get(url) === promise) _inflightFetches.delete(url);
+  });
+  return promise;
+}
+
+function _scheduleDequeue() {
+  if (_dequeueScheduled) return;
+  _dequeueScheduled = true;
+  setTimeout(_dequeueNext, 0);
+}
+
+// Dequeues the next work item from the queue and dispatches it. Gated by in-flight count
+// and time window. When in-flight is maxed, relies on completion callbacks to re-enter —
+// no polling timeout needed since every path through _dispatchFetchWithRetry calls back.
+function _dequeueNext() {
+  if (_workQueue.length === 0) { _dequeueScheduled = false; return; }
+  if (_inflightCount >= CONFIG.INFLIGHT_MAX) return; // completions will re-enter
+
+  const now = Date.now();
+  const cutoff = now - CONFIG.RATE_WINDOW;
+  while (_apiTimestamps.length > 0 && _apiTimestamps[0] < cutoff) {
+    _apiTimestamps.shift();
+  }
+  if (_apiTimestamps.length >= CONFIG.RATE_LIMIT) {
+    const wait = _apiTimestamps[0] + CONFIG.RATE_WINDOW - now + 10;
+    setTimeout(_dequeueNext, Math.max(wait, 1));
+    return;
+  }
+
+  // Both gates pass — pop and dispatch.
+  const item = _workQueue.shift();
+  if (!item) { _dequeueScheduled = false; return; }
+  _apiTimestamps.push(Date.now());
+  _inflightCount++;
+
+  _dispatchFetchWithRetry(item, _fetchGeneration, 0);
+}
+
+// Executes the HTTP fetch with retry logic. On success/failure resolves/rejects the
+// work item's deferred promise and triggers next dequeue. On retriable error releases
+// its in-flight slot, waits backoff delay, then re-enqueues at tail to compete fairly.
+function _dispatchFetchWithRetry(item, gen, retries) {
+  if (isStale(gen)) { bailQueueItem(item, () => { _inflightCount--; _dequeueNext(); }); return; }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT);
+
+  fetch(item.url, { signal: controller.signal })
+    .then(async res => {
+      clearTimeout(timer);
+      if (isStale(gen)) { bailQueueItem(item, () => { _inflightCount--; _dequeueNext(); }); return; }
+      if (res.ok) {
+        _consecutive429s = 0;
+        updateRateLimitUI(false);
+        const text = await res.text();
+        _totalBytesReceived += text.length;
+        incApiCalls(1);
+        const data = JSON.parse(text);
+        if (isStale(gen)) { bailQueueItem(item, () => { _inflightCount--; _dequeueNext(); }); return; }
+        _inflightCount--;
+        item.resolve(data);
+        _dequeueNext();
+      } else if ((res.status === 429 || res.status >= 500) && retries < CONFIG.MAX_RETRIES) {
+        const nextRetry = retries + 1;
+        let delay;
+        if (res.status === 429) {
+          _consecutive429s++;
+          updateRateLimitUI(_consecutive429s >= 3);
+          const ra = res.headers.get('Retry-After');
+          delay = ra ? parseInt(ra, 10) * 1000 : Math.min(1000 * Math.pow(2, retries), 30000);
+        } else {
+          _consecutive429s = 0;
+          updateRateLimitUI(false);
+          delay = Math.min(1000 * Math.pow(2, retries), 30000);
+        }
+        console.warn(`API ${res.status} for ${item.url}, retry ${nextRetry}/${CONFIG.MAX_RETRIES} in ${delay}ms`);
+        _inflightCount--;
+        setTimeout(() => {
+          _workQueue.push(item);
+          _scheduleDequeue();
+        }, delay);
+        _dequeueNext();
+      } else {
+        _consecutive429s = 0;
+        updateRateLimitUI(false);
+        incApiCalls(1);
+        _inflightCount--;
+        item.reject(new Error(`HTTP ${res.status}`));
+        _dequeueNext();
+      }
+    })
+    .catch(err => {
+      clearTimeout(timer);
+      if (isStale(gen)) { bailQueueItem(item, () => { _inflightCount--; _dequeueNext(); }); return; }
+      if (retries < CONFIG.MAX_RETRIES) {
+        const delay = Math.min(1000 * Math.pow(2, retries), 30000);
+        console.warn(`Network error for ${item.url}, retry ${retries + 1}/${CONFIG.MAX_RETRIES} in ${delay}ms`);
+        _inflightCount--;
+        setTimeout(() => {
+          _workQueue.push(item);
+          _scheduleDequeue();
+        }, delay);
+        _dequeueNext();
+      } else {
+        _inflightCount--;
+        item.reject(err);
+        _dequeueNext();
+      }
+    });
+}
+
+// ── Endpoint Wrappers ──
+async function fetchModels(task) {
+  return fetchJson(`https://huggingface.co/api/models?sort=downloads&direction=-1&limit=${CONFIG.LIMIT}&pipeline_tag=${task}&full=true&cardData=true`);
+}
+
+async function fetchRecentModels(task) {
+  return fetchJson(`https://huggingface.co/api/models?sort=lastModified&direction=-1&limit=${CONFIG.LIMIT}&pipeline_tag=${task}&full=true&cardData=true`);
+}
+
+async function fetchUntaggedModels() {
+  return fetchJson(`https://huggingface.co/api/models?sort=downloads&direction=-1&limit=${CONFIG.LIMIT}&full=true&cardData=true`);
+}
+
+async function fetchTrendingModels() {
+  return fetchJson(`https://huggingface.co/api/models?sort=trendingScore&direction=-1&limit=${CONFIG.TRENDING_LIMIT}&full=true&cardData=true`);
+}
+
+// ── Progressive Fetch State & Merge ──
+let _fetchSeen = null;        // Set of model IDs seen this generation
+let _fetchCompleted = 0;      // Number of completed requests
+
+// Initialize shared fetch state at the start of a new "Get Results" cycle.
+function _initFetchState() {
+  if (!_allFetched) _allFetched = [];
+  _fetchSeen = new Set(_allFetched.map(m => m.id));
+  _fetchCompleted = 0;
+}
+function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
+  if (isStale(gen)) return 0;
+  let added = 0;
+  for (const m of rawModels.map(normalizeModel)) {
+    if (_fetchSeen.has(m.id)) continue;
+    _fetchSeen.add(m.id);
+    m.paramB = getParamCount(m);
+    if (!m.pipeline_tag && pipelineTag) m.pipeline_tag = pipelineTag;
+    if (filterFn && !filterFn(m)) continue;
+    _allFetched.push(m);
+    added++;
+  }
+  return added;
+}
+
+// Called by each independent completion handler to update status and trigger render.
+// RAF coalescing in requestRender() handles burst protection — no modulo gate needed.
+function _onFetchComplete(gen, completed, total, savedExpansions) {
+  if (isStale(gen)) return;
+  UI.setStatus(`Fetching models… (${completed}/${total})`);
+  recomputeAndRender(savedExpansions);
+}
+
+// Trim _allFetched to ALL_FETCHED_MAX, preserving injected base models.
+function _trimAllFetched() {
+  if (_allFetched.length <= CONFIG.ALL_FETCHED_MAX) return;
+  const pinned = [];
+  const droppable = [];
+  for (const m of _allFetched) {
+    if (_injectedBaseIds.has(m.id)) pinned.push(m);
+    else droppable.push(m);
+  }
+  droppable.sort((a, b) => {
+    const da = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+    const db = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+    return db !== da ? db - da : (b.id || '').localeCompare(a.id || '');
+  });
+  const room = CONFIG.ALL_FETCHED_MAX - pinned.length;
+  droppable.length = Math.max(0, Math.min(droppable.length, room));
+  _allFetched = droppable.concat(pinned);
+}
+
+// ── applyFilters (Main "Get Results" Entry Point) ──
+function applyFilters(force, deep) {
+  if (!needsUpdate && !force) return;
+  needsUpdate = false;
+  const savedExpansions = new Set(RC.expandedSections);
+  _fetchGeneration++;
+  const gen = _fetchGeneration;
+  const quickBtn = document.getElementById("get-quick-results-btn");
+  const deepBtn = document.getElementById("get-deep-results-btn");
+  // When deep is clicked both buttons disable (quick no longer makes sense after deep).
+  // When quick is clicked only the quick button disables — deep remains active so the
+  // user can upgrade to deep results without re-fetching.
+  // Only strip the ready indicator from buttons that get disabled.
+  quickBtn.classList.remove("ready");
+  quickBtn.disabled = true;
+  if (deep) { deepBtn.classList.remove("ready"); deepBtn.disabled = true; }
+  const tasks = resolveTasks().filter(t => activeTaskFilters.has(t));
+  const newTasks = tasks.filter(t => !fetchedTasks.has(t));
+  const needUntagged = activeSpecialFilters.has("include untagged") && !fetchedUntagged;
+  const reenable = () => { quickBtn.disabled = false; deepBtn.disabled = false; };
+
+  // Fast path: no new data needed, just re-render with current filters.
+  if (newTasks.length === 0 && !needUntagged && fetchedTrending && !deep) {
+    markLocalParents(_allFetched, gen);
+    reenable();
+    recomputeAndRender(savedExpansions);
+    return;
+  }
+
+  // Async path: fire all requests independently with progressive rendering.
+  (async () => {
+    document.getElementById("main-table").setAttribute("aria-busy", "true");
+    try {
+      _initFetchState();
+      const promises = [];
+      let totalRequests = 0;
+
+      // Fetch trending first so its data is available for the earliest progressive renders.
+      if (!fetchedTrending) {
+        totalRequests++;
+        try {
+          _trendingAdded = _mergeRequestResult(await fetchTrendingModels(), gen, null, null);
+          fetchedTrending = true;
+        } catch (e) { console.warn("fetchTrendingModels error:", e); }
+        finally { _onFetchComplete(gen, ++_fetchCompleted, totalRequests, savedExpansions); }
+      }
+
+      // Fire each task's sorts as independent requests — no pairing, no batching.
+      const fireFetch = (fetchFn, tag, filterFn, onDone) => {
+        totalRequests++;
+        promises.push((async () => {
+          try {
+            _mergeRequestResult(await fetchFn(), gen, tag, filterFn);
+            if (onDone) onDone();
+          } catch (e) { console.warn("fetch error for", tag || "special", e); }
+          finally { _onFetchComplete(gen, ++_fetchCompleted, totalRequests, savedExpansions); }
+        })());
+      };
+      for (const tag of newTasks) {
+        fireFetch(() => fetchModels(tag), tag, null, () => fetchedTasks.add(tag));
+        fireFetch(() => fetchRecentModels(tag), tag, null, () => fetchedTasks.add(tag));
+      }
+
+      // Fire untagged as independent request.
+      if (needUntagged) {
+        fireFetch(fetchUntaggedModels, null, m => !m.pipeline_tag, () => fetchedUntagged = true);
+      }
+
+      // Wait for all requests to complete before post-processing.
+      await Promise.allSettled(promises);
+      if (isStale(gen)) return;
+
+      // Post-fetch processing: trim, inject/mark parents, final render.
+      _trimAllFetched();
+
+      if (deep) {
+        UI.setStatus(`Resolving base models…`);
+        try {
+          await injectBaseModels(_allFetched, (() => {
+            let renderCounter = 0;
+            return () => {
+              renderCounter++;
+              if (isStale(gen)) return;
+              if (renderCounter % 2 !== 0) return;
+              const saved = new Set(RC.expandedSections);
+              recomputeAndRender(saved);
+            };
+          })());
+        } catch (e) {
+          console.warn("Base model injection error:", e);
+        }
+      } else {
+        // Quick mode: mark parents already in _allFetched so quants outside the date
+        // range still keep their parent visible (the data is already in hand — no API
+        // calls needed, just a local scan).
+        // _injectedBaseIds is intentionally NOT cleared here — models injected during
+        // a prior deep fetch should persist across quick re-fetches since upstream data
+        // is static and re-injecting would waste API calls. Clear Cache or a fresh deep
+        // fetch resets the set (injectBaseModels calls .clear()).
+        markLocalParents(_allFetched, gen);
+      }
+
+      if (isStale(gen)) return;
+      recomputeAndRender(savedExpansions);
+      UI.setStatus("");
+    } catch (e) {
+      console.warn("applyFilters error:", e);
+      UI.setStatus("Error: " + e.message);
+    } finally {
+      reenable();
+      document.getElementById("main-table").setAttribute("aria-busy", "false");
+    }
+  })();
+}
+
+// ── Parent Injection (quick mode — no API calls) ──
+function markLocalParents(all, gen) {
+  if (isStale(gen)) return;
+  const seen = new Set(all.map(m => m.id));
+  for (let i = 0; i < all.length; i++) {
+    if (isStale(gen)) return;
+    const m = all[i];
+    if (!isInDateRange(m.lastModified)) continue;
+
+    let baseId = null;
+    const cd = m.cardData;
+    const bm = cd && cd.base_model;
+
+    if (bm) {
+      baseId = getBaseModelId(cd);
+      if (!baseId) continue;
+    } else {
+      const idLower = m.id.toLowerCase();
+      if (!RE_Q_EXISTS.test(idLower)) continue;
+      baseId = inferParent(m.id, seen);
+      if (!baseId) continue;
+    }
+
+    if (seen.has(baseId)) {
+      const parent = all.find(p => p.id === baseId);
+      if (parent) {
+        parent._injected = true;
+        _injectedBaseIds.add(baseId);
+      }
+    }
+  }
+}
+
+// ── Parent Injection (deep mode — fetches via queue) ──
+async function injectBaseModels(all, onBatch) {
+  const gen = _fetchGeneration;
+  if (isStale(gen)) return;
+  _injectedBaseIds.clear();  // Reset on deep fetch — fresh injection pass will repopulate.
+  markLocalParents(all, gen);
+  if (isStale(gen)) return;
+  const seenAuthors = new Set(all.map(m => m.id.split("/")[0]));
+  const injected = [];
+  const fetchQueue = new Map();
+  const seen = new Set(all.map(m => m.id));
+
+  for (let i = 0; i < all.length; i++) {
+    if (isStale(gen)) return;
+    const m = all[i];
+    if (!isInDateRange(m.lastModified)) continue;
+
+    let baseId = null;
+    const cd = m.cardData;
+    const bm = cd && cd.base_model;
+
+    if (bm) {
+      baseId = getBaseModelId(cd);
+      if (!baseId) continue;
+    } else {
+      const idLower = m.id.toLowerCase();
+      if (!RE_Q_EXISTS.test(idLower)) continue;
+      baseId = inferParent(m.id, seen);
+      if (!baseId) continue;
+    }
+
+    if (!seen.has(baseId) && bm && !isBase(m)) {
+      const baseAuthor = baseId.split("/")[0];
+      if (!seenAuthors.has(baseAuthor)) {
+        if (!fetchQueue.has(baseId)) {
+          fetchQueue.set(baseId, true);
+        }
+      }
+    }
+  }
+
+  const baseIds = [...fetchQueue.keys()];
+  let completed = 0;
+  const totalRequests = baseIds.length;
+  const promises = baseIds.map((baseId) => {
+    return fetchJson(`https://huggingface.co/api/models/${baseId}?full=true`).then(
+      (raw) => {
+        if (isStale(gen)) return null;
+        const full = normalizeModel(raw);
+        full.paramB = getParamCount(full);
+        full._injected = true;
+        injected.push(full);
+        seen.add(full.id);
+        _injectedBaseIds.add(full.id);
+      },
+      (err) => {
+        console.warn("Failed to fetch base model", err);
+      }
+    ).finally(() => {
+      if (isStale(gen)) return;
+      completed++;
+      UI.setStatus(`Resolving base models… (${completed}/${totalRequests})`);
+      if (onBatch) onBatch();
+    });
+  });
+  await Promise.all(promises);
+
+  if (isStale(gen)) return;
+  all.push(...injected);
+
+  // Final reconciliation: guarantee every model flagged as _injected is whitelisted
+  // in _injectedBaseIds. Generation guards or Pass 1/Pass 2 races can cause flagged
+  // parents to slip through earlier set additions. This ensures
+  // hierarchy integrity so quantizations attach to their true parent even when that
+  // parent falls outside the active date range (see modelPassesAllFilters).
+  all.forEach(m => { if (m._injected && gen === _fetchGeneration) _injectedBaseIds.add(m.id); });
+  UI.setStatus("");
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 4: Data Processing & Parameter Resolution
+// ═══════════════════════════════════════════════════════════════
+
+// ── Data Normalization ──
+// Transforms raw API payloads into the canonical internal model shape.
+// Intentionally drops sha, siblings, config, library_name, private, and all other API fields
+// (~60% memory savings in _allFetched). Callers: S3 (_mergeRequestResult, injectBaseModels),
+// S4 (resolveParamFromChildren), S6 (loadAuthorModels, loadChildren).
+function normalizeModel(m) {
+  return {
+    id: m.id,
+    downloads: m.downloads || 0,
+    likes: m.likes || 0,
+    lastModified: m.lastModified || "",
+    createdAt: m.createdAt || "",
+    pipeline_tag: m.pipeline_tag || "",
+    tags: m.tags || [],
+    safetensors: m.safetensors || null,
+    gguf: m.gguf || null,
+    cardData: m.cardData ? { base_model: m.cardData.base_model } : null
+  };
+}
+
+// ── Model Classification ──
+//   getBaseModelId / isBase / inferParent / isOrphanQuant / isNestedQuant
+function getBaseModelId(cd) {
+  if (!cd || !cd.base_model) return null;
+  const bm = cd.base_model;
+  if (typeof bm === "string") return bm;
+  if (Array.isArray(bm)) {
+    const first = bm[0];
+    return typeof first === "string" ? first : (first && first.id) || null;
+  }
+  return null;
+}
+
+// A model is "base" if it has no cardData.base_model, or its base_model points to the same author.
+// Same-author fine-tunes appear at L2 alongside true base models, since users
+// browsing an author page already see them as part of that author's lineage.
+function isBase(model) {
+  const cd = model.cardData;
+  if (!cd) return true;
+  const baseId = getBaseModelId(cd);
+  if (!baseId) return true;
+  const author = model.id.split("/")[0];
+  if (baseId.split("/")[0] === author) return true;
+  return false;
+}
+
+// Iteratively strip trailing -segments from a model ID until a known parent is found.
+// Handles patterns like Qwen2.5-7B-AWQ → Qwen2.5-7B, or Qwen3-Coder-Next-GGUF → Qwen3-Coder-Next.
+function inferParent(modelId, knownIds) {
+  const bits = modelId.split('/');
+  let name = bits[1];
+  if (!name) return null;
+  while (name.length > 0) {
+    const dash = name.lastIndexOf('-');
+    if (dash <= 0) break;
+    name = name.substring(0, dash);
+    const candId = bits[0] + '/' + name;
+    if (knownIds.has(candId)) return candId;
+  }
+  return null;
+}
+
+// Quant model without explicit base_model metadata, but whose parent is in knownIds.
+// Shown at L2 with an orphan badge. knownIds comes from _allFetched (full set, not date-filtered)
+// so a parent outside the date range still suppresses the quant from appearing standalone at L1.
+function isOrphanQuant(model, knownIds) {
+  const cd = model.cardData;
+  if (cd && cd.base_model) return false;
+  const idLower = model.id.toLowerCase();
+  if (!RE_Q_EXISTS.test(idLower)) return false;
+  return inferParent(model.id, knownIds) !== null;
+}
+
+function getOrphanQuantMethod(modelId) {
+  const idLower = modelId.toLowerCase();
+  return idLower.match(RE_Q_MATCH) || [];
+}
+
+function isNestedQuant(m, knownIds, allFetchedMap) {
+  const cd = m.cardData;
+  if (!cd) return false;
+  const baseId = getBaseModelId(cd);
+  if (!baseId) return false;
+  const idLower = m.id.toLowerCase();
+  if (!RE_Q_EXISTS.test(idLower)) return false;
+  if (!knownIds.has(baseId)) return false;
+  // Only suppress if the parent is itself a non-base (quant/derivative).
+  // Same-author quants whose parent is a true base model should appear at L2.
+  const parent = allFetchedMap.get(baseId);
+  return parent ? !isBase(parent) : false;
+}
+
+// ── Canonical Author Dedup ──
+function buildCanonicalAuthors() {
+  if (_canonicalCache && _canonicalCache.ref === _allFetched) {
+    _canonicalAuthor = _canonicalCache.result;
+    return;
+  }
+  _canonicalAuthor = {};
+  // Single-pass: for each name, track the best (highest-download) author and whether
+  // multiple authors exist. Only names with >1 distinct author go into canonical map.
+  const byName = {};
+  _allFetched.forEach(m => {
+    const name = m.id.split("/").slice(1).join("/");
+    const parts = m.id.split("/");
+    const authorLower = parts[0].toLowerCase();
+    const entry = { author: authorLower, raw: parts[0], downloads: m.downloads || 0 };
+    if (!byName[name]) {
+      byName[name] = { best: entry, authors: new Set([authorLower]) };
+    } else {
+      const g = byName[name];
+      g.authors.add(authorLower);
+      if (entry.downloads > g.best.downloads) g.best = entry;
+    }
+  });
+  for (const name in byName) {
+    if (byName[name].authors.size > 1) {
+      _canonicalAuthor[name] = byName[name].best.raw;
+    }
+  }
+  _canonicalCache = { result: _canonicalAuthor, ref: _allFetched };
+}
+
+function isCanonicalCopy(m) {
+  const name = m.id.split("/").slice(1).join("/");
+  return _canonicalAuthor && _canonicalAuthor[name] !== undefined &&
+    _canonicalAuthor[name].toLowerCase() !== m.id.split("/")[0].toLowerCase();
+}
+
+// ── Pipeline Tag Resolution ──
+function resolveTasks() {
+  return TO_TAGS.filter(t => {
+    const fromMatch = t.from.every(f => activeFromFilters.has(f));
+    const toMatch = activeToFilters.has(t.to);
+    return fromMatch && toMatch;
+  }).map(t => t.tag);
+}
+function matchesTaskFilter(pipelineTag) {
+  if (!pipelineTag) return true;
+  const t = TO_TAGS.find(x => x.tag === pipelineTag);
+  if (!t) return false;
+  const fromMatch = t.from.every(f => activeFromFilters.has(f));
+  const toMatch = activeToFilters.has(t.to);
+  return fromMatch && toMatch;
+}
+
+// ── Parameter Extraction ──
+//   extractParamFromId → getParamCount → resolveParamFromChildren → tryResolveModelParam
+function extractParamFromId(id) {
+  const bMatch = id.match(RE_B_PARAM);
+  if (bMatch) {
+    const v = parseFloat(bMatch[1]);
+    if (v >= 0.001 && v <= 2000) return v;
+  }
+  const mMatch = id.match(RE_M_PARAM);
+  if (mMatch) {
+    const v = parseFloat(mMatch[1]) / 1000;
+    if (v >= 0.001 && v <= 2000) return v;
+  }
+  return null;
+}
+function getParamCount(m) {
+  const cached = _paramCache.get(m.id);
+  if (cached !== undefined) return cached;
+  let result;
+  if (m.safetensors && m.safetensors.total != null) result = m.safetensors.total / 1e9;
+  else if (m.gguf && m.gguf.total != null) result = m.gguf.total / 1e9;
+  else {
+    result = extractParamFromId(m.id);
+    if (result !== null) _paramSource.set(m.id, 'name');
+  }
+  _paramCache.set(m.id, result);
+  return result;
+}
+async function resolveParamFromChildren(modelId) {
+  const bits = modelId.split('/');
+  const modelName = bits[1];
+  const lim = CONFIG.DERIVED_BATCH_SIZE;
+  const nameUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${lim}&full=true&cardData=true`;
+  const idUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(modelId)}&sort=downloads&direction=-1&limit=${lim}&full=true&cardData=true`;
+  const [nameRes, idRes] = await Promise.all([
+    fetchJson(nameUrl).catch(() => []),
+    fetchJson(idUrl).catch(() => [])
+  ]);
+  const seen = new Set();
+  const children = [];
+  for (const raw of [...nameRes, ...idRes]) {
+    if (!raw || !raw.id || seen.has(raw.id)) continue;
+    seen.add(raw.id);
+    if (raw.id === modelId) continue;
+    const cd = raw.cardData || {};
+    const childHasBase = hasBaseModel(cd, modelId);
+    if (!childHasBase && !strictNameMatch(raw.id, modelName)) continue;
+    children.push(normalizeModel(raw));
+  }
+  // Sort children by ascending modification date so the oldest (typically
+  // original GGUF quants) are prioritized over newer pruned variants (REAP)
+  // when DERIVED_BATCH_SIZE limits how many individual cards we fetch.
+  children.sort((a, b) => (a.lastModified || "").localeCompare(b.lastModified || ""));
+  // Collect params from top children and use the maximum — pruning
+  // (REAP, distillation) only reduces parameter counts, never increases them.
+  // Try free ID-based extraction first: most quant child names contain B/M
+  // patterns (e.g. "7B", "13B") that reveal the parent's parameter count
+  // without an API call. Fall back to individual model fetch only when the
+  // name lacks a B/M pattern (rare for quant models).
+  // Early exit: if 3 non-null results agree on the current maximum, stop.
+  let runningMax = null, maxConfidence = 0, usedApi = false;
+  for (let i = 0; i < Math.min(children.length, CONFIG.DERIVED_BATCH_SIZE); i++) {
+    const childId = children[i].id;
+    let childP = extractParamFromId(childId);
+    if (childP === null) {
+      usedApi = true;
+      try {
+        const full = await fetchJson(`https://huggingface.co/api/models/${childId}?full=true`);
+        childP = (full.safetensors && full.safetensors.total != null) ? full.safetensors.total / 1e9 :
+                 (full.gguf && full.gguf.total != null) ? full.gguf.total / 1e9 : null;
+      } catch (e) { /* skip */ }
+    }
+    if (childP !== null) {
+      _paramCache.set(childId, childP);
+      if (childP > runningMax) { runningMax = childP; maxConfidence = 1; }
+      else if (childP === runningMax) { maxConfidence++; }
+      if (maxConfidence >= 3) break;
+    }
+  }
+  return { value: runningMax, usedApi };
+}
+async function tryResolveModelParam(m, gen) {
+  const rowEl = document.querySelector(`tr.l2-row[data-model="${CSS.escape(m.id)}"]`);
+  if (rowEl) rowEl.classList.add("inferring");
+  UI.setStatus(`Resolving params for ${m.id.split("/").slice(1).join("/")}…`);
+
+  let resolved = null;
+  let source = 'none';
+
+  // ① FREE: Name pattern extraction (B/M suffixes)
+  if ((resolved = extractParamFromId(m.id)) !== null) {
+    source = 'name';
+  }
+
+  // ② FREE: Parent param inheritance (iterative suffix stripping)
+  if (resolved === null) {
+    const bits = m.id.split('/');
+    let name = bits[1];
+    while (name.length > 0) {
+      const dash = name.lastIndexOf('-');
+      if (dash <= 0) break;
+      name = name.substring(0, dash);
+      const candId = bits[0] + '/' + name;
+
+      // Check param cache first (fastest path for already-resolved parents)
+      const cachedP = _paramCache.get(candId);
+      if (cachedP != null) { resolved = cachedP; source = 'parent'; break; }
+
+      // Fallback to _allFetched scan (covers injected/visible base models)
+      if (!resolved) {
+        const parent = _allFetched.find(f => f.id === candId && f.paramB != null);
+        if (parent) { resolved = parent.paramB; source = 'parent'; }
+      }
+    }
+  }
+
+  // ③ EXPENSIVE: Child search API calls — ONLY if still unresolved & not attempted
+  let childUsedApi = false;
+  if (resolved === null && !_inferredAttemptedIds.has(m.id)) {
+    if (isStale(gen)) {
+      if (rowEl) rowEl.classList.remove("inferring");
+      return false;
+    }
+    const childResult = await resolveParamFromChildren(m.id);
+    resolved = childResult.value;
+    childUsedApi = childResult.usedApi;
+    source = 'children';
+  }
+
+  // Mark as attempted to prevent future expensive retries on re-expansion/filter changes
+  if (_inferredAttemptedIds.size > 5000) _inferredAttemptedIds.clear();
+  _inferredAttemptedIds.add(m.id);
+
+  if (rowEl) rowEl.classList.remove("inferring");
+
+  // Commit to state & cache only on success
+  if (resolved !== null) {
+    m.paramB = resolved;
+    _paramCache.set(m.id, resolved);
+    const ps = source === 'name' ? 'name' : source === 'parent' ? 'parent_inherit' : (source === 'children' && childUsedApi) ? 'child_api' : 'child_name';
+    _paramSource.set(m.id, ps);
+
+    const af = _allFetched?.find(x => x.id === m.id);
+    if (af) af.paramB = resolved;
+  }
+
+  // Progressive UI update only — no structural render
+  UI.queueUpdate(() => UI.updateCellBadge(m.id, paramBadgeHtml(m)));
+  return resolved !== null;
+}
+
+// ── Filter Pipeline ──
+//   matchesFilter → qMethodToCategory → resolveTasks → matchesTaskFilter → modelPassesAllFilters → computeAuthorData
+function matchesFilter(qMethod) {
+  if (!qMethod) return true;
+  const methods = qMethod.toLowerCase().split(",").map(s => s.trim());
+  return methods.some(m => {
+    const cat = qMethodToCategory(m);
+    return activeFilters.has(cat);
+  });
+}
+function qMethodToCategory(method) {
+  const m = method.toLowerCase();
+  if (["awq", "finetune", "gguf", "mlx", "fp4", "fp8", "safetensors"].includes(m)) return m;
+  return "others";
+}
+function modelPassesAllFilters(m) {
+  const tf2 = RC._state.textFilters.l2Model;
+  if (tf2 && !m.id.split("/").slice(1).join("/").toLowerCase().includes(tf2.toLowerCase())) return false;
+  if (!_injectedBaseIds.has(m.id) && !isInDateRange(m.lastModified)) return false;
+  const tag = m.pipeline_tag;
+  if (!tag && !activeSpecialFilters.has("include untagged")) return false;
+  const pb = m.paramB != null ? m.paramB : getParamCount(m);
+  if (!isInParamRange(pb)) return false;
+  if (_hideMissingParamEnabled && pb === null) return false;
+  if (!matchesTaskFilter(tag)) return false;
+  if (tag && !activeTaskFilters.has(tag)) return false;
+  return true;
+}
+function computeAuthorData() {
+  buildCanonicalAuthors();
+  const all = _allFetched;
+  const knownIds = new Set(all.map(x => x.id));
+  const byId = new Map(all.map(x => [x.id, x]));
+  const map = {};
+  all.forEach(m => {
+    if (!modelPassesAllFilters(m)) return;
+    if (!isBase(m)) return;
+    if (isOrphanQuant(m, knownIds)) return;
+    if (isNestedQuant(m, knownIds, byId)) return;
+    if (isCanonicalCopy(m)) return;
+    const author = m.id.split("/")[0];
+    if (!map[author]) map[author] = { author, count: 0, totalDownloads: 0, totalLikes: 0 };
+    map[author].count++;
+    map[author].totalDownloads += m.downloads || 0;
+    map[author].totalLikes += m.likes || 0;
+  });
+  return Object.values(map);
+}
+
+// ── Filter Boundary Tracking ──
+function _filterBoundaryChanged(author) {
+  const baseModels = cacheAccess(author);
+  if (!baseModels) return true;
+  const nqb = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
+  const current = nqb.filter(m => modelPassesAllFilters(m)).length;
+  const prev = _lastFilteredCounts.get(author) ?? current;
+  _lastFilteredCounts.set(author, current);
+  return current !== prev;
+}
+
+// Schedule a structural render after deepening completes, but only if visibility
+// of models changed (i.e., param resolution moved models into/out of param filter range).
+function _schedulePostDeepenRender(author, gen) {
+  if (isStale(gen)) return;
+  if (_filterBoundaryChanged(author)) {
+    RC.requestRender(null, true);
+  }
+}
+
+// ── Sort Utilities ──
+//   sortCoerce → _cmp → sortRows
+const _NUMERIC_SORT_KEYS = new Set(["downloads", "likes", "totalDownloads", "totalLikes", "count", "paramB"]);
+function sortCoerce(v, k) {
+  if (_NUMERIC_SORT_KEYS.has(k)) return Number(v);
+  if (k === "created_at" || k === "updated_at" || k.includes("Modified")) { const t = new Date(v || 0).getTime(); return t === t ? t : Infinity; }
+  return String(v || "").toLowerCase();
+}
+function _cmp(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
+function sortRows(rows, key, asc, subKey) {
+  const cmp = (x, y) => {
+    let va = sortCoerce(x[key], key), vb = sortCoerce(y[key], key);
+    let r = typeof va === 'number' && typeof vb === 'number' ? _cmp(va, vb) : _cmp(va, vb);
+    if (r === 0 && subKey && x[key] === y[key]) {
+      r = _cmp(sortCoerce(x[subKey], subKey), sortCoerce(y[subKey], subKey));
+    }
+    return r || x.id.localeCompare(y.id);
+  };
+  return rows.slice().sort(asc ? cmp : (a, b) => -cmp(a, b));
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 5: UI Components & Widgets
+// ═══════════════════════════════════════════════════════════════
+
+// ── Utility Formatters ──
+//   fmt / fmtDate / fmtAge / escapeHtml / debounce
+function fmt(n) { return n.toLocaleString(); }
+function fmtDate(d) { return d ? new Date(d).toISOString().slice(0, 10) : "—"; }
+function fmtAge(d) {
+  if (!d) return "";
+  const days = Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
+  if (days < 30) return `${days}d`;
+  if (days < 365) return `${Math.floor(days / 30)}mo`;
+  return `${(days / 365).toFixed(1)}y`;
+}
+// Object-lookup escape: single-pass replacement, faster than chained .replaceAll calls.
+const _htmlEsc = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function escapeHtml(str) { return String(str).replace(/[&<>"']/g, c => _htmlEsc[c]); }
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+// ── Hidden Models Popup System ──
+//   getFilteredOutModels / renderFilteredPopup / positionPopupCenter / schedulePopupShow/Hide / hideAllPopups / wirePopupHover / makePopupTrigger
+function getFilteredOutModels(source, displayedIds, maxSamples) {
+  const samples = [];
+  let totalHidden = 0;
+  for (let i = 0; i < source.length; i++) {
+    const m = source[i];
+    if (displayedIds.has(m.id)) continue;
+    totalHidden++;
+    if (samples.length >= maxSamples) continue;
+    const pb = m.paramB != null ? m.paramB : getParamCount(m);
+    const qMatch = m.id.toLowerCase().match(RE_Q_MATCH) || [];
+    samples.push({
+      id: m.id,
+      paramB: pb,
+      qMethod: qMatch.map(q => q.toUpperCase()).join(', '),
+      pipelineTag: m.pipeline_tag || "—",
+      updated: fmtDate(m.lastModified)
+    });
+  }
+  return { samples, totalHidden, maxSamples };
+}
+
+// Renders a compact popup table of filtered-out model samples with sortable columns.
+function renderFilteredPopup(container, result) {
+  container._popupData = result;
+  if (!container._popupSort) container._popupSort = { key: 'updated', asc: false };
+  const sp = container._popupSort;
+  const { samples, totalHidden, maxSamples } = result;
+  const sorted = [...samples].sort((a, b) => {
+    let cmp = 0;
+    if (sp.key === 'paramB') {
+      const va = a.paramB != null ? a.paramB : -1;
+      const vb = b.paramB != null ? b.paramB : -1;
+      cmp = va - vb;
+    } else if (sp.key === 'updated') {
+      cmp = (a.updated || '').localeCompare(b.updated || '');
+    } else if (sp.key === 'id') {
+      cmp = a.id.localeCompare(b.id);
+    } else if (sp.key === 'qMethod') {
+      cmp = (a.qMethod || '').localeCompare(b.qMethod || '');
+    } else if (sp.key === 'pipelineTag') {
+      cmp = (a.pipelineTag || '').localeCompare(b.pipelineTag || '');
+    }
+    return sp.asc ? cmp : -cmp;
+  });
+  const arrow = k => k === sp.key ? (sp.asc ? ' ▲' : ' ▼') : '';
+  const capNote = (maxSamples != null && maxSamples < totalHidden) ? ` (at most ${maxSamples} shown)` : '';
+  const fpHeader = `<div class="fp-header">Hidden Models Preview${capNote}</div>`;
+  if (!samples.length) {
+    container.innerHTML = fpHeader + '<table><tbody><tr><td colspan="5" class="fp-note">No hidden models to preview.</td></tr></tbody></table>';
+    return;
+  }
+  let html = `<table><thead><tr>
+    <th scope="col" data-sk="id" tabindex="0">Model ID${arrow('id')}</th>
+    <th scope="col" data-sk="paramB" tabindex="0" style="text-align:center">Params${arrow('paramB')}</th>
+    <th scope="col" data-sk="qMethod" tabindex="0" style="text-align:center">Quant${arrow('qMethod')}</th>
+    <th scope="col" data-sk="pipelineTag" tabindex="0">Tag${arrow('pipelineTag')}</th>
+    <th scope="col" data-sk="updated" tabindex="0" style="white-space:nowrap">Updated${arrow('updated')}</th>
+  </tr></thead><tbody>`;
+  html += sorted.map(s => {
+    const name = s.id.split("/").slice(1).join("/");
+    return `<tr>
+      <td class="model-id-cell"><a href="https://huggingface.co/${escapeHtml(s.id)}" target="_blank" rel="noopener noreferrer">${escapeHtml(name)}</a></td>
+      <td style="text-align:center; font-size:0.75rem">${s.paramB != null ? paramValueToLabel(s.paramB) : "—"}</td>
+      <td style="text-align:center; font-size:0.72rem; color:#8b949e">${escapeHtml(s.qMethod || "SAFE TENSOR")}</td>
+      <td style="font-size:0.72rem; color:#8b949e">${escapeHtml(s.pipelineTag)}</td>
+      <td style="white-space:nowrap; font-size:0.72rem; color:#8b949e">${s.updated}</td>
+    </tr>`;
+  }).join('');
+  html += `</tbody></table><div class="fp-footer">${totalHidden} model(s) hidden by filters</div>`;
+  container.innerHTML = fpHeader + html;
+  if (!container._popupSorted) {
+    container._popupSorted = true;
+    container.addEventListener('click', function(e) {
+      const th = e.target.closest('thead th[data-sk]');
+      if (!th) return;
+      const key = th.dataset.sk;
+      const s = this._popupSort;
+      if (!s || !this._popupData) return;
+      if (s.key === key) s.asc = !s.asc;
+      else { s.key = key; s.asc = key !== 'updated'; }
+      renderFilteredPopup(this, this._popupData);
+      if (this._popupTrigger) positionPopupCenter(this._popupTrigger, this);
+    });
+    container.addEventListener('keydown', function(e) {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      const th = e.target.closest('thead th[data-sk]');
+      if (!th) return;
+      e.preventDefault();
+      th.click();
+    });
+  }
+}
+
+// Popup show/hide with debounce to prevent flicker on accidental mouse passes.
+// The popup stays visible when hovering over it (not just the trigger), so links are clickable.
+function positionPopupCenter(trigger, popup) {
+  const parent = trigger.closest('.detail-count');
+  if (!parent) return;
+  const pRect = parent.getBoundingClientRect();
+  const tRect = trigger.getBoundingClientRect();
+  if (!popup._cachedWidth) {
+    popup.style.display = 'block';
+    popup._cachedWidth = popup.offsetWidth;
+    popup.style.display = '';
+  }
+  const w = popup._cachedWidth;
+  let left = (tRect.left - pRect.left) + (tRect.width / 2) - (w / 2);
+  left = Math.max(5, Math.min(left, pRect.width - w - 5));
+  const vRect = document.documentElement.getBoundingClientRect();
+  const popupRight = pRect.left + left + w + 5;
+  if (popupRight > vRect.width) left -= (popupRight - vRect.width);
+  popup.style.bottom = 'calc(100% + 6px)';
+  popup.style.left = left + 'px';
+}
+function schedulePopupShow(popupEl, delay) {
+  clearTimeout(_popupTimers.get(popupEl));
+  _popupTimers.set(popupEl, setTimeout(() => {
+    if (!popupEl.isConnected) return;
+    if (popupEl._popupTrigger) positionPopupCenter(popupEl._popupTrigger, popupEl);
+    popupEl.classList.add("visible");
+    const saved = _popupScrollPositions.get(popupEl);
+    popupEl.scrollTop = typeof saved === "number" ? saved : 0;
+  }, delay || CONFIG.POPUP_SHOW_DELAY));
+}
+function schedulePopupHide(popupEl, delay) {
+  clearTimeout(_popupTimers.get(popupEl));
+  _popupTimers.set(popupEl, setTimeout(() => {
+    _popupScrollPositions.set(popupEl, popupEl.scrollTop);
+    popupEl.classList.remove("visible");
+  }, delay || CONFIG.POPUP_HIDE_DELAY));
+}
+// Hide all visible popups on scroll/resize to prevent stale positioning.
+function hideAllPopups() {
+  document.querySelectorAll(".filter-popup.visible").forEach(p => {
+    _popupScrollPositions.set(p, p.scrollTop);
+    delete p._cachedWidth;
+    p.classList.remove("visible");
+  });
+  for (const [, timer] of _popupTimers) clearTimeout(timer);
+  _popupTimers.clear();
+}
+
+// Wires up hover events on both trigger and popup so the popup stays alive when moving between them.
+function wirePopupHover(trigger, popup, makeContent) {
+  popup._popupTrigger = trigger;
+  let contentReady = false;
+  const show = () => {
+    if (!contentReady) { makeContent(popup); contentReady = true; }
+    schedulePopupShow(popup);
+  };
+  const hide = () => schedulePopupHide(popup);
+  trigger.addEventListener("mouseenter", show);
+  trigger.addEventListener("mouseleave", hide);
+  trigger.addEventListener("click", show);
+  popup.addEventListener("mouseenter", () => clearTimeout(_popupTimers.get(popup)));
+  popup.addEventListener("mouseleave", hide);
+}
+
+// Generates hidden-models popup trigger HTML and returns a post-render wiring function.
+// Pass makeContent as null to defer it — call with the callback later in .wire(makeContent).
+function makePopupTrigger(suffix, labelText, makeContent) {
+  const safe = suffix.replace(/\//g, '__');
+  return {
+    html: `<button type="button" id="fp-trigger-${safe}" class="filter-popup-trigger" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">${labelText}</button><div id="fp-popup-${safe}" class="filter-popup"></div>`,
+    wire: (mc) => {
+      const trigger = document.getElementById(`fp-trigger-${safe}`);
+      const popup = document.getElementById(`fp-popup-${safe}`);
+      if (trigger && popup) wirePopupHover(trigger, popup, mc || makeContent);
+    }
+  };
+}
+
+// ── Model Helpers ──
+//   strictNameMatch / hasBaseModel
+function strictNameMatch(candidateId, modelName) {
+  let name = candidateId.split("/").slice(1).join("/");
+  do {
+    const m = name.match(RE_Q_STRIP);
+    if (!m) break;
+    name = name.slice(0, -m[0].length);
+  } while (true);
+  return name.toLowerCase() === modelName.toLowerCase();
+}
+function hasBaseModel(cd, targetId) {
+  if (!cd || !cd.base_model) return false;
+  const bm = cd.base_model;
+  if (typeof bm === "string") return bm === targetId;
+  if (Array.isArray(bm)) return bm.some(b => {
+    const bid = typeof b === "string" ? b : (b && b.id || "");
+    return bid === targetId;
+  });
+  return false;
+}
+
+// ── Filter Chip System ──
+//   toggleSet / syncChipSet / createFilterChip / toggleChipUI / createTaskTag / handleSortClick
+function toggleSet(option, options, activeSet) {
+  const wasEnabled = activeSet.has(option);
+  const enabledCount = options.filter(o => activeSet.has(o)).length;
+  if (!wasEnabled) { activeSet.add(option); }
+  else if (enabledCount === options.length) {
+    options.forEach(o => activeSet.delete(o));
+    activeSet.add(option);
+  } else if (enabledCount === 1) {
+    options.forEach(o => activeSet.add(o));
+  } else { activeSet.delete(option); }
+}
+function syncChipSet(selector, isActiveFn) {
+  document.querySelectorAll(selector).forEach(chip => {
+    const on = isActiveFn(chip);
+    chip.classList.toggle("active", on);
+    chip.classList.toggle("inactive", !on);
+    chip.setAttribute("aria-pressed", String(on));
+  });
+}
+function createFilterChip({ container, dataset, text, className, ariaPressed, onClick }) {
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = className;
+  Object.entries(dataset).forEach(([k, v]) => chip.dataset[k] = v);
+  chip.textContent = text;
+  chip.setAttribute("aria-pressed", String(ariaPressed));
+  chip.addEventListener("click", onClick);
+  container.appendChild(chip);
+  return chip;
+}
+function toggleChipUI(chip, on) {
+  chip.classList.toggle("active", on);
+  chip.classList.toggle("inactive", !on);
+  chip.setAttribute("aria-checked", String(on));
+}
+function createTaskTag(tag, isActive) {
+  const desc = TO_TAGS.find(t => t.tag === tag)?.desc || "";
+  const el = document.createElement("button");
+  el.type = "button";
+  el.className = "act-tag" + (isActive ? " active" : "");
+  el.dataset.tag = tag;
+  el.textContent = tag;
+  if (desc) el.title = desc;
+  el.addEventListener("click", () => {
+    applyActTagLogic(tag);
+    syncFilterChips();
+    markDirty();
+  });
+  return el;
+}
+function handleSortClick(th, level, stateKey, defaultKey, refreshAfter, renderFn) {
+  if (th.dataset.level !== level) return;
+  const key = th.dataset.key;
+  if (!key) return;
+  const st = RC.getDetailSort(stateKey) || { key: defaultKey, asc: false };
+  if (st.key === key) st.asc = !st.asc;
+  else { st.key = key; st.asc = false; }
+  RC._state.detailSort[stateKey] = st;
+  renderFn();
+  if (refreshAfter) refreshAllExpanded();
+}
+
+// ── Slider System: Math & Labels ──
+//   sliderValueToDate / sliderValueToLabel / isInDateRange
+function sliderValueToDate(val) {
+  if (val === 0) return new Date("2010-01-01");
+  if (val === CONFIG.DATE_SLIDER_MAX) return new Date();
+  const d = new Date();
+  d.setDate(d.getDate() - (CONFIG.DATE_SLIDER_MAX - val) * CONFIG.DAYS_PER_STEP);
+  return d;
+}
+function sliderValueToLabel(val) {
+  if (val === 0) return "Anytime";
+  if (val === CONFIG.DATE_SLIDER_MAX) return "Now";
+  const d = new Date();
+  d.setDate(d.getDate() - (CONFIG.DATE_SLIDER_MAX - val) * CONFIG.DAYS_PER_STEP);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}/${m}/${day}`;
+}
+function isInDateRange(dateStr) {
+  if (!dateStr) return true;
+  const c = new Date(dateStr);
+  return c >= sliderValueToDate(sliderFrom) && c <= sliderValueToDate(sliderTo);
+}
+
+// ── Slider System: Param Math ──
+//   paramPosToValue / valueToPos / sliderCenterPct / paramValueToLabel / isInParamRange
+function paramPosToValue(pos) {
+  if (pos <= 0) return 0;
+  if (pos >= CONFIG.PARAM_SLIDER_MAX) return Infinity;
+  if (pos <= 40) return pos * 0.025;
+  if (pos <= 70) return 1 + (pos - 40) * 0.1;
+  if (pos <= 100) return 4 + (pos - 70) * 0.2;
+  if (pos <= 130) return 10 + (pos - 100) * 1;
+  if (pos <= 160) return 40 + (pos - 130) * 2;
+  if (pos <= 190) return 100 + (pos - 160) * 10;
+  return 400 + (pos - 190) * 20;
+}
+function valueToPos(val) {
+  if (val <= 0) return 0;
+  if (val <= 1) return val / 0.025;
+  if (val <= 4) return 40 + (val - 1) / 0.1;
+  if (val <= 10) return 70 + (val - 4) / 0.2;
+  if (val <= 40) return 100 + (val - 10) / 1;
+  if (val <= 100) return 130 + (val - 40) / 2;
+  if (val <= 400) return 160 + (val - 100) / 10;
+  if (val <= 1000) return 190 + (val - 400) / 20;
+  return CONFIG.PARAM_SLIDER_MAX;
+}
+function sliderCenterPct(input, pos, max) {
+  const rect = input.getBoundingClientRect();
+  const thumbSize = CONFIG.THUMB_SIZE, iw = rect.width || 1, pct = pos / (max || CONFIG.PARAM_SLIDER_MAX);
+  return Math.min(100, Math.max(0, (thumbSize / 2 + pct * (iw - thumbSize)) / iw * 100));
+}
+function paramValueToLabel(val) {
+  if (val === Infinity) return ">1T";
+  if (val === 0) return "0";
+  if (val >= 1000) return `${Math.round(val / 1000)}T`;
+  if (val >= 10) return `${Math.round(val)}B`;
+  if (val >= 1) return `${val.toFixed(1)}B`;
+  return `${Math.round(val * 1000)}M`;
+}
+function isInParamRange(paramB) {
+  if (paramB === null || paramB === undefined) return true;
+  const fromVal = paramPosToValue(paramSliderFrom);
+  const toVal = paramPosToValue(paramSliderTo);
+  return paramB >= fromVal && (toVal === Infinity || paramB <= toVal);
+}
+
+// ── Slider System: Dual Slider Wiring ──
+//   clampRange / enforceFromGap / enforceToGap / throttledSliderUI / setupDualSlider
+function clampRange(fromEl, toEl, minGap, max) {
+  const fv = parseInt(fromEl.value);
+  const tv = parseInt(toEl.value);
+  if (tv - fv < minGap) {
+    fromEl.value = String(Math.max(tv - minGap, 0));
+    toEl.value = String(Math.min(fv + minGap, max));
+  }
+}
+function enforceFromGap(fromEl, toEl, minGap, max) {
+  const nv = parseInt(fromEl.value);
+  const tv = parseInt(toEl.value);
+  if (nv >= tv - (minGap - 1)) {
+    toEl.value = String(Math.min(nv + minGap, max));
+  }
+  clampRange(fromEl, toEl, minGap, max);
+}
+function enforceToGap(fromEl, toEl, minGap, max) {
+  const nv = parseInt(toEl.value);
+  const fv = parseInt(fromEl.value);
+  if (nv <= fv + (minGap - 1)) {
+    fromEl.value = String(Math.max(nv - minGap, 0));
+  }
+  clampRange(fromEl, toEl, minGap, max);
+}
+function throttledSliderUI() {
+  if (_uiRafId) return;
+  _uiRafId = requestAnimationFrame(() => { updateDateUI(); updateParamUI(); _uiRafId = null; });
+}
+function setupDualSlider(fromEl, toEl, getState, setState, minGap, max) {
+  const syncState = () => setState([parseInt(fromEl.value), parseInt(toEl.value)]);
+  fromEl.addEventListener("input", () => { enforceFromGap(fromEl, toEl, minGap, max); syncState(); throttledSliderUI(); });
+  fromEl.addEventListener("change", () => { enforceFromGap(fromEl, toEl, minGap, max); syncState(); debouncedSliderUpdate(); });
+  toEl.addEventListener("input", () => { enforceToGap(fromEl, toEl, minGap, max); syncState(); throttledSliderUI(); });
+  toEl.addEventListener("change", () => { enforceToGap(fromEl, toEl, minGap, max); syncState(); debouncedSliderUpdate(); });
+}
+
+// ── Slider System: Builders & UI Updates ──
+//   buildDateSlider / updateDualSliderUI / updateDateUI / buildParamLegend / buildParamSlider / updateParamUI
+function buildDateSlider() {
+  const from = document.getElementById("ds-from");
+  const to = document.getElementById("ds-to");
+  from.value = sliderFrom;
+  to.value = sliderTo;
+  setupDualSlider(from, to, () => [sliderFrom, sliderTo], v => { sliderFrom = v[0]; sliderTo = v[1]; }, 1, CONFIG.DATE_SLIDER_MAX);
+  updateDateUI();
+}
+function updateDualSliderUI({ fromInput, toInput, fillId, labelIds, tipFromId, tipToId, tipAligns, fromPos, toPos, max, valueLabel }) {
+  document.getElementById(labelIds[0]).textContent = valueLabel(fromPos);
+  document.getElementById(labelIds[1]).textContent = valueLabel(toPos);
+  fromInput.setAttribute("aria-valuenow", String(fromPos));
+  fromInput.setAttribute("aria-valuetext", valueLabel(fromPos));
+  toInput.setAttribute("aria-valuenow", String(toPos));
+  toInput.setAttribute("aria-valuetext", valueLabel(toPos));
+  const left = sliderCenterPct(fromInput, fromPos, max);
+  const right = sliderCenterPct(toInput, toPos, max);
+  document.getElementById(fillId).style.left = left + "%";
+  document.getElementById(fillId).style.width = (right - left) + "%";
+  const tipFrom = document.getElementById(tipFromId);
+  const tipTo = document.getElementById(tipToId);
+  if (tipFrom) { tipFrom.style.left = left + "%"; if (tipAligns) tipFrom.className = "ps-tooltip " + tipAligns[0]; tipFrom.textContent = valueLabel(fromPos); }
+  if (tipTo) { tipTo.style.left = right + "%"; if (tipAligns) tipTo.className = "ps-tooltip " + tipAligns[1]; tipTo.textContent = valueLabel(toPos); }
+}
+
+function updateDateUI() {
+  updateDualSliderUI({
+    fromInput: document.getElementById("ds-from"),
+    toInput: document.getElementById("ds-to"),
+    fillId: "ds-fill",
+    labelIds: ["ds-from-label", "ds-to-label"],
+    tipFromId: "ds-tooltip-from", tipToId: "ds-tooltip-to",
+    tipAligns: ["align-right", "align-left"],
+    fromPos: sliderFrom, toPos: sliderTo, max: CONFIG.DATE_SLIDER_MAX,
+    valueLabel: v => sliderValueToLabel(v)
+  });
+}
+
+// ── Param slider ──
+function buildParamLegend() {
+  const input = document.getElementById("ps-from");
+  const legend = document.getElementById("ps-legend");
+  const ticks = [0, 0.5, 1, 4, 10, 40, 100, 400, 1000];
+  legend.innerHTML = ticks.map(v => {
+    const left = sliderCenterPct(input, valueToPos(v));
+    return `<div class="ps-legend-tick" style="left:${left}%"><span class="ps-legend-label">${paramValueToLabel(v)}</span></div>`;
+  }).join("");
+}
+function buildParamSlider() {
+  const from = document.getElementById("ps-from");
+  const to = document.getElementById("ps-to");
+  from.value = paramSliderFrom;
+  to.value = paramSliderTo;
+  setupDualSlider(from, to, () => [paramSliderFrom, paramSliderTo], v => { paramSliderFrom = v[0]; paramSliderTo = v[1]; }, CONFIG.PARAM_MIN_GAP, CONFIG.PARAM_SLIDER_MAX);
+  updateParamUI();
+}
+
+function updateParamUI() {
+  updateDualSliderUI({
+    fromInput: document.getElementById("ps-from"),
+    toInput: document.getElementById("ps-to"),
+    fillId: "ps-fill",
+    labelIds: ["ps-from-label", "ps-to-label"],
+    tipFromId: "ps-tooltip-from", tipToId: "ps-tooltip-to",
+    fromPos: paramSliderFrom, toPos: paramSliderTo, max: CONFIG.PARAM_SLIDER_MAX,
+    valueLabel: v => paramValueToLabel(paramPosToValue(v))
+  });
+}
+
+// ── Filter Chip Wiring ──
+//   syncFilterChips / applyFilterLogic / applyActTagLogic
+//   buildFilterBar / buildFromToBars / buildSpecialBar / buildBar
+//   reseedActiveTaskFilters / applyFromLogic / applyToLogic / applyBarLogic
+function syncFilterChips() {
+  syncChipSet("#filter-bar .filter-chip", chip => activeFilters.has(chip.dataset.method));
+  syncChipSet("#from-bar .filter-chip", chip => {
+    const f = chip.dataset.option;
+    return f === "all" ? FROM_OPTIONS.every(o => o === "all" || activeFromFilters.has(o)) : activeFromFilters.has(f);
+  });
+  syncChipSet("#to-bar .filter-chip", chip => {
+    const t = chip.dataset.option;
+    return t === "all" ? TO_OPTIONS.every(o => o === "all" || activeToFilters.has(o)) : activeToFilters.has(t);
+  });
+  syncChipSet("#special-bar .filter-chip", chip => activeSpecialFilters.has(chip.dataset.special));
+  const tasks = resolveTasks().sort();
+  const activeContainer = document.getElementById("activated-types");
+  const availContainer = document.getElementById("available-types");
+  const activeLabel = activeContainer.querySelector(".filter-label");
+  const availLabel = availContainer.querySelector(".filter-label");
+  const activeTags = [];
+  const availTags = [];
+  tasks.forEach(tag => {
+    if (activeTaskFilters.has(tag)) activeTags.push(tag);
+    else availTags.push(tag);
+  });
+  const showUntagged = activeSpecialFilters.has("include untagged");
+  if (showUntagged) activeTags.push(UNTAGGED_SENTINEL);
+  while (activeContainer.lastChild !== activeLabel) activeContainer.removeChild(activeContainer.lastChild);
+  while (availContainer.lastChild !== availLabel) availContainer.removeChild(availContainer.lastChild);
+  activeTags.forEach(tag => {
+    if (tag === UNTAGGED_SENTINEL) {
+      const span = document.createElement("span");
+      span.className = "act-tag active";
+      span.textContent = "(untagged)";
+      activeContainer.appendChild(span);
+    } else {
+      activeContainer.appendChild(createTaskTag(tag, true));
+    }
+  });
+  availTags.forEach(tag => availContainer.appendChild(createTaskTag(tag, false)));
+}
+function applyFilterLogic(method) {
+  toggleSet(method, FILTER_DISPLAY, activeFilters);
+}
+function applyActTagLogic(tag) {
+  toggleSet(tag, resolveTasks(), activeTaskFilters);
+}
+function buildFilterBar() {
+  const bar = document.getElementById("filter-bar");
+  FILTER_DISPLAY.forEach(method => {
+    createFilterChip({
+      container: bar, dataset: { method }, text: method.toUpperCase(),
+      className: "filter-chip active", ariaPressed: true,
+      onClick: () => { applyFilterLogic(method); syncFilterChips(); debouncedSliderUpdate(); }
+    });
+  });
+}
+function buildFromToBars() {
+  buildBar("from-bar", FROM_OPTIONS, activeFromFilters, applyFromLogic);
+  buildBar("to-bar", TO_OPTIONS, activeToFilters, applyToLogic);
+}
+function buildSpecialBar() {
+  const bar = document.getElementById("special-bar");
+  SPECIAL_DISPLAY.forEach(opt => {
+    createFilterChip({
+      container: bar, dataset: { special: opt }, text: opt.replace(/ /g, "\u00A0"),
+      className: "filter-chip inactive", ariaPressed: false,
+      onClick: () => {
+        if (activeSpecialFilters.has(opt)) activeSpecialFilters.delete(opt);
+        else activeSpecialFilters.add(opt);
+        syncFilterChips(); markDirty();
+      }
+    });
+  });
+}
+function buildBar(barId, options, activeSet, clickHandler) {
+  const bar = document.getElementById(barId);
+  options.forEach(opt => {
+    createFilterChip({
+      container: bar, dataset: { option: opt }, text: opt.charAt(0).toUpperCase() + opt.slice(1),
+      className: "filter-chip " + (activeSet.has(opt) ? "active" : "inactive"),
+      ariaPressed: activeSet.has(opt),
+      onClick: () => { clickHandler(opt); syncFilterChips(); markDirty(); }
+    });
+  });
+}
+function reseedActiveTaskFilters() {
+  const tasks = resolveTasks();
+  const resolvedSet = new Set(tasks);
+  for (const tag of activeTaskFilters) {
+    if (!resolvedSet.has(tag)) activeTaskFilters.delete(tag);
+  }
+  tasks.forEach(t => {
+    if (DEFAULT_ACTIVE_TAGS.has(t)) activeTaskFilters.add(t);
+  });
+}
+function applyFromLogic(option) {
+  applyBarLogic(option, FROM_OPTIONS, activeFromFilters);
+  reseedActiveTaskFilters();
+}
+function applyToLogic(option) {
+  applyBarLogic(option, TO_OPTIONS, activeToFilters);
+  reseedActiveTaskFilters();
+}
+function applyBarLogic(option, options, activeSet) {
+  const nonAllOptions = options.filter(o => o !== "all");
+  if (option === "all") {
+    const allActive = nonAllOptions.every(o => activeSet.has(o));
+    if (allActive) nonAllOptions.forEach(o => activeSet.delete(o));
+    else nonAllOptions.forEach(o => activeSet.add(o));
+    return;
+  }
+  toggleSet(option, nonAllOptions, activeSet);
+}
+
+// ── Param Badge System ──
+function paramBadgeHtml(m) {
+  if (m.paramB == null) {
+    if (_derivedParamEnabled && _inferredAttemptedIds.has(m.id)) {
+      return '<span class="no-param" title="Infer Missing Params attempted but could not resolve">—</span>';
+    }
+    return '<span class="no-param-maybe" title="No parameter count — enable Infer Missing Params to attempt resolution">—</span>';
+  }
+  const label = paramValueToLabel(m.paramB);
+  if (_deepeningParamIds.has(m.id)) {
+    return `<span class="deepening-param" title="Resolved via direct API fetch">${label}</span>`;
+  }
+  const ps = _paramSource.get(m.id);
+  if (ps === 'name') return `<span class="name-infer-param" title="Inferred from model name pattern">${label}</span>`;
+  if (ps === 'child_api') return `<span class="child-data-param" title="Resolved from child model data (API call)">${label}</span>`;
+  if (ps === 'parent_inherit') return `<span class="parent-inherit-param" title="Inherited from parent model">${label}</span>`;
+  if (ps === 'child_name') return `<span class="derived-param" title="Inferred from child model names">${label}</span>`;
+  return `<span class="metadata-param" title="Resolved from model metadata">${label}</span>`;
+}
+
+// ── UI Helpers ──
+//   userFriendlyError / renderErrorWithRetry / updateArrows
+function userFriendlyError(err) {
+  if (err.name === 'AbortError') return 'Request cancelled';
+  const msg = err.message || '';
+  if (msg.includes('404')) return 'Model not found or private';
+  if (msg.includes('Failed to fetch') || msg.toLowerCase().includes('network')) return 'Connection failed — check your internet connection';
+  if (msg.startsWith('HTTP ')) { const s = msg.slice(5); if (s === '429') return 'Rate limited — try again later'; }
+  return msg;
+}
+
+function renderErrorWithRetry(container, message, retryFn) {
+  container.innerHTML = `<div class="detail-error" role="alert">
+    <span>${escapeHtml(message)}</span>
+    <button class="retry-btn" type="button">Retry</button>
+  </div>`;
+  const btn = container.querySelector(".retry-btn");
+  if (btn) btn.addEventListener("click", retryFn, { once: true });
+}
+function updateArrows() {
+  document.querySelectorAll("#main-table thead th").forEach(th => {
+    const arrow = th.querySelector(".arrow, .sort-arrow, .arrow-left");
+    if (!arrow) return;
+    const active = th.dataset.key === RC.sortKey;
+    arrow.textContent = active ? (RC.sortAsc ? "▲" : "▼") : "";
+    arrow.className = th.classList.contains("right") ? "arrow-left" : "arrow";
+    th.classList.toggle("sorted", active);
+    if (active) th.setAttribute("aria-sort", RC.sortAsc ? "ascending" : "descending");
+    else th.removeAttribute("aria-sort");
+  });
+  const ann = document.getElementById("sort-announce");
+  if (ann) ann.textContent = `Sorted by ${RC.sortKey} ${RC.sortAsc ? "ascending" : "descending"}`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 6: Render Pipeline
+// ═══════════════════════════════════════════════════════════════
+
+// ── DOM Cache & Section Toggle Utilities ──
+//   cacheDomRef / invalidateDomKey / invalidateDomPrefix / _getSectionCached
+//   toggleSection / pruneExpiredExpansions / saveRestoreExpansions / recomputeAndRender
+
+// Unified section toggle: handles expand/collapse DOM and state for all levels.
+// Returns true if section was expanded, false if collapsed.
+// descendantPrefixes is optional — used at L1/L2 to cascade-delete child keys on collapse.
+function toggleSection(detailRow, tog, key, descendantPrefixes) {
+  const expanding = detailRow.style.display === "none";
+  if (expanding) {
+    detailRow.style.display = "";
+    tog.classList.add("open");
+    tog.setAttribute("aria-expanded", "true");
+    RC.expandedSections.add(key);
+  } else {
+    detailRow.style.display = "none";
+    tog.classList.remove("open");
+    tog.setAttribute("aria-expanded", "false");
+    invalidateDomKey(key);
+    RC.expandedSections.delete(key);
+    if (descendantPrefixes) {
+      const prefixes = Array.isArray(descendantPrefixes) ? descendantPrefixes : [descendantPrefixes];
+      prefixes.forEach(p => invalidateDomPrefix(p));
+      for (const k of [...RC.expandedSections]) {
+        if (prefixes.some(p => k.startsWith(p))) RC.expandedSections.delete(k);
+      }
+    }
+  }
+  return expanding;
+}
+
+// Cache-then-query helper for section DOM refs used by refreshAllExpanded phases.
+// Returns cached ref if valid, null otherwise.
+function _getSectionCached(key) {
+  const ref = _domCache.get(key);
+  if (ref && ref.row.isConnected) return ref;
+  return null;
+}
+
+function pruneExpiredExpansions(renderedAuthors) {
+  for (const key of [...RenderCoordinator.expandedSections]) {
+    if (!key.startsWith(PREFIX_AUTHOR)) continue;
+    const author = key.slice(PREFIX_AUTHOR.length);
+    if (!renderedAuthors.has(author)) {
+      invalidateDomKey(key);
+      invalidateDomPrefix(PREFIX_MODEL + author + "/");
+      invalidateDomPrefix(PREFIX_GROUP + author + "/");
+      RenderCoordinator.expandedSections.delete(key);
+      for (const child of [...RenderCoordinator.expandedSections]) {
+        if (child.startsWith(PREFIX_MODEL + author + "/") || child.startsWith(PREFIX_GROUP + author + "/")) {
+          RenderCoordinator.expandedSections.delete(child);
+        }
+      }
+    }
+  }
+}
+
+function saveRestoreExpansions(saved) {
+  for (const key of saved) {
+    if (!RenderCoordinator.expandedSections.has(key)) RenderCoordinator.expandedSections.add(key);
+  }
+}
+function recomputeAndRender(saved) {
+  RenderCoordinator.requestRender(saved, false);
+}
+
+// ── Level 1: Authors ──
+//   renderMain / deepenBatch / refreshAuthorL2Section / loadAuthorModels
+function renderMain(authorData, skipSort) {
+  const tbody = document.getElementById("body");
+  let sorted;
+  if (skipSort) {
+    // Preserve current DOM row order — no sort, no text-filter boost
+    const domAuthors = [];
+    const rows = tbody.querySelectorAll("tr.l1-row");
+    for (const r of rows) { if (r.dataset.author) domAuthors.push(r.dataset.author); }
+    const rank = new Map(domAuthors.map((a, i) => [a, i]));
+    sorted = [...authorData].sort((a, b) => {
+      const ra = rank.get(a.author), rb = rank.get(b.author);
+      if (ra !== undefined && rb !== undefined) return ra - rb;
+      if (ra !== undefined) return -1;
+      if (rb !== undefined) return 1;
+      return a.author.localeCompare(b.author);
+    });
+  } else {
+    sorted = sortRows(authorData, RC.sortKey, RC.sortAsc, RC.sortKey === "author" ? undefined : "author");
+    const tf1 = RC._state.textFilters.l1Author;
+    if (tf1) {
+      const f = tf1.toLowerCase();
+      sorted = [...sorted].sort((a, b) => {
+        const aMatch = a.author.toLowerCase().includes(f);
+        const bMatch = b.author.toLowerCase().includes(f);
+        if (aMatch && !bMatch) return -1;
+        if (!aMatch && bMatch) return 1;
+        return 0;
+      });
+    }
+  }
+
+  // Optimized: Use map + join to create the HTML string in one pass
+  const html = sorted.map((a, idx) => {
+    const zebra = idx % 2 === 0 ? "row-even" : "row-odd";
+    return `<tr class="l1-row ${zebra}" data-l1-idx="${idx}" data-author="${escapeHtml(a.author)}">
+      <td><button type="button" class="toggle" id="t1-${idx}" aria-expanded="false" aria-label="Expand ${escapeHtml(a.author)} models">▶</button><a href="https://huggingface.co/${escapeHtml(a.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(a.author)}</a></td>
+      <td class="right">${a.count}</td>
+      <td class="right">${fmt(a.totalDownloads)}</td>
+      <td class="right">${fmt(a.totalLikes)}</td>
+    </tr>
+    <tr class="detail-row" id="d1-${idx}" style="display:none" aria-labelledby="t1-${idx}"><td colspan="4"><div class="detail-inner" id="i1-${idx}"></div></td></tr>`;
+  }).join('');
+
+  tbody.innerHTML = html;
+  let countText = `${sorted.length} authors with base models in selected range`;
+  if (_trendingAdded > 0) {
+    countText += ` (+${_trendingAdded} from trending)`;
+  }
+  document.getElementById("count").textContent = countText + ". Click to expand.";
+}
+async function deepenBatch(idx, author, container, unknownModels, filterApplied, nonQuantBase, gen) {
+  const totalUnk = unknownModels.length;
+  let completed = 0;
+  unknownModels.forEach(m => _deepeningParamIds.add(m.id));
+  UI.setStatus(`Resolving parameters for ${author}… (0/${totalUnk})`);
+  await Promise.all(unknownModels.map((m) => {
+    return fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`).then(
+      (full) => {
+        if (isStale(gen)) return;
+        let p = null;
+        if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
+        if (p === null && full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
+        if (p !== null) {
+          m.paramB = p;
+          _paramCache.set(m.id, p);
+          _deepeningParamIds.delete(m.id);
+          UI.queueUpdate(() => UI.updateCellBadge(m.id, paramBadgeHtml(m)));
+        }
+      },
+      (e) => { console.warn("Failed to fetch param for", m.id, e); }
+    ).finally(() => {
+      if (isStale(gen)) return;
+      completed++;
+      UI.setStatus(`Resolving parameters for ${author}… (${completed}/${totalUnk})`);
+      if (completed === totalUnk) {
+        UI.setStatus("");
+      }
+      // Call unconditionally — _filterBoundaryChange + RAF coalescing prevent wasted renders
+      _schedulePostDeepenRender(author, gen);
+    });
+  }));
+}
+async function refreshAuthorL2Section(idx, author, container) {
+  if (_deepeningAuthors.has(author)) return; // already deepening
+  _deepeningAuthors.add(author);
+  try {
+    const baseModels = cacheAccess(author);
+    if (!baseModels) return;
+    const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
+    const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
+    renderL2(idx, author, filtered, container, nonQuantBase.length, nonQuantBase);
+    _lastFilteredCounts.set(author, filtered.length);
+    const freshUnknowns = filtered.filter(m => m.paramB === null && !_deepeningParamIds.has(m.id));
+    const gen = _fetchGeneration;
+    if (freshUnknowns.length > 0) {
+      await deepenBatch(idx, author, container, freshUnknowns,
+        () => nonQuantBase.filter(m => modelPassesAllFilters(m)),
+        nonQuantBase, gen);
+    }
+    if (_derivedParamEnabled) {
+      const stillUnknown = filtered.filter(m =>
+        m.paramB === null && !_inferredAttemptedIds.has(m.id));
+      if (stillUnknown.length > 0) {
+        for (const m of stillUnknown) {
+          if (isStale(gen)) return;
+          if (m.paramB != null) continue;
+          const resolved = await tryResolveModelParam(m, gen);
+          if (resolved && gen === _fetchGeneration) {
+            _deepeningParamIds.delete(m.id);
+          }
+        }
+        if (isStale(gen)) return;
+        UI.setStatus("");
+        _schedulePostDeepenRender(author, gen);
+      }
+    }
+  } finally {
+    _deepeningAuthors.delete(author);
+  }
+}
+async function loadAuthorModels(idx, author, container) {
+  const gen = _fetchGeneration;
+  try {
+    const raw = cacheAccess(author + "_models") || await fetchJson(
+      `https://huggingface.co/api/models?author=${author}&sort=downloads&direction=-1&limit=${CONFIG.AUTHOR_LIMIT}&full=true&cardData=true`
+    );
+    const models = raw.map(normalizeModel);
+   cacheSet(author + "_models", models);
+
+    markLocalParents(models, gen);
+
+    const authorKnownIds = new Set(models.map(x => x.id));
+    const byAuthorId = new Map(models.map(x => [x.id, x]));
+    const baseModels = models.filter(m => isBase(m)).map(m => ({
+      id: m.id,
+      downloads: m.downloads || 0,
+      likes: m.likes || 0,
+      created_at: m.createdAt || "",
+      updated_at: m.lastModified || "",
+      lastModified: m.lastModified || "",
+      tags: m.tags || [],
+      paramB: getParamCount(m),
+      pipeline_tag: m.pipeline_tag || "",
+      _orphanQuant: isOrphanQuant(m, authorKnownIds),
+      _nestedQuant: isNestedQuant(m, authorKnownIds, byAuthorId)
+    }));
+
+    cacheSet(author, baseModels);
+
+    const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
+    const filterApplied = () => nonQuantBase.filter(m => modelPassesAllFilters(m));
+
+    const dated = filterApplied();
+
+    if (isStale(gen)) return;
+    const row = document.querySelector(`.l1-row[data-author="${CSS.escape(author)}"]`);
+    if (row) {
+      const cells = row.querySelectorAll("td");
+      cells[1].textContent = dated.length;
+      cells[2].textContent = fmt(dated.reduce((s, m) => s + m.downloads, 0));
+      cells[3].textContent = fmt(dated.reduce((s, m) => s + m.likes, 0));
+    }
+
+    if (isStale(gen) || !container.isConnected) return;
+    refreshAuthorL2Section(idx, author, container);
+  } catch (err) {
+    renderErrorWithRetry(container, userFriendlyError(err), () => {
+      if (container.isConnected) loadAuthorModels(idx, author, container);
+    });
+  }
+}
+
+// ── Level 2: Base Models ──
+//   thHtml / renderL2Empty / buildL2TableHtml / setupL2Events / renderL2 / loadChildren
+function thHtml(c, state, level, colindex) {
+  const isSorted = state.key === c.key;
+  const cls = ((c.headerCls || "") + " " + (c.cls || "") + (isSorted ? " sorted" : "")).trim();
+  const arrow = isSorted ? (state.asc ? "▲" : "▼") : "";
+  const ariaSort = isSorted ? ` aria-sort="${state.asc ? "ascending" : "descending"}"` : '';
+  const ci = colindex ? ` aria-colindex="${colindex}"` : '';
+  // Arrow before text for right/center-aligned and date headers; after (default) for left-aligned.
+  const arrowBefore = c.align && c.align !== 'left';
+  return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort} tabindex="0"${ci}>${arrowBefore ? `<span class="arrow-left">${arrow}</span>` : ''}${escapeHtml(c.label)}${!arrowBefore ? `<span class="arrow">${arrow}</span>` : ''}</th>`;
+}
+
+function renderL2Empty(idx, author, container, popupSource) {
+  const cached = cacheAccess(author);
+  const hasData = (popupSource && popupSource.length > 0) || (cached && cached.length > 0);
+  const allBaseModels = popupSource || cached || [];
+  RC._levelState.l2.set(author, { idx, author, models: [], allBaseModels });
+  if (allBaseModels.length > 0) {
+    const pt = makePopupTrigger(`l2-empty-${author}`, "No base models match current filters",
+      (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), allBaseModels.length)));
+    container.innerHTML = `<div class="detail-count" style="color:#6e7681">${pt.html}</div>`;
+    pt.wire();
+  } else if (!hasData) {
+    container.innerHTML = '<div class="detail-count" style="color:#6e7681">No data loaded yet.</div>';
+  } else {
+    container.innerHTML = '<div class="detail-count" style="color:#6e7681">No base models match current filters.</div>';
+  }
+}
+
+function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
+  const cols = [
+    { key: "id", label: "Model ID" },
+    { key: "pipeline_tag", label: "Pipeline", align: 'center', cls: "center", width: 180 },
+    { key: "paramB", label: "Params", align: 'center', headerCls: "updated-header", cls: "center", width: 135 },
+    { key: "downloads", label: "Downloads", align: 'right', cls: "right", width: 110 },
+    { key: "likes", label: "Likes", align: 'right', cls: "right", width: 80 },
+    { key: "lastModified", label: "Updated", align: 'center', cls: "updated-cell", headerCls: "updated-header", width: 125 }
+  ];
+  const l2Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Base Models for ${author}` } : c);
+  let html = `<table aria-label="Base models for ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` style="width:${c.width}px"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
+  l2Cols.forEach((c, i) => { html += thHtml(c, state, "2", i + 1); });
+  html += `</tr></thead><tbody>`;
+  html += sorted.map((m, mIdx) => {
+    const qMethods = getOrphanQuantMethod(m.id);
+    const rowIdx = 2 + mIdx * 2;
+    const detailRowIdx = rowIdx + 1;
+    const zebra = mIdx % 2 === 0 ? "row-even" : "row-odd";
+    const orphanBadge = qMethods.length ? qMethods.map(q => `<span class="badge orphan" title="Parent base model filtered out">${escapeHtml(q.toUpperCase())}</span>`).join(' ') + ' ' : '';
+    return `<tr class="l2-row ${zebra}" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}" aria-rowindex="${rowIdx}">
+      <td class="model-id-cell" aria-colindex="1"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(m.id)}">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
+      <td class="center" aria-colindex="2">${escapeHtml(m.pipeline_tag)}</td>
+      <td class="center" aria-colindex="3" style="font-size:0.78rem">${paramBadgeHtml(m)}</td>
+      <td class="right" aria-colindex="4">${fmt(m.downloads)}</td>
+      <td class="right" aria-colindex="5">${fmt(m.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
+      <td class="updated-cell" aria-colindex="6">${fmtDate(m.lastModified)} <span style="color:#6e7681;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
+    </tr>
+    <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none" aria-rowindex="${detailRowIdx}"><td colspan="6"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
+  }).join('');
+  const hidden = (totalBeforeFilter != null && totalBeforeFilter > sorted.length) ? totalBeforeFilter - sorted.length : 0;
+  let pt = null;
+  if (hidden > 0) {
+    pt = makePopupTrigger(`l2-${author}`, `+${hidden} hidden by current filters`, null);
+    html += `</tbody></table><div class="detail-count">${sorted.length} model(s), ${pt.html}</div>`;
+  } else {
+    html += `</tbody></table><div class="detail-count">${sorted.length} model(s)</div>`;
+  }
+  return { html, hidden, pt };
+}
+
+function setupL2Events(container) {
+  if (container._delegatedL2) return;
+  container._delegatedL2 = true;
+  const l2Click = function(e) {
+    const inner = e.target.closest(".detail-inner");
+    if (inner && inner !== this) return;
+    const s = RC._levelState.l2.get(this.dataset.l2Author);
+    if (!s) return;
+    const th = e.target.closest("thead th");
+    if (th) {
+      handleSortClick(th, "2", `l2-${s.author}`, "downloads", true, () => {
+        renderL2(s.idx, s.author, s.models, this, s.totalBeforeFilter, s.allBaseModels);
+      });
+      return;
+    }
+    const tr = e.target.closest("tr.l2-row");
+    if (tr && e.target.tagName !== "A") {
+      const l2Idx = parseInt(tr.dataset.l2Idx);
+      const modelIdx = parseInt(tr.dataset.modelIdx);
+      const modelId = tr.dataset.model;
+      const detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
+      const inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
+      const tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
+      const modelKey = `${PREFIX_MODEL}${modelId}`;
+      if (toggleSection(detailRow, tog, modelKey, `${PREFIX_GROUP}${modelId}|`)) {
+        cacheDomRef(modelKey, { row: tr, detailRow, inner, toggle: tog });
+        const key = `children-${modelId}`;
+        const cached = cacheAccess(key);
+        if (cached) {
+          renderL3(l2Idx, modelIdx, modelId, cached, inner);
+        } else {
+          inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
+          loadChildren(l2Idx, modelIdx, modelId, inner);
+        }
+        tog?.focus();
+      }
+    }
+  };
+  container.addEventListener("click", l2Click);
+  container.addEventListener("keydown", function(e) {
+    const th = e.target.closest("thead th[tabindex]");
+    if (!th || (e.key !== "Enter" && e.key !== " ")) return;
+    e.preventDefault();
+    th.click();
+  });
+}
+
+function renderL2(idx, author, models, container, totalBeforeFilter, popupSource) {
+  const state = RC.getDetailSort(`l2-${author}`) || { key: "downloads", asc: false };
+  const sorted = sortRows(models, state.key, state.asc, state.key === "id" ? undefined : "id");
+
+  if (sorted.length === 0) {
+    renderL2Empty(idx, author, container, popupSource);
+    return;
+  }
+
+  const res = buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state);
+  container.innerHTML = res.html;
+  container.dataset.l2Author = author;
+  const allBaseModels = popupSource || cacheAccess(author) || [];
+  RC._levelState.l2.set(author, { idx, author, models, totalBeforeFilter, allBaseModels });
+
+  if (res.pt) res.pt.wire((p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(models.map(m => m.id)), allBaseModels.length)));
+  setupL2Events(container);
+}
+
+// Two-phase search: first try model name alone (covers quant suffixes), fall back to
+// full parent ID. strictNameMatch strips known quant suffixes from candidate IDs
+// before comparing, so Qwen2.5-7B-GGUF matches a search for "Qwen2.5-7B".
+// Same-author fine-tunes are skipped (already shown at L2).
+// Cross-author fine-tunes without explicit base_model are only included if they pass the
+// active task filter and aren't already in _allFetched (avoids duplicating base models
+// that happen to be surfaced by the search endpoint).
+// No _fetchGeneration guard needed: container.isConnected catches stale renders after
+// L2 re-render. _inflightChildren dedup shares the inflight promise across concurrent
+// expansions; fallback to a fresh fetch when the promise resolves with null results
+// (error case) prevents the UI from getting stuck in loading state.
+async function loadChildren(l2Idx, modelIdx, parentId, container) {
+  const cacheKey = `children-${parentId}`;
+
+  // Deduplicate concurrent fetches for the same parent — same approach as _inflightFetches
+  // in fetchJson: concurrent L3 expansions for the same model share one inflight promise
+  // rather than each issuing a separate API call.
+  const entry = _inflightChildren.get(cacheKey);
+  if (entry) {
+    await entry.promise;
+    if (entry.results && container.isConnected) {
+      renderL3(l2Idx, modelIdx, parentId, entry.results, container);
+      return;
+    }
+    // Inflight entry resolved with no results (fetch failed) or old container was
+    // detached. Fall through to issue a fresh fetch so the caller's container gets
+    // rendered, rather than leaving it stuck in "Fetching..." state.
+  }
+
+  const newEntry = { promise: null, results: null };
+  newEntry.promise = (async () => {
+    try {
+      const modelName = parentId.split("/").slice(1).join("/");
+      const results = [];
+      const seen = new Set();
+      const _allFetchedIds = _allFetched ? new Set(_allFetched.map(m => m.id)) : new Set();
+
+      const processChildren = (models) => {
+        for (const m of models) {
+          if (m.id === parentId || seen.has(m.id)) continue;
+          seen.add(m.id);
+
+          const cd = m.cardData || {};
+          const idLower = m.id.toLowerCase();
+          const tagsStr = (m.tags || []).join(" ").toLowerCase();
+          const isQuant = RE_Q_EXISTS.test(idLower) || RE_Q_EXISTS.test(tagsStr);
+          const childHasBase = hasBaseModel(cd, parentId);
+          const childAuthor = m.id.split("/")[0];
+          const parentAuthor = parentId.split("/")[0];
+          if (childAuthor === parentAuthor) continue;
+
+          if (childHasBase || (strictNameMatch(m.id, modelName) && isQuant)) {
+              if (!childHasBase) {
+                if (m.pipeline_tag && !activeTaskFilters.has(m.pipeline_tag)) continue;
+                if (_allFetchedIds.has(m.id)) continue;
+              }
+              const qSet = new Set();
+              (idLower.match(RE_Q_MATCH) || []).forEach(m => qSet.add(m));
+              (tagsStr.match(RE_Q_MATCH) || []).forEach(m => qSet.add(m));
+              const qMethods = [...qSet];
+              let qMethod;
+              if (childHasBase) {
+                qMethod = qMethods.length ? "finetune, " + qMethods.join(", ") : "finetune";
+              } else {
+                qMethod = qMethods.length ? qMethods.join(", ") : (tagsStr.includes("safetensors") ? "safetensors" : "derivative");
+              }
+              results.push({
+              id: m.id,
+              author: m.id.split("/")[0],
+              downloads: m.downloads || 0,
+              likes: m.likes || 0,
+              created_at: m.createdAt || "",
+              updated_at: m.lastModified || "",
+              lastModified: m.lastModified || "",
+              pipeline_tag: m.pipeline_tag || "",
+              q_method: qMethod,
+              tags: m.tags || []
+            });
+          }
+        }
+      };
+
+      const nameUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
+      const nameResults = (await fetchJson(nameUrl)).map(normalizeModel);
+      processChildren(nameResults);
+      let rawResults = nameResults;
+
+      if (nameResults.length === 0) {
+        const fullUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(parentId)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
+        rawResults = (await fetchJson(fullUrl)).map(normalizeModel);
+        processChildren(rawResults);
+      }
+
+      // Infer parent paramB from child model IDs using B/M pattern matching.
+      // The search API never returns safetensors/gguf metadata even with full=true
+      // (see AGENTS.md), so metadata-based extraction is not viable here.
+      // ID pattern matching covers most real-world cases (e.g. children named
+      // "Qwen2.5-7B-GGUF" reveal the parent's 7B size).
+      let maxChildParam = null;
+      for (const cm of rawResults) {
+        const p = extractParamFromId(cm.id);
+        if (p !== null && (maxChildParam === null || p > maxChildParam)) maxChildParam = p;
+      }
+      if (maxChildParam !== null) {
+        const cached = _paramCache.get(parentId);
+        if (cached === undefined || cached === null) {
+          _paramCache.set(parentId, maxChildParam);
+          _paramSource.set(parentId, 'child_name');
+          const pauthor = parentId.split("/")[0];
+          const st = RC._levelState.l2.get(pauthor);
+          if (st) {
+            const pm = st.models.find(m => m.id === parentId);
+            if (pm && pm.paramB == null) pm.paramB = maxChildParam;
+            const pam = st.allBaseModels.find(m => m.id === parentId);
+            if (pam && pam.paramB == null) pam.paramB = maxChildParam;
+          }
+          const af = _allFetched && _allFetched.find(m => m.id === parentId);
+          if (af && af.paramB == null) af.paramB = maxChildParam;
+        }
+      }
+
+      newEntry.results = results;
+      cacheSet(cacheKey, results);
+      if (container.isConnected) renderL3(l2Idx, modelIdx, parentId, results, container);
+    } catch (err) {
+      if (container.isConnected) renderErrorWithRetry(container, userFriendlyError(err), () => {
+        if (container.isConnected) loadChildren(l2Idx, modelIdx, parentId, container);
+      });
+    }
+  })();
+
+  _inflightChildren.set(cacheKey, newEntry);
+  await newEntry.promise;
+  if (_inflightChildren.get(cacheKey) === newEntry) _inflightChildren.delete(cacheKey);
+}
+
+// ── Level 3: Quant Author Groups ──
+//   renderL3
+function renderL3(l2Idx, modelIdx, parentId, children, container) {
+  const filtered = children.filter(c => matchesFilter(c.q_method) && isInDateRange(c.lastModified));
+  const groups = {};
+  filtered.forEach(c => {
+    if (!groups[c.author]) groups[c.author] = [];
+    groups[c.author].push(c);
+  });
+
+  const groupEntries = Object.entries(groups).map(([author, quants]) => {
+    const maxLastModified = quants.reduce((max, q) => (!max || q.lastModified > max) ? q.lastModified : max, null);
+    return {
+      author,
+      count: quants.length,
+      totalDownloads: quants.reduce((s, q) => s + q.downloads, 0),
+      maxLastModified,
+      quants
+    };
+  }).filter(g => { const tf = RC._state.textFilters.l3Author; return !tf || g.author.toLowerCase().includes(tf.toLowerCase()); });
+
+  const state = RC.getDetailSort(`l3-${parentId}`) || { key: "totalDownloads", asc: false };
+  const sorted = sortRows(groupEntries, state.key, state.asc, state.key === "author" ? undefined : "author");
+
+  const cols = [
+    { key: "author", label: "Quant Author" },
+    { key: "totalDownloads", label: "Downloads", align: 'right', cls: "right", width: 120 },
+    { key: "count", label: "Models", align: 'right', cls: "right", width: 75 },
+    { key: "maxLastModified", label: "Updated", align: 'center', cls: "updated-cell", headerCls: "updated-header", width: 125 }
+  ];
+
+  const parentName = parentId.split("/").slice(1).join("/");
+  const l3Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Derivative Authors for ${parentName}` } : c);
+  let html = `<table aria-label="Quant author groups for ${escapeHtml(parentId)}"><colgroup>${cols.map(c => `<col${c.width ? ` style="width:${c.width}px"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
+  l3Cols.forEach((c, i) => { html += thHtml(c, state, "3", i + 1); });
+  html += `</tr></thead><tbody>`;
+
+  // Optimized: Use map + join for table rows instead of forEach + +=
+  html += sorted.map((g, gIdx) => {
+    const rowIdx = 2 + gIdx * 2;
+    const detailRowIdx = rowIdx + 1;
+    const zebra = gIdx % 2 === 0 ? "row-even" : "row-odd";
+    return `<tr class="l3-row ${zebra}" data-l3-l2="${l2Idx}" data-l3-model-idx="${modelIdx}" data-l3-parent="${escapeHtml(parentId)}" data-l3-idx="${gIdx}" data-l3-author="${escapeHtml(g.author)}" aria-rowindex="${rowIdx}">
+      <td aria-colindex="1"><button type="button" class="toggle" id="t3-${l2Idx}-${modelIdx}-${gIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(g.author)} quants">▶</button><a href="https://huggingface.co/${escapeHtml(g.author)}" target="_blank" rel="noopener noreferrer">${escapeHtml(g.author)}</a></td>
+      <td class="right" aria-colindex="2">${fmt(g.totalDownloads)}</td>
+      <td class="models-cell" aria-colindex="3">${g.count}</td>
+      <td class="updated-cell" aria-colindex="4">${fmtDate(g.maxLastModified)}</td>
+    </tr>
+    <tr class="detail-row" id="d3-${l2Idx}-${modelIdx}-${gIdx}" style="display:none" aria-rowindex="${detailRowIdx}"><td colspan="4" aria-colindex="1"><div class="detail-inner" id="i3-${l2Idx}-${modelIdx}-${gIdx}"></div></td></tr>`;
+  }).join('');
+  html += `</tbody></table>`;
+  html += `<div class="detail-count">${filtered.length} child model(s) from ${groupEntries.length} author(s)${filtered.length !== children.length ? ` (filtered from ${children.length})` : ''}</div>`;
+  container.innerHTML = html;
+  container.dataset.l3Parent = parentId;
+  RC._levelState.l3.set(parentId, { l2Idx, modelIdx, parentId, children });
+
+  if (!container._delegatedL3) {
+    // Event delegation: same rationale as L2 — survives innerHTML re-renders.
+    container._delegatedL3 = true;
+    container.addEventListener("click", function(e) {
+      const inner = e.target.closest(".detail-inner");
+      if (inner && inner !== this) return;
+      const s = RC._levelState.l3.get(this.dataset.l3Parent);
+      if (!s) return;
+      const th = e.target.closest("thead th");
+      if (th) {
+        handleSortClick(th, "3", `l3-${s.parentId}`, "totalDownloads", true, () => {
+          renderL3(s.l2Idx, s.modelIdx, s.parentId, s.children, this);
+        });
+        return;
+      }
+      const tr = e.target.closest("tr.l3-row");
+      if (tr && e.target.tagName !== "A") {
+        const l2Idx = parseInt(tr.dataset.l3L2);
+        const modelIdx = parseInt(tr.dataset.l3ModelIdx);
+        const parentId = tr.dataset.l3Parent;
+        const gIdx = parseInt(tr.dataset.l3Idx);
+        const author = tr.dataset.l3Author;
+        const detailRow = document.getElementById(`d3-${l2Idx}-${modelIdx}-${gIdx}`);
+        const inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
+        const tog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
+        const groupKey = `${PREFIX_GROUP}${parentId}|${author}`;
+        if (toggleSection(detailRow, tog, groupKey)) {
+          cacheDomRef(groupKey, { row: tr, detailRow, inner, toggle: tog });
+          const allChildren = cacheAccess(`children-${parentId}`) || s.children || [];
+          const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
+          renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, inner);
+          tog?.focus();
+        }
+      }
+    });
+    container.addEventListener("keydown", function(e) {
+      const th = e.target.closest("thead th[tabindex]");
+      if (!th || (e.key !== "Enter" && e.key !== " ")) return;
+      e.preventDefault();
+      th.click();
+    });
+  }
+}
+
+// ── Level 4: Individual Quants ──
+//   renderL4
+function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
+  const st = RC.getDetailSort(`l4-${parentId}-${author}`) || { key: "downloads", asc: false };
+  // quants is the pre-text-filter array (from cache or state). Create a filtered copy for display.
+  const tf4 = RC._state.textFilters.l4Model;
+  const displayed = tf4 ? quants.filter(q => q.id.split("/").slice(1).join("/").toLowerCase().includes(tf4.toLowerCase())) : quants;
+  const sorted = sortRows(displayed, st.key, st.asc, st.key === "id" ? undefined : "id");
+
+  const cols = [
+    { key: "id", label: "Model ID" },
+    { key: "q_method", label: "Quant", align: 'center', headerCls: "updated-header", cls: "center", width: 160 },
+    { key: "downloads", label: "Downloads", align: 'right', cls: "right", width: 110 },
+    { key: "likes", label: "Likes", align: 'right', cls: "right", width: 80 },
+    { key: "lastModified", label: "Updated", align: 'right', cls: "right", width: 110 }
+  ];
+
+  const l4Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Derivative Models for ${author}` } : c);
+  let html = `<table aria-label="Individual quantizations for ${escapeHtml(parentId)} by ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` style="width:${c.width}px"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
+  l4Cols.forEach((c, i) => { html += thHtml(c, st, "4", i + 1); });
+  html += `</tr></thead><tbody>`;
+
+  // Optimized: Use map + join for table rows instead of forEach + +=
+  html += sorted.map((q, qIdx) => {
+    return `<tr class="l4-row" aria-rowindex="${2 + qIdx}">
+      <td class="model-id-cell" aria-colindex="1"><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.id.split("/").slice(1).join("/"))}">${escapeHtml(q.id.split("/").slice(1).join("/"))}</a></td>
+      <td class="center" aria-colindex="2"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
+      <td class="right" aria-colindex="3">${fmt(q.downloads)}</td>
+      <td class="right" aria-colindex="4">${fmt(q.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
+      <td class="right" aria-colindex="5">${fmtDate(q.lastModified)}</td>
+    </tr>`;
+  }).join('');
+
+  const hiddenL4 = quants.length - displayed.length;
+  let pt = null;
+  if (hiddenL4 > 0) {
+    pt = makePopupTrigger(`l4-${parentId}|${author}`, `+${hiddenL4} hidden by text filter`, null);
+    html += `</tbody></table><div class="detail-count">${displayed.length} model(s), ${pt.html}</div>`;
+  } else {
+    html += `</tbody></table><div class="detail-count">${displayed.length} model(s)</div>`;
+  }
+  container.innerHTML = html;
+  const l4Key = `${parentId}|${author}`;
+  container.dataset.l4Key = l4Key;
+  RC._levelState.l4.set(l4Key, { l2Idx, modelIdx, gIdx, parentId, author, quants });
+
+  if (pt) pt.wire((p) => renderFilteredPopup(p, getFilteredOutModels(quants, new Set(displayed.map(q => q.id)), CONFIG.POPUP_MAX_SAMPLES_L4)));
+
+  if (!container._delegatedL4) {
+    container._delegatedL4 = true;
+    container.addEventListener("click", function(e) {
+      const th = e.target.closest("thead th");
+      if (!th || th.dataset.level !== "4") return;
+      const s = RC._levelState.l4.get(this.dataset.l4Key);
+      if (!s) return;
+      handleSortClick(th, "4", `l4-${s.parentId}-${s.author}`, "downloads", false, () => {
+        renderL4(s.l2Idx, s.modelIdx, s.gIdx, s.parentId, s.author, s.quants, this);
+      });
+    });
+    container.addEventListener("keydown", function(e) {
+      const th = e.target.closest("thead th[tabindex]");
+      if (!th || th.dataset.level !== "4" || (e.key !== "Enter" && e.key !== " ")) return;
+      e.preventDefault();
+      th.click();
+    });
+  }
+}
+
+// ── Refresh & Re-expansion ──
+//   refreshAllExpanded
+function refreshAllExpanded(force, allowAsync = true) {
+  // Phase 1: re-expand L1 author rows
+  for (const key of RC.expandedSections) {
+    if (!key.startsWith(PREFIX_AUTHOR)) continue;
+    const author = key.slice(PREFIX_AUTHOR.length);
+    let ref = _getSectionCached(key), row, detailRow, inner, tog;
+    if (ref) {
+      ({ row, detailRow, inner, tog } = ref);
+    } else {
+      row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
+      if (!row) continue;
+      const idx = parseInt(row.dataset.l1Idx);
+      detailRow = document.getElementById(`d1-${idx}`);
+      inner = document.getElementById(`i1-${idx}`);
+      tog = document.getElementById(`t1-${idx}`);
+      cacheDomRef(key, { row, detailRow, inner, toggle: tog });
+    }
+    if (!detailRow) continue;
+    const currentlyHidden = detailRow.style.display === "none";
+    if (!force && !currentlyHidden) continue;
+    if (currentlyHidden) {
+      detailRow.style.display = "";
+      if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
+    }
+    const idx = parseInt(row.dataset.l1Idx);
+    if (allowAsync) {
+      refreshAuthorL2Section(idx, author, inner);
+    } else {
+      // Sync-only: show cached L2 without deepening
+      const baseModels = cacheAccess(author);
+      if (baseModels) {
+        const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
+        const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
+        renderL2(idx, author, filtered, inner, nonQuantBase.length, nonQuantBase);
+      }
+    }
+  }
+
+  // Phase 2: re-expand L2 model rows
+  for (const key of RC.expandedSections) {
+    if (!key.startsWith(PREFIX_MODEL)) continue;
+    const modelId = key.slice(PREFIX_MODEL.length);
+    let ref = _getSectionCached(key), row, detailRow, inner, tog;
+    if (ref) {
+      ({ row, detailRow, inner, tog } = ref);
+    } else {
+      row = document.querySelector(`tr.l2-row[data-model="${CSS.escape(modelId)}"]`);
+      if (!row) continue;
+      const l2Idx = parseInt(row.dataset.l2Idx);
+      const modelIdx = parseInt(row.dataset.modelIdx);
+      detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
+      inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
+      tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
+      cacheDomRef(key, { row, detailRow, inner, toggle: tog });
+    }
+
+    // Skip rows that no longer belong to an active L1 expansion after filter changes.
+    if (!row || !row.closest(".detail-inner")) continue;
+
+    const l2Idx = parseInt(row.dataset.l2Idx);
+    const modelIdx = parseInt(row.dataset.modelIdx);
+    if (!detailRow || detailRow.style.display !== "none") continue;
+    detailRow.style.display = "";
+    if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
+    const children = cacheAccess(`children-${modelId}`);
+    if (children) {
+      renderL3(l2Idx, modelIdx, modelId, children, inner);
+    } else {
+      inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
+      loadChildren(l2Idx, modelIdx, modelId, inner);
+    }
+  }
+
+  // Phase 3: re-expand L3 quant author group rows
+  for (const key of RC.expandedSections) {
+    if (!key.startsWith(PREFIX_GROUP)) continue;
+    const parts = key.split("|");
+    const modelId = parts[1];
+    const groupAuthor = parts.slice(2).join("|");
+    let ref = _getSectionCached(key), row, detailRow, inner, tog;
+    if (ref) {
+      ({ row, detailRow, inner, tog } = ref);
+    } else {
+      row = document.querySelector(`tr.l3-row[data-l3-parent="${CSS.escape(modelId)}"][data-l3-author="${CSS.escape(groupAuthor)}"]`);
+      if (!row || !row.closest(".detail-inner")) continue;
+      const l2Idx = parseInt(row.dataset.l3L2);
+      const modelIdx = parseInt(row.dataset.l3ModelIdx);
+      const gIdx = parseInt(row.dataset.l3Idx);
+      detailRow = document.getElementById(`d3-${l2Idx}-${modelIdx}-${gIdx}`);
+      inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
+      tog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
+      cacheDomRef(key, { row, detailRow, inner, toggle: tog });
+    }
+
+    if (!row || !row.closest(".detail-inner")) continue;
+    const l2Idx = parseInt(row.dataset.l3L2);
+    const modelIdx = parseInt(row.dataset.l3ModelIdx);
+    const gIdx = parseInt(row.dataset.l3Idx);
+    if (!detailRow || detailRow.style.display !== "none") continue;
+    detailRow.style.display = "";
+    if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
+    const allChildren = cacheAccess(`children-${modelId}`) || [];
+    const quants = allChildren.filter(c => c.author === groupAuthor && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
+    renderL4(l2Idx, modelIdx, gIdx, modelId, groupAuthor, quants, inner);
+  }
+}
+
+// ── Text Filter Application ──
+// ── Instant (In-memory) filter path ──
+// Text inputs and sliders apply instantly via debounced callbacks (debouncedTextFilter,
+// debouncedSliderUpdate). These re-render from in-memory state only — no API calls,
+// no generation bump. Changes are visible immediately but reflect only already-fetched data.
+//   applyTextFilters / debouncedTextFilter / applyLocalFilters / debouncedSliderUpdate
+function applyTextFilters() {
+  RC._state.textFilters.l1Author = document.getElementById("l1-author-filter").value.trim();
+  RC._state.textFilters.l2Model = document.getElementById("l2-model-filter").value.trim();
+  RC._state.textFilters.l3Author = document.getElementById("l3-author-filter").value.trim();
+  RC._state.textFilters.l4Model = document.getElementById("l4-model-filter").value.trim();
+  const saved = new Set(RenderCoordinator.expandedSections);
+  recomputeAndRender(saved);
+}
+const debouncedTextFilter = debounce(applyTextFilters, CONFIG.DEBOUNCE_MS);
+
+// Re-render using existing in-memory data — no API calls, no generation bump.
+function applyLocalFilters() {
+  if (!_allFetched || _allFetched.length === 0) return;
+  const saved = new Set(RenderCoordinator.expandedSections);
+  recomputeAndRender(saved);
+}
+const debouncedSliderUpdate = debounce(applyLocalFilters, CONFIG.DEBOUNCE_MS);
+
+// ── RenderCoordinator Method Wiring ──
+RenderCoordinator.renderL1 = renderMain;
+RenderCoordinator.updateArrows = function() {
+  updateArrows();
+};
+RenderCoordinator.pruneExpiredExpansions = pruneExpiredExpansions;
+RenderCoordinator.saveRestoreExpansions = saveRestoreExpansions;
+RenderCoordinator.refreshAllExpanded = refreshAllExpanded;
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 7: Event Binding, Init & Dev Hooks
+// ═══════════════════════════════════════════════════════════════
+
+// ── Event Binding ──
+document.querySelector("#main-table").addEventListener("click", e => {
+  if (e.target.closest(".detail-inner")) return;
+  const th = e.target.closest("#main-table > thead > tr > th");
+  if (th) {
+    const key = th.dataset.key;
+    RC.setL1Sort(key);
+    const saved = new Set(RC.expandedSections);
+    RC.requestRender(saved, false);
+    return;
+  }
+  const tr = e.target.closest("tr.l1-row");
+  if (tr && e.target.tagName !== "A") {
+    const idx = parseInt(tr.dataset.l1Idx);
+    const author = tr.dataset.author;
+    const detailRow = document.getElementById(`d1-${idx}`);
+    const inner = document.getElementById(`i1-${idx}`);
+    const tog = document.getElementById(`t1-${idx}`);
+    const authorKey = `${PREFIX_AUTHOR}${author}`;
+    if (toggleSection(detailRow, tog, authorKey, [`${PREFIX_MODEL}${author}/`, `${PREFIX_GROUP}${author}/`])) {
+      cacheDomRef(authorKey, { row: tr, detailRow, inner, toggle: tog });
+      if (cacheAccess(author)) {
+        refreshAuthorL2Section(idx, author, inner);
+      } else {
+        inner.innerHTML = '<div class="detail-loading" role="status">Fetching base models…</div>';
+        loadAuthorModels(idx, author, inner);
+      }
+      tog?.focus();
+    }
+  }
+});
+document.querySelector("#main-table").addEventListener("keydown", e => {
+  const th = e.target.closest("#main-table > thead > tr > th");
+  if (!th || (e.key !== "Enter" && e.key !== " ")) return;
+  e.preventDefault();
+  th.click();
+});
+document.getElementById("get-quick-results-btn").addEventListener("click", () => applyFilters(true, false));
+document.getElementById("get-deep-results-btn").addEventListener("click", () => applyFilters(true, true));
+document.getElementById("clear-cache-btn").addEventListener("click", () => {
+  const el = document.getElementById("clear-cache-btn");
+  const ann = document.getElementById("clear-cache-announce");
+  el.textContent = "Cleared!";
+  ann.textContent = "Clear Cache completed";
+  setTimeout(() => { el.textContent = "Clear Cache"; }, 1500);
+  resetAppState();
+  recomputeAndRender();
+});
+document.getElementById("derived-param-chip").addEventListener("click", () => {
+  _derivedParamEnabled = !_derivedParamEnabled;
+  toggleChipUI(document.getElementById("derived-param-chip"), _derivedParamEnabled);
+  if (_derivedParamEnabled) refreshAllExpanded(true);
+});
+document.getElementById("hide-missing-param-chip").addEventListener("click", () => {
+  _hideMissingParamEnabled = !_hideMissingParamEnabled;
+  toggleChipUI(document.getElementById("hide-missing-param-chip"), _hideMissingParamEnabled);
+  // Cosmetic-only re-render: infer-missing-params already handled inline
+  // within refreshAuthorL2Section for newly-visible models.
+  const saved = new Set(RC.expandedSections);
+  recomputeAndRender(saved);
+});
+
+// ── Initialization (_initApp) ──
+function _initApp() {
+  document.getElementById("ds-from").max = CONFIG.DATE_SLIDER_MAX;
+  document.getElementById("ds-to").max = CONFIG.DATE_SLIDER_MAX;
+  document.getElementById("ps-from").max = CONFIG.PARAM_SLIDER_MAX;
+  document.getElementById("ps-to").max = CONFIG.PARAM_SLIDER_MAX;
+  updateArrows();
+  buildFilterBar();
+  buildFromToBars();
+  buildSpecialBar();
+  buildDateSlider();
+  buildParamSlider();
+  buildParamLegend();
+  let _resizeTimer;
+  const sliderResize = new ResizeObserver(() => {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(() => { updateDateUI(); updateParamUI(); }, 50);
+  });
+ sliderResize.observe(document.getElementById("date-slider"));
+   sliderResize.observe(document.getElementById("param-slider"));
+   window.addEventListener("scroll", hideAllPopups, { passive: true });
+   window.addEventListener("resize", debounce(hideAllPopups, 100), { passive: true });
+   document.addEventListener("visibilitychange", () => { if (document.hidden) hideAllPopups(); }, { passive: true });
+   reseedActiveTaskFilters();
+  syncFilterChips();
+  document.getElementById("l1-author-filter").addEventListener("input", debouncedTextFilter);
+  document.getElementById("l2-model-filter").addEventListener("input", debouncedTextFilter);
+  document.getElementById("l3-author-filter").addEventListener("input", debouncedTextFilter);
+  document.getElementById("l4-model-filter").addEventListener("input", debouncedTextFilter);
+  document.getElementById("text-filter-row").addEventListener("click", e => {
+    const fic = e.target.closest(".fic");
+    if (!fic) return;
+    const input = document.getElementById(fic.dataset.for);
+    if (input) { input.value = ""; input.dispatchEvent(new Event("input", { bubbles: true })); input.focus(); }
+  });
+  markDirty();
+  document.getElementById("api-counter").textContent = "API Requests: 0 / 0 B";
+  document.getElementById("version").textContent = "Version: " + APP_VERSION;
+  UI.setStatus("Select your filters, then click Get Quick Results or Get Deep Results.");
+  renderMain([]);
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', _initApp);
+} else {
+  _initApp();
+}
+
+// ── Dev Hooks ──
+// Dev console: expose fetch generation counter for debugging race conditions.
+window.__HF_SEARCH_GEN = () => _fetchGeneration;
+
+})();
+</script>
+</body>
+</html>
