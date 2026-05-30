@@ -22,6 +22,13 @@ Design decisions, changelog entries, and architectural rationale for `streamline
 
 ## Version Changelog
 
+### v260529.05 — Remove artificial display throttling
+- **Removed**: `_deepenThrottleTimer` — dead variable; its last remaining `clearTimeout` in `deepenBatch` was a no-op since the timer was never assigned.
+- **Removed**: `% 3` modulo gate in `_onFetchComplete` — structural render now fires on every fetch completion. RAF coalescing (`_renderScheduled` + `requestAnimationFrame`) prevents render storms.
+- **Removed**: `% 4` modulo gate in `deepenBatch` — `_schedulePostDeepenRender` called unconditionally on every param resolution. `_filterBoundaryChanged` + RAF coalescing prevent wasted structural renders.
+- **Changed**: `deepenBatch` finally block — `_schedulePostDeepenRender` moved outside the if/else to fire unconditionally.
+- **Rationale**: Both modulo gates were legacy safeguards predating `RenderCoordinator.requestRender()`'s RAF coalescing. With ≤1 render/frame guaranteed and the API manager's ~4 req/s cap, they added no value.
+
 ### v260529.04 — Two-tier rendering refactoring: Progressive UI layer, re-entrancy elimination
 - **New**: `const UI = { ... }` — Progressive UI Layer providing `setStatus`, `updateCellBadge`, and `queueUpdate` for immediate feedback without structural renders. All status/cell/loading updates routed through it. Batch micro-updates via rAF-gated queue.
 - **New**: `_isRendering` guard on `RenderCoordinator` — hard re-entrancy barrier preventing recursive structural renders. `requestRender()` and `_doFullRender()` both check before proceeding.
