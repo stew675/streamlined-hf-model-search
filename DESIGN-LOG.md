@@ -22,6 +22,19 @@ Design decisions, changelog entries, and architectural rationale for `streamline
 
 ## Version Changelog
 
+### v260529.07 — Structural compactness refactoring: 8 mechanical deduplications
+
+- **CSS selector consolidation**: Added `chip-group` class to filter bar containers; collapsed 5-selector repetitions into single `.chip-group .filter-chip` rules. Saves ~15 lines of CSS with identical behavior.
+- **Generation guard helpers**: Extracted `isStale(gen)` and `bailQueueItem(item, cleanup)` to eliminate repetitive `gen !== _fetchGeneration` boilerplate across 20+ call sites. Each occurrence was 3-5 lines of identical teardown logic.
+- **Chip toggle helper**: Added `toggleChipUI(chip, on)` for the derived-param-chip and hide-missing-param-chip handlers — both had identical class toggle + aria-checked patterns.
+- **Slider parameterization**: Overrode prior DESIGN-LOG rejection (v260528.05). Consolidated into `setupDualSlider(fromEl, toEl, getState, setState, minGap, max)` and `updateDualSliderUI(config)`. Date slider tooltip alignment (`align-right`/`align-left`) preserved via `tipAligns` parameter — param slider omits it (no alignment class needed).
+- **Popup trigger helper**: Added `makePopupTrigger(suffix, labelText, makeContent)` that generates sanitized HTML fragment and returns `.wire()` function. Eliminates post-innerHTML DOM query dance in L2/L4 renders. ID sanitization (`/` → `__`) centralized here.
+- **sortCoerce/sortRows cleanup**: Replaced `.includes()` with `_NUMERIC_SORT_KEYS` Set lookup; simplified comparison logic using shared `_cmp(a, b)` helper. Eliminates redundant typeof check and nested if/else.
+- **applyFilters fire loop dedup**: Extracted `fireFetch(fetchFn, tag, filterFn, onDone)` for the common try/catch/finally pattern used by fetchModels/fetchRecentModels/untagged requests. Trending kept separate (has unique `_trendingAdded` assignment).
+- **thHtml align property**: Replaced fragile class-string inspection (`allCls.includes("right")`) with explicit `align` property on column configs. Default (undefined) → arrow after text; any non-'left' value → arrow before text.
+
+**Net result**: 3201 → 3144 lines (-57, -1.8%). Zero behavioral changes — all structural/progressive render paths verified syntactically valid.
+
 ### v260529.06 — Zero-waste tryResolveModelParam pipeline with built-in parent inheritance
 - **Changed**: `tryResolveModelParam` — deterministic 3-step pipeline (name regex → parent inheritance → child search API). Parent inheritance via iterative suffix stripping checks `_paramCache` then `_allFetched` before the expensive `resolveParamFromChildren` API path. Generation guard moved to only before the API call (steps 1–2 are synchronous). Models resolved via parent inheritance get purple `_inferredParamIds` badge (same as child search). `_inferredAttemptedIds` prevents re-attempts on re-expansion.
 - **Removed**: `inheritParentParams()` function and both call sites — parent inheritance logic is now embedded in `tryResolveModelParam` step 2, making the standalone post-deepen pass redundant. The batch-level call in `deepenBatch.finally()` and the inline call in `refreshAuthorL2Section`'s derive loop both removed.
@@ -95,7 +108,7 @@ Design decisions, changelog entries, and architectural rationale for `streamline
 - **DOM cache lookup helper**: `_getSectionCached()` replaces repeated cache-hit checks in `refreshAllExpanded`.
 - **Parent-stripping consolidation**: `inferParent()` now used by `markLocalParents` and `injectBaseModels` instead of their own inline copies of the loop.
 - **Consistency**: `handleSortClick` parameter renamed from `sortKey` to `stateKey`. L2 event delegation uses `this` instead of captured `container`. L2/L3 rows now have `row-even`/`row-odd` zebra classes matching L1.
-- **Slider UI dedup**: Skipped (config-object approach reduces readability more than 20-line duplication saves — per DESIGN-LOG.md Code Review Decisions #4 precedent).
+- **Slider UI dedup**: Originally skipped, later implemented in v260529.07 refactoring. The concern about config-object readability was addressed by using named parameters on a single destructured object (`updateDualSliderUI({fromInput, toInput, ...})`) rather than positional args, making the call sites self-documenting.
 
 ### v260528.04 — Render coalescing, error boundary, DOM cache
 - **API counter tooltip**: Corrected to state retries are NOT counted, matching actual behavior where `incApiCalls` only fires on success and permanent failure, not retriable errors.
@@ -251,4 +264,4 @@ L2/L4 hidden count and popup hidden count must match exactly. `popupSource` pass
 L2 label says "hidden by current filters" and counts models removed by ALL filters (date, param, pipeline, text, etc.), with popup showing all hidden (no sample cap). L4 says "hidden by text filter" and counts only text-filtered models, popup capped at 200 samples. This difference is intentional: L2 filters are many and layered (sliders + chips + text), while L4 only has the text filter.
 
 ### Popup ID sanitization
-L4 popup IDs replace `/` with `__` in parentId (`l4SafeId`) to produce valid HTML IDs. Trigger and popup must use the same sanitized key to ensure hover events wire up correctly.
+Popup trigger/popup IDs are generated by `makePopupTrigger(suffix, ...)` which centralizes the `/` → `__` replacement for valid HTML IDs. Callers pass raw suffixes (e.g., `l4-${parentId}|${author}`) and the helper produces sanitized IDs used for both the trigger button and popup div.
