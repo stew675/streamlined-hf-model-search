@@ -106,13 +106,13 @@
   #main-table .model-id-cell a { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
   #filter-row { display: flex; flex-wrap: nowrap; align-items: center; }
   #filter-bar { flex: 1 1 auto; min-width: 0; }
- #button-row .filter-chip, #filter-bar .filter-chip, #from-bar .filter-chip, #to-bar .filter-chip, #special-bar .filter-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem;
-                         padding: 5px 12px; min-height: 24px; border-radius: 14px; cursor: pointer; user-select: none;
-                         background: #161b22; border: 1px solid #30363d; transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; }
-  #button-row .filter-chip:hover, #filter-bar .filter-chip:hover, #from-bar .filter-chip:hover, #to-bar .filter-chip:hover, #special-bar .filter-chip:hover { background: #1c2129; color: #c9d1d9; }
-  #button-row .filter-chip.active, #filter-bar .filter-chip.active, #from-bar .filter-chip.active, #to-bar .filter-chip.active, #special-bar .filter-chip.active { color: #58a6ff; border-color: #58a6ff; box-shadow: 0 0 6px #1f6feb33; }
-  #button-row .filter-chip.inactive, #filter-bar .filter-chip.inactive, #from-bar .filter-chip.inactive, #to-bar .filter-chip.inactive, #special-bar .filter-chip.inactive { color: #8b949e; border-color: #484f58; }
-  #filter-bar .filter-label, #from-bar .filter-label, #to-bar .filter-label, #special-bar .filter-label, #filter-bar h3, #from-bar h3, #to-bar h3, #special-bar h3 { color: #8b949e; font-size: 0.78rem; margin-right: 4px; font-weight: 600; display: inline; }
+.chip-group .filter-chip, #button-row .filter-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.78rem;
+                          padding: 5px 12px; min-height: 24px; border-radius: 14px; cursor: pointer; user-select: none;
+                          background: #161b22; border: 1px solid #30363d; transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s; }
+   .chip-group .filter-chip:hover, #button-row .filter-chip:hover { background: #1c2129; color: #c9d1d9; }
+   .chip-group .filter-chip.active, #button-row .filter-chip.active { color: #58a6ff; border-color: #58a6ff; box-shadow: 0 0 6px #1f6feb33; }
+   .chip-group .filter-chip.inactive, #button-row .filter-chip.inactive { color: #8b949e; border-color: #484f58; }
+   .chip-group .filter-label, .chip-group h3 { color: #8b949e; font-size: 0.78rem; margin-right: 4px; font-weight: 600; display: inline; }
   .task-bar-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; align-items: center; }
    .task-bar-row .filter-label, .task-bar-row h3 { color: #8b949e; font-size: 0.78rem; margin-right: 4px; font-weight: 600; display: inline; }
    .task-bar-row .act-tag { display: inline-block; font-size: 0.72rem; padding: 3px 10px; min-height: 24px; border-radius: 10px;
@@ -283,13 +283,13 @@
   <div class="ps-legend" id="ps-legend"></div>
 </div>
 <div id="task-bars">
-<div id="from-bar" role="group" aria-label="Input modality filters">
+<div class="chip-group" id="from-bar" role="group" aria-label="Input modality filters">
   <h3 class="filter-label">From PipeLine Classes:</h3>
 </div>
-<div id="to-bar" role="group" aria-label="Output modality filters">
+<div class="chip-group" id="to-bar" role="group" aria-label="Output modality filters">
   <h3 class="filter-label">To PipeLine Classes:</h3>
 </div>
-<div id="special-bar" role="group" aria-label="Special filters">
+<div class="chip-group" id="special-bar" role="group" aria-label="Special filters">
   <h3 class="filter-label">Untagged PipeLines:</h3>
 </div>
 </div>
@@ -300,7 +300,7 @@
   <h3 class="filter-label">Available Pipeline Tags:</h3>
 </div>
 <div id="filter-row">
-<div id="filter-bar" role="group" aria-label="Quantization type filters">
+<div class="chip-group" id="filter-bar" role="group" aria-label="Quantization type filters">
   <h3 class="filter-label">Quant Types:</h3>
 </div>
 </div>
@@ -549,6 +549,13 @@ function matchesTaskFilter(pipelineTag) {
   return fromMatch && toMatch;
 }
 
+// Generation guard helpers: eliminate repetitive `gen !== _fetchGeneration` boilerplate.
+function isStale(gen) { return gen !== _fetchGeneration; }
+function bailQueueItem(item, cleanup) {
+  if (cleanup) cleanup();
+  item.reject(new Error("stale generation"));
+}
+
 const _apiTimestamps = [];
 const _inflightFetches = new Map();
 
@@ -614,35 +621,20 @@ function _dequeueNext() {
 // work item's deferred promise and triggers next dequeue. On retriable error releases
 // its in-flight slot, waits backoff delay, then re-enqueues at tail to compete fairly.
 function _dispatchFetchWithRetry(item, gen, retries) {
-  if (gen !== _fetchGeneration) {
-    _inflightCount--;
-    item.reject(new Error("stale generation"));
-    _dequeueNext();
-    return;
-  }
+  if (isStale(gen)) { bailQueueItem(item, () => { _inflightCount--; _dequeueNext(); }); return; }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT);
 
   fetch(item.url, { signal: controller.signal })
     .then(async res => {
       clearTimeout(timer);
-      if (gen !== _fetchGeneration) {
-        _inflightCount--;
-        item.reject(new Error("stale generation"));
-        _dequeueNext();
-        return;
-      }
+      if (isStale(gen)) { bailQueueItem(item, () => { _inflightCount--; _dequeueNext(); }); return; }
       if (res.ok) {
         _consecutive429s = 0;
         updateRateLimitUI(false);
         incApiCalls(1);
         const data = await res.json();
-        if (gen !== _fetchGeneration) {
-          _inflightCount--;
-          item.reject(new Error("stale generation"));
-          _dequeueNext();
-          return;
-        }
+        if (isStale(gen)) { bailQueueItem(item, () => { _inflightCount--; _dequeueNext(); }); return; }
         _inflightCount--;
         item.resolve(data);
         _dequeueNext();
@@ -677,12 +669,7 @@ function _dispatchFetchWithRetry(item, gen, retries) {
     })
     .catch(err => {
       clearTimeout(timer);
-      if (gen !== _fetchGeneration) {
-        _inflightCount--;
-        item.reject(new Error("stale generation"));
-        _dequeueNext();
-        return;
-      }
+      if (isStale(gen)) { bailQueueItem(item, () => { _inflightCount--; _dequeueNext(); }); return; }
       if (retries < CONFIG.MAX_RETRIES) {
         const delay = Math.min(1000 * Math.pow(2, retries), 30000);
         console.warn(`Network error for ${item.url}, retry ${retries + 1}/${CONFIG.MAX_RETRIES} in ${delay}ms`);
@@ -1004,6 +991,20 @@ function wirePopupHover(trigger, popup, makeContent) {
   popup.addEventListener("mouseleave", hide);
 }
 
+// Generates hidden-models popup trigger HTML and returns a post-render wiring function.
+// Pass makeContent as null to defer it — call with the callback later in .wire(makeContent).
+function makePopupTrigger(suffix, labelText, makeContent) {
+  const safe = suffix.replace(/\//g, '__');
+  return {
+    html: `<button type="button" id="fp-trigger-${safe}" class="filter-popup-trigger" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">${labelText}</button><div id="fp-popup-${safe}" class="filter-popup"></div>`,
+    wire: (mc) => {
+      const trigger = document.getElementById(`fp-trigger-${safe}`);
+      const popup = document.getElementById(`fp-popup-${safe}`);
+      if (trigger && popup) wirePopupHover(trigger, popup, mc || makeContent);
+    }
+  };
+}
+
 // ── Extraction Helpers ──
 function strictNameMatch(candidateId, modelName) {
   let name = candidateId.split("/").slice(1).join("/");
@@ -1053,6 +1054,11 @@ function createFilterChip({ container, dataset, text, className, ariaPressed, on
   chip.addEventListener("click", onClick);
   container.appendChild(chip);
   return chip;
+}
+function toggleChipUI(chip, on) {
+  chip.classList.toggle("active", on);
+  chip.classList.toggle("inactive", !on);
+  chip.setAttribute("aria-checked", String(on));
 }
 function createTaskTag(tag, isActive) {
   const desc = TO_TAGS.find(t => t.tag === tag)?.desc || "";
@@ -1641,33 +1647,23 @@ function applyBarLogic(option, options, activeSet) {
   toggleSet(option, nonAllOptions, activeSet);
 }
 
+const _NUMERIC_SORT_KEYS = new Set(["downloads", "likes", "totalDownloads", "totalLikes", "count", "paramB"]);
 function sortCoerce(v, k) {
-  if (["downloads", "likes", "totalDownloads", "totalLikes", "count", "paramB"].includes(k)) return Number(v);
+  if (_NUMERIC_SORT_KEYS.has(k)) return Number(v);
   if (k === "created_at" || k === "updated_at" || k.includes("Modified")) { const t = new Date(v || 0).getTime(); return t === t ? t : Infinity; }
   return String(v || "").toLowerCase();
 }
+function _cmp(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
 function sortRows(rows, key, asc, subKey) {
-  return rows.slice().sort((a, b) => {
-    let cmp = 0;
-    if (subKey && a[key] != null && b[key] != null && a[key] === b[key]) {
-      const sa = sortCoerce(a[subKey], subKey);
-      const sb = sortCoerce(b[subKey], subKey);
-      if (sa < sb) return -1;
-      if (sa > sb) return 1;
-      cmp = 0;
-    } else {
-      let va = sortCoerce(a[key], key), vb = sortCoerce(b[key], key);
-      if (typeof va === 'number' && typeof vb === 'number') {
-        cmp = va < vb ? -1 : va > vb ? 1 : 0;
-      } else {
-        if (va < vb) cmp = -1;
-        else if (va > vb) cmp = 1;
-        else cmp = 0;
-      }
+  const cmp = (x, y) => {
+    let va = sortCoerce(x[key], key), vb = sortCoerce(y[key], key);
+    let r = typeof va === 'number' && typeof vb === 'number' ? _cmp(va, vb) : _cmp(va, vb);
+    if (r === 0 && subKey && x[key] === y[key]) {
+      r = _cmp(sortCoerce(x[subKey], subKey), sortCoerce(y[subKey], subKey));
     }
-    if (cmp === 0) cmp = a.id.localeCompare(b.id);
-    return asc ? cmp : -cmp;
-  });
+    return r || x.id.localeCompare(y.id);
+  };
+  return rows.slice().sort(asc ? cmp : (a, b) => -cmp(a, b));
 }
 
 // ── Level 1: Authors ──
@@ -1732,7 +1728,7 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
   await Promise.all(unknownModels.map((m) => {
     return fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`).then(
       (full) => {
-        if (gen !== _fetchGeneration) return;
+        if (isStale(gen)) return;
         let p = null;
         if (full.safetensors && full.safetensors.total != null) p = full.safetensors.total / 1e9;
         if (p === null && full.gguf && full.gguf.total != null) p = full.gguf.total / 1e9;
@@ -1751,7 +1747,7 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
       },
       (e) => { console.warn("Failed to fetch param for", m.id, e); }
     ).finally(() => {
-      if (gen !== _fetchGeneration) return;
+      if (isStale(gen)) return;
       completed++;
       UI.setStatus(`Resolving parameters for ${author}… (${completed}/${totalUnk})`);
       if (completed === totalUnk) {
@@ -1779,7 +1775,7 @@ function _filterBoundaryChanged(author) {
 // Schedule a structural render after deepening completes, but only if visibility
 // of models changed (i.e., param resolution moved models into/out of param filter range).
 function _schedulePostDeepenRender(author, gen) {
-  if (gen !== _fetchGeneration) return;
+  if (isStale(gen)) return;
   if (_filterBoundaryChanged(author)) {
     RC.requestRender();
   }
@@ -1809,14 +1805,14 @@ function refreshAuthorL2Section(idx, author, container) {
         const gen = _fetchGeneration;
         (async () => {
           for (const m of deepenedNotInferred) {
-            if (gen !== _fetchGeneration) return;
+            if (isStale(gen)) return;
             if (m.paramB != null) continue;
             const resolved = await tryResolveModelParam(m, gen);
             if (resolved && gen === _fetchGeneration) {
               _deepeningParamIds.delete(m.id);
             }
           }
-          if (gen !== _fetchGeneration) return;
+          if (isStale(gen)) return;
           UI.setStatus("");
           _schedulePostDeepenRender(author, gen);
         })();
@@ -1861,7 +1857,7 @@ async function loadAuthorModels(idx, author, container) {
 
     const dated = filterApplied();
 
-    if (gen !== _fetchGeneration) return;
+    if (isStale(gen)) return;
     const ad = _authorData;
     for (const a of ad) {
       if (a.author === author) {
@@ -1879,7 +1875,7 @@ async function loadAuthorModels(idx, author, container) {
       cells[3].textContent = fmt(dated.reduce((s, m) => s + m.likes, 0));
     }
 
-    if (gen !== _fetchGeneration || !container.isConnected) return;
+    if (isStale(gen) || !container.isConnected) return;
     refreshAuthorL2Section(idx, author, container);
   } catch (err) {
     renderErrorWithRetry(container, userFriendlyError(err), () => {
@@ -1891,16 +1887,13 @@ async function loadAuthorModels(idx, author, container) {
 // ── Level 2: Base Models ──
 function thHtml(c, state, level, colindex) {
   const isSorted = state.key === c.key;
-  const allCls = (c.headerCls || "") + " " + (c.cls || "");
-  const cls = allCls.trim() + (isSorted ? " sorted" : "");
+  const cls = ((c.headerCls || "") + " " + (c.cls || "") + (isSorted ? " sorted" : "")).trim();
   const arrow = isSorted ? (state.asc ? "▲" : "▼") : "";
   const ariaSort = isSorted ? ` aria-sort="${state.asc ? "ascending" : "descending"}"` : '';
-  const tabIdx = ' tabindex="0"';
   const ci = colindex ? ` aria-colindex="${colindex}"` : '';
-  if (allCls.includes("right") || allCls.includes("center") || allCls.includes("updated-header")) {
-    return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}${tabIdx}${ci}><span class="arrow-left">${arrow}</span>${escapeHtml(c.label)}</th>`;
-  }
-  return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort}${tabIdx}${ci}>${escapeHtml(c.label)}<span class="arrow">${arrow}</span></th>`;
+  // Arrow before text for right/center-aligned and date headers; after (default) for left-aligned.
+  const arrowBefore = c.align && c.align !== 'left';
+  return `<th data-key="${c.key}" data-level="${level}" class="${cls}" scope="col"${ariaSort} tabindex="0"${ci}>${arrowBefore ? `<span class="arrow-left">${arrow}</span>` : ''}${escapeHtml(c.label)}${!arrowBefore ? `<span class="arrow">${arrow}</span>` : ''}</th>`;
 }
 
 function renderL2Empty(idx, author, container, popupSource) {
@@ -1909,12 +1902,10 @@ function renderL2Empty(idx, author, container, popupSource) {
   const allBaseModels = popupSource || cached || [];
   RC._levelState.l2.set(author, { idx, author, models: [], allBaseModels });
   if (allBaseModels.length > 0) {
-    container.innerHTML = `<div class="detail-count" style="color:#6e7681"><button type="button" id="fp-trigger-l2-empty-${author}" class="filter-popup-trigger" aria-haspopup="true">No base models match current filters</button><div id="fp-popup-l2-empty-${author}" class="filter-popup"></div></div>`;
-    const trigger = document.getElementById(`fp-trigger-l2-empty-${author}`);
-    const popup = document.getElementById(`fp-popup-l2-empty-${author}`);
-    if (trigger && popup) {
-      wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), allBaseModels.length)));
-    }
+    const pt = makePopupTrigger(`l2-empty-${author}`, "No base models match current filters",
+      (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), allBaseModels.length)));
+    container.innerHTML = `<div class="detail-count" style="color:#6e7681">${pt.html}</div>`;
+    pt.wire();
   } else if (!hasData) {
     container.innerHTML = '<div class="detail-count" style="color:#6e7681">No data loaded yet.</div>';
   } else {
@@ -1925,11 +1916,11 @@ function renderL2Empty(idx, author, container, popupSource) {
 function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
   const cols = [
     { key: "id", label: "Model ID" },
-    { key: "pipeline_tag", label: "Pipeline", cls: "center", width: 180 },
-    { key: "paramB", label: "Params", headerCls: "updated-header", cls: "center", width: 135 },
-    { key: "downloads", label: "Downloads", cls: "right", width: 110 },
-    { key: "likes", label: "Likes", cls: "right", width: 80 },
-    { key: "lastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header", width: 125 }
+    { key: "pipeline_tag", label: "Pipeline", align: 'center', cls: "center", width: 180 },
+    { key: "paramB", label: "Params", align: 'center', headerCls: "updated-header", cls: "center", width: 135 },
+    { key: "downloads", label: "Downloads", align: 'right', cls: "right", width: 110 },
+    { key: "likes", label: "Likes", align: 'right', cls: "right", width: 80 },
+    { key: "lastModified", label: "Updated", align: 'center', cls: "updated-cell", headerCls: "updated-header", width: 125 }
   ];
   const l2Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Base Models for ${author}` } : c);
   let html = `<table aria-label="Base models for ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` style="width:${c.width}px"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
@@ -1952,18 +1943,14 @@ function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
     <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none" aria-rowindex="${detailRowIdx}"><td colspan="6"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
   }).join('');
   const hidden = (totalBeforeFilter != null && totalBeforeFilter > sorted.length) ? totalBeforeFilter - sorted.length : 0;
-  html += `</tbody></table><div class="detail-count">${sorted.length} model(s)` + (hidden > 0 ? `, <button type="button" id="fp-trigger-l2-${author}" class="filter-popup-trigger" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">+${hidden} hidden by current filters</button><div id="fp-popup-l2-${author}" class="filter-popup"></div>` : '') + `</div>`;
-  return { html, hidden };
-}
-
-function wireL2Popups(author, models, allBaseModels, hidden) {
-  if (hidden <= 0) return;
-  const trigger = document.getElementById(`fp-trigger-l2-${author}`);
-  const popup = document.getElementById(`fp-popup-l2-${author}`);
-  if (trigger && popup) {
-    const displayedIds = new Set(models.map(m => m.id));
-    wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, displayedIds, allBaseModels.length)));
+  let pt = null;
+  if (hidden > 0) {
+    pt = makePopupTrigger(`l2-${author}`, `+${hidden} hidden by current filters`, null);
+    html += `</tbody></table><div class="detail-count">${sorted.length} model(s), ${pt.html}</div>`;
+  } else {
+    html += `</tbody></table><div class="detail-count">${sorted.length} model(s)</div>`;
   }
+  return { html, hidden, pt };
 }
 
 function setupL2Events(container) {
@@ -2022,13 +2009,13 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
     return;
   }
 
-  const { html, hidden } = buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state);
-  container.innerHTML = html;
+  const res = buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state);
+  container.innerHTML = res.html;
   container.dataset.l2Author = author;
   const allBaseModels = popupSource || cacheAccess(author) || [];
   RC._levelState.l2.set(author, { idx, author, models, totalBeforeFilter, allBaseModels });
 
-  wireL2Popups(author, models, allBaseModels, hidden);
+  if (res.pt) res.pt.wire((p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(models.map(m => m.id)), allBaseModels.length)));
   setupL2Events(container);
 }
 
@@ -2248,9 +2235,9 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
 
   const cols = [
     { key: "author", label: "Quant Author" },
-    { key: "totalDownloads", label: "Downloads", cls: "right", width: 120 },
-    { key: "count", label: "Models", cls: "right", width: 75 },
-    { key: "maxLastModified", label: "Updated", cls: "updated-cell", headerCls: "updated-header", width: 125 }
+    { key: "totalDownloads", label: "Downloads", align: 'right', cls: "right", width: 120 },
+    { key: "count", label: "Models", align: 'right', cls: "right", width: 75 },
+    { key: "maxLastModified", label: "Updated", align: 'center', cls: "updated-cell", headerCls: "updated-header", width: 125 }
   ];
 
   const parentName = parentId.split("/").slice(1).join("/");
@@ -2332,10 +2319,10 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 
   const cols = [
     { key: "id", label: "Model ID" },
-    { key: "q_method", label: "Quant", headerCls: "updated-header", cls: "center", width: 160 },
-    { key: "downloads", label: "Downloads", cls: "right", width: 110 },
-    { key: "likes", label: "Likes", cls: "right", width: 80 },
-    { key: "lastModified", label: "Updated", cls: "right", width: 110 }
+    { key: "q_method", label: "Quant", align: 'center', headerCls: "updated-header", cls: "center", width: 160 },
+    { key: "downloads", label: "Downloads", align: 'right', cls: "right", width: 110 },
+    { key: "likes", label: "Likes", align: 'right', cls: "right", width: 80 },
+    { key: "lastModified", label: "Updated", align: 'right', cls: "right", width: 110 }
   ];
 
   const l4Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Derivative Models for ${author}` } : c);
@@ -2355,23 +2342,19 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
   }).join('');
 
   const hiddenL4 = quants.length - displayed.length;
-  // Sanitize parentId for HTML IDs: replace / with __ to avoid invalid characters.
-  const l4SafeId = `${parentId.replace(/\//g, '__')}_${author}`;
-  html += `</tbody></table><div class="detail-count">${displayed.length} model(s)` + (hiddenL4 > 0 ? `, <button type="button" id="fp-trigger-l4-${l4SafeId}" class="filter-popup-trigger" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">+${hiddenL4} hidden by text filter</button><div id="fp-popup-l4-${l4SafeId}" class="filter-popup"></div>` : '') + `</div>`;
+  let pt = null;
+  if (hiddenL4 > 0) {
+    pt = makePopupTrigger(`l4-${parentId}|${author}`, `+${hiddenL4} hidden by text filter`, null);
+    html += `</tbody></table><div class="detail-count">${displayed.length} model(s), ${pt.html}</div>`;
+  } else {
+    html += `</tbody></table><div class="detail-count">${displayed.length} model(s)</div>`;
+  }
   container.innerHTML = html;
   const l4Key = `${parentId}|${author}`;
   container.dataset.l4Key = l4Key;
-  // Store pre-text-filter quants so re-render (e.g. sort) can re-apply _l4ModelFilter correctly.
   RC._levelState.l4.set(l4Key, { l2Idx, modelIdx, gIdx, parentId, author, quants });
 
-  if (hiddenL4 > 0) {
-    const trigger = document.getElementById(`fp-trigger-l4-${l4SafeId}`);
-    const popup = document.getElementById(`fp-popup-l4-${l4SafeId}`);
-    if (trigger && popup) {
-      const displayedIds = new Set(displayed.map(q => q.id));
-      wirePopupHover(trigger, popup, (p) => renderFilteredPopup(p, getFilteredOutModels(quants, displayedIds, CONFIG.POPUP_MAX_SAMPLES_L4)));
-    }
-  }
+  if (pt) pt.wire((p) => renderFilteredPopup(p, getFilteredOutModels(quants, new Set(displayed.map(q => q.id)), CONFIG.POPUP_MAX_SAMPLES_L4)));
 
   if (!container._delegatedL4) {
     container._delegatedL4 = true;
@@ -2562,7 +2545,7 @@ async function tryResolveModelParam(m, gen) {
 
   // ③ EXPENSIVE: Child search API calls — ONLY if still unresolved & not attempted
   if (resolved === null && !_inferredAttemptedIds.has(m.id)) {
-    if (gen !== _fetchGeneration) {
+    if (isStale(gen)) {
       if (rowEl) rowEl.classList.remove("inferring");
       return false;
     }
@@ -2623,11 +2606,12 @@ function throttledSliderUI() {
   if (_uiRafId) return;
   _uiRafId = requestAnimationFrame(() => { updateDateUI(); updateParamUI(); _uiRafId = null; });
 }
-function setupSliderEvents(from, to, minGap, max, read, updateUI, markDirty) {
-  from.addEventListener("input", () => { enforceFromGap(from, to, minGap, max); read(); throttledSliderUI(); });
-  from.addEventListener("change", () => { enforceFromGap(from, to, minGap, max); read(); markDirty(); });
-  to.addEventListener("input", () => { enforceToGap(from, to, minGap, max); read(); throttledSliderUI(); });
-  to.addEventListener("change", () => { enforceToGap(from, to, minGap, max); read(); markDirty(); });
+function setupDualSlider(fromEl, toEl, getState, setState, minGap, max) {
+  const syncState = () => setState([parseInt(fromEl.value), parseInt(toEl.value)]);
+  fromEl.addEventListener("input", () => { enforceFromGap(fromEl, toEl, minGap, max); syncState(); throttledSliderUI(); });
+  fromEl.addEventListener("change", () => { enforceFromGap(fromEl, toEl, minGap, max); syncState(); debouncedSliderUpdate(); });
+  toEl.addEventListener("input", () => { enforceToGap(fromEl, toEl, minGap, max); syncState(); throttledSliderUI(); });
+  toEl.addEventListener("change", () => { enforceToGap(fromEl, toEl, minGap, max); syncState(); debouncedSliderUpdate(); });
 }
 
 // ── Date slider ──
@@ -2636,8 +2620,7 @@ function buildDateSlider() {
   const to = document.getElementById("ds-to");
   from.value = sliderFrom;
   to.value = sliderTo;
-  const read = () => { sliderFrom = parseInt(from.value); sliderTo = parseInt(to.value); };
-  setupSliderEvents(from, to, 1, CONFIG.DATE_SLIDER_MAX, read, updateDateUI, debouncedSliderUpdate);
+  setupDualSlider(from, to, () => [sliderFrom, sliderTo], v => { sliderFrom = v[0]; sliderTo = v[1]; }, 1, CONFIG.DATE_SLIDER_MAX);
   updateDateUI();
 }
 
@@ -2660,7 +2643,7 @@ function _initFetchState() {
 // Normalize, dedup, and push models from a completed request into _allFetched.
 // Triggers progressive render. Returns the count of new (non-deduped) models added.
 function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
-  if (gen !== _fetchGeneration) return 0;
+  if (isStale(gen)) return 0;
   let added = 0;
   for (const m of rawModels.map(normalizeModel)) {
     if (_fetchSeen.has(m.id)) continue;
@@ -2677,7 +2660,7 @@ function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
 // Called by each independent completion handler to update status and trigger render.
 // RAF coalescing in requestRender() handles burst protection — no modulo gate needed.
 function _onFetchComplete(gen, completed, total, savedExpansions) {
-  if (gen !== _fetchGeneration) return;
+  if (isStale(gen)) return;
   UI.setStatus(`Fetching models… (${completed}/${total})`);
   recomputeAndRenderWithoutDerive(savedExpansions);
 }
@@ -2738,48 +2721,24 @@ function applyFilters(force, deep) {
       let totalRequests = 0;
 
       // Fire each task's sorts as independent requests — no pairing, no batching.
+      const fireFetch = (fetchFn, tag, filterFn, onDone) => {
+        totalRequests++;
+        promises.push((async () => {
+          try {
+            _mergeRequestResult(await fetchFn(), gen, tag, filterFn);
+            if (onDone) onDone();
+          } catch (e) { console.warn("fetch error for", tag || "special", e); }
+          finally { _onFetchComplete(gen, ++_fetchCompleted, totalRequests, savedExpansions); }
+        })());
+      };
       for (const tag of newTasks) {
-        totalRequests++;
-        promises.push((async () => {
-          try {
-            const raw = await fetchModels(tag);
-            _mergeRequestResult(raw, gen, tag, null);
-            fetchedTasks.add(tag);
-          } catch (e) {
-            console.warn("fetchModels error for", tag, e);
-          } finally {
-            _onFetchComplete(gen, ++_fetchCompleted, totalRequests, savedExpansions);
-          }
-        })());
-
-        totalRequests++;
-        promises.push((async () => {
-          try {
-            const raw = await fetchRecentModels(tag);
-            _mergeRequestResult(raw, gen, tag, null);
-            fetchedTasks.add(tag);
-          } catch (e) {
-            console.warn("fetchRecentModels error for", tag, e);
-          } finally {
-            _onFetchComplete(gen, ++_fetchCompleted, totalRequests, savedExpansions);
-          }
-        })());
+        fireFetch(() => fetchModels(tag), tag, null, () => fetchedTasks.add(tag));
+        fireFetch(() => fetchRecentModels(tag), tag, null, () => fetchedTasks.add(tag));
       }
 
       // Fire untagged as independent request.
       if (needUntagged) {
-        totalRequests++;
-        promises.push((async () => {
-          try {
-            const raw = await fetchUntaggedModels();
-            _mergeRequestResult(raw, gen, null, m => !m.pipeline_tag);
-            fetchedUntagged = true;
-          } catch (e) {
-            console.warn("fetchUntaggedModels error:", e);
-          } finally {
-            _onFetchComplete(gen, ++_fetchCompleted, totalRequests, savedExpansions);
-          }
-        })());
+        fireFetch(fetchUntaggedModels, null, m => !m.pipeline_tag, () => fetchedUntagged = true);
       }
 
       // Fire trending as independent request.
@@ -2787,20 +2746,16 @@ function applyFilters(force, deep) {
         totalRequests++;
         promises.push((async () => {
           try {
-            const raw = await fetchTrendingModels();
-            _trendingAdded = _mergeRequestResult(raw, gen, null, null);
+            _trendingAdded = _mergeRequestResult(await fetchTrendingModels(), gen, null, null);
             fetchedTrending = true;
-          } catch (e) {
-            console.warn("fetchTrendingModels error:", e);
-          } finally {
-            _onFetchComplete(gen, ++_fetchCompleted, totalRequests, savedExpansions);
-          }
+          } catch (e) { console.warn("fetchTrendingModels error:", e); }
+          finally { _onFetchComplete(gen, ++_fetchCompleted, totalRequests, savedExpansions); }
         })());
       }
 
       // Wait for all requests to complete before post-processing.
       await Promise.allSettled(promises);
-      if (gen !== _fetchGeneration) return;
+      if (isStale(gen)) return;
 
       // Post-fetch processing: trim, inject/mark parents, final render.
       _trimAllFetched();
@@ -2812,7 +2767,7 @@ function applyFilters(force, deep) {
             let renderCounter = 0;
             return () => {
               renderCounter++;
-              if (gen !== _fetchGeneration) return;
+              if (isStale(gen)) return;
               if (renderCounter % 2 !== 0) return;
               const saved = new Set(RC.expandedSections);
               recomputeAndRender(saved);
@@ -2832,7 +2787,7 @@ function applyFilters(force, deep) {
         markLocalParents(_allFetched, gen);
       }
 
-      if (gen !== _fetchGeneration) return;
+      if (isStale(gen)) return;
       recomputeAndRender(savedExpansions);
       UI.setStatus("");
     } catch (e) {
@@ -2845,26 +2800,35 @@ function applyFilters(force, deep) {
   })();
 }
 
+// Shared dual-slider UI update: sets labels, aria attributes, fill bar, and tooltips.
+function updateDualSliderUI({ fromInput, toInput, fillId, labelIds, tipFromId, tipToId, tipAligns, fromPos, toPos, max, valueLabel }) {
+  document.getElementById(labelIds[0]).textContent = valueLabel(fromPos);
+  document.getElementById(labelIds[1]).textContent = valueLabel(toPos);
+  fromInput.setAttribute("aria-valuenow", String(fromPos));
+  fromInput.setAttribute("aria-valuetext", valueLabel(fromPos));
+  toInput.setAttribute("aria-valuenow", String(toPos));
+  toInput.setAttribute("aria-valuetext", valueLabel(toPos));
+  const left = sliderCenterPct(fromInput, fromPos, max);
+  const right = sliderCenterPct(toInput, toPos, max);
+  document.getElementById(fillId).style.left = left + "%";
+  document.getElementById(fillId).style.width = (right - left) + "%";
+  const tipFrom = document.getElementById(tipFromId);
+  const tipTo = document.getElementById(tipToId);
+  if (tipFrom) { tipFrom.style.left = left + "%"; if (tipAligns) tipFrom.className = "ps-tooltip " + tipAligns[0]; tipFrom.textContent = valueLabel(fromPos); }
+  if (tipTo) { tipTo.style.left = right + "%"; if (tipAligns) tipTo.className = "ps-tooltip " + tipAligns[1]; tipTo.textContent = valueLabel(toPos); }
+}
+
 function updateDateUI() {
-  document.getElementById("ds-from-label").textContent = sliderValueToLabel(sliderFrom);
-  document.getElementById("ds-to-label").textContent = sliderValueToLabel(sliderTo);
-
-  const fromInput = document.getElementById("ds-from");
-  const toInput = document.getElementById("ds-to");
-  fromInput.setAttribute("aria-valuenow", String(sliderFrom));
-  fromInput.setAttribute("aria-valuetext", sliderValueToLabel(sliderFrom));
-  toInput.setAttribute("aria-valuenow", String(sliderTo));
-  toInput.setAttribute("aria-valuetext", sliderValueToLabel(sliderTo));
-  const left = sliderCenterPct(fromInput, sliderFrom, CONFIG.DATE_SLIDER_MAX);
-  const right = sliderCenterPct(toInput, sliderTo, CONFIG.DATE_SLIDER_MAX);
-  const fill = document.getElementById("ds-fill");
-  fill.style.left = left + "%";
-  fill.style.width = (right - left) + "%";
-
-  const tipFrom = document.getElementById("ds-tooltip-from");
-  const tipTo = document.getElementById("ds-tooltip-to");
-  if (tipFrom) { tipFrom.style.left = left + "%"; tipFrom.className = "ps-tooltip align-right"; tipFrom.textContent = sliderValueToLabel(sliderFrom); }
-  if (tipTo) { tipTo.style.left = right + "%"; tipTo.className = "ps-tooltip align-left"; tipTo.textContent = sliderValueToLabel(sliderTo); }
+  updateDualSliderUI({
+    fromInput: document.getElementById("ds-from"),
+    toInput: document.getElementById("ds-to"),
+    fillId: "ds-fill",
+    labelIds: ["ds-from-label", "ds-to-label"],
+    tipFromId: "ds-tooltip-from", tipToId: "ds-tooltip-to",
+    tipAligns: ["align-right", "align-left"],
+    fromPos: sliderFrom, toPos: sliderTo, max: CONFIG.DATE_SLIDER_MAX,
+    valueLabel: v => sliderValueToLabel(v)
+  });
 }
 
 // ── Param slider ──
@@ -2882,35 +2846,20 @@ function buildParamSlider() {
   const to = document.getElementById("ps-to");
   from.value = paramSliderFrom;
   to.value = paramSliderTo;
-  const read = () => { paramSliderFrom = parseInt(from.value); paramSliderTo = parseInt(to.value); };
-  setupSliderEvents(from, to, CONFIG.PARAM_MIN_GAP, CONFIG.PARAM_SLIDER_MAX, read, updateParamUI, debouncedSliderUpdate);
+  setupDualSlider(from, to, () => [paramSliderFrom, paramSliderTo], v => { paramSliderFrom = v[0]; paramSliderTo = v[1]; }, CONFIG.PARAM_MIN_GAP, CONFIG.PARAM_SLIDER_MAX);
   updateParamUI();
 }
 
 function updateParamUI() {
-  const fromVal = paramPosToValue(paramSliderFrom);
-  const toVal = paramPosToValue(paramSliderTo);
-
-  const fromInput = document.getElementById("ps-from");
-  const toInput = document.getElementById("ps-to");
-  fromInput.setAttribute("aria-valuenow", String(paramSliderFrom));
-  fromInput.setAttribute("aria-valuetext", paramValueToLabel(paramPosToValue(paramSliderFrom)));
-  toInput.setAttribute("aria-valuenow", String(paramSliderTo));
-  toInput.setAttribute("aria-valuetext", paramValueToLabel(paramPosToValue(paramSliderTo)));
-  const left = sliderCenterPct(fromInput, paramSliderFrom);
-  const right = sliderCenterPct(toInput, paramSliderTo);
-
-  document.getElementById("ps-from-label").textContent = paramValueToLabel(fromVal);
-  document.getElementById("ps-to-label").textContent = paramValueToLabel(toVal);
-
-  const fill = document.getElementById("ps-fill");
-  fill.style.left = left + "%";
-  fill.style.width = (right - left) + "%";
-
-  const tipFrom = document.getElementById("ps-tooltip-from");
-  const tipTo = document.getElementById("ps-tooltip-to");
-  if (tipFrom) { tipFrom.style.left = left + "%"; tipFrom.textContent = paramValueToLabel(fromVal); }
-  if (tipTo) { tipTo.style.left = right + "%"; tipTo.textContent = paramValueToLabel(toVal); }
+  updateDualSliderUI({
+    fromInput: document.getElementById("ps-from"),
+    toInput: document.getElementById("ps-to"),
+    fillId: "ps-fill",
+    labelIds: ["ps-from-label", "ps-to-label"],
+    tipFromId: "ps-tooltip-from", tipToId: "ps-tooltip-to",
+    fromPos: paramSliderFrom, toPos: paramSliderTo, max: CONFIG.PARAM_SLIDER_MAX,
+    valueLabel: v => paramValueToLabel(paramPosToValue(v))
+  });
 }
 
 // ── Main Table Sort ──
@@ -3004,19 +2953,13 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   recomputeAndRenderWithoutDerive();
 });
 document.getElementById("derived-param-chip").addEventListener("click", () => {
-  _derivedParamEnabled = !_derivedParamEnabled;
-  const chip = document.getElementById("derived-param-chip");
-  chip.classList.toggle("active", _derivedParamEnabled);
-  chip.classList.toggle("inactive", !_derivedParamEnabled);
-  chip.setAttribute("aria-checked", String(_derivedParamEnabled));
+   _derivedParamEnabled = !_derivedParamEnabled;
+  toggleChipUI(document.getElementById("derived-param-chip"), _derivedParamEnabled);
   if (_derivedParamEnabled) refreshAllExpanded(true);
 });
 document.getElementById("hide-missing-param-chip").addEventListener("click", () => {
-  _hideMissingParamEnabled = !_hideMissingParamEnabled;
-  const chip = document.getElementById("hide-missing-param-chip");
-  chip.classList.toggle("active", _hideMissingParamEnabled);
-  chip.classList.toggle("inactive", !_hideMissingParamEnabled);
-  chip.setAttribute("aria-checked", String(_hideMissingParamEnabled));
+   _hideMissingParamEnabled = !_hideMissingParamEnabled;
+  toggleChipUI(document.getElementById("hide-missing-param-chip"), _hideMissingParamEnabled);
   // Cosmetic-only re-render: infer-missing-params already handled inline
   // within refreshAuthorL2Section for newly-visible models.
   const saved = new Set(RC.expandedSections);
@@ -3029,10 +2972,10 @@ document.getElementById("hide-missing-param-chip").addEventListener("click", () 
 // Used by Quick mode to surface parents of visible quants without fetching new models.
 // Takes `gen` as a generation guard to prevent stale async operations from corrupting state.
 function markLocalParents(all, gen) {
-  if (gen !== _fetchGeneration) return;
+  if (isStale(gen)) return;
   const seen = new Set(all.map(m => m.id));
   for (let i = 0; i < all.length; i++) {
-    if (gen !== _fetchGeneration) return;
+    if (isStale(gen)) return;
     const m = all[i];
     if (!isInDateRange(m.lastModified)) continue;
 
@@ -3070,17 +3013,17 @@ function markLocalParents(all, gen) {
    // during the scan, so there is no infinite loop risk.
 async function injectBaseModels(all, onBatch) {
   const gen = _fetchGeneration;
-  if (gen !== _fetchGeneration) return;
+  if (isStale(gen)) return;
   _injectedBaseIds.clear();  // Reset on deep fetch — fresh injection pass will repopulate.
   markLocalParents(all, gen);
-  if (gen !== _fetchGeneration) return;
+  if (isStale(gen)) return;
   const seenAuthors = new Set(all.map(m => m.id.split("/")[0]));
   const injected = [];
   const fetchQueue = new Map();
   const seen = new Set(all.map(m => m.id));
 
   for (let i = 0; i < all.length; i++) {
-    if (gen !== _fetchGeneration) return;
+    if (isStale(gen)) return;
     const m = all[i];
     if (!isInDateRange(m.lastModified)) continue;
 
@@ -3114,7 +3057,7 @@ async function injectBaseModels(all, onBatch) {
   const promises = baseIds.map((baseId) => {
     return fetchJson(`https://huggingface.co/api/models/${baseId}?full=true`).then(
       (raw) => {
-        if (gen !== _fetchGeneration) return null;
+        if (isStale(gen)) return null;
         const full = normalizeModel(raw);
         full.paramB = getParamCount(full);
         full._injected = true;
@@ -3126,7 +3069,7 @@ async function injectBaseModels(all, onBatch) {
         console.warn("Failed to fetch base model", err);
       }
     ).finally(() => {
-      if (gen !== _fetchGeneration) return;
+      if (isStale(gen)) return;
       completed++;
       UI.setStatus(`Resolving base models… (${completed}/${totalRequests})`);
       if (onBatch) onBatch();
@@ -3134,7 +3077,7 @@ async function injectBaseModels(all, onBatch) {
   });
   await Promise.all(promises);
 
-  if (gen !== _fetchGeneration) return;
+  if (isStale(gen)) return;
   all.push(...injected);
 
   // Final reconciliation: guarantee every model flagged as _injected is whitelisted
