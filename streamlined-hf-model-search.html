@@ -356,9 +356,10 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260530.09';
+const APP_VERSION = '260530.10';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _allFetched = [];
+let _allFetchedById = new Map();
 let _authorData = [];
 let _canonicalAuthor = {};
 
@@ -802,6 +803,7 @@ function resetAppState() {
   _inferredAttemptedIds.clear();
   _deepeningParamIds.clear();
   _injectedBaseIds.clear();
+  _allFetchedById.clear();
   _canonicalCache = null;
   _consecutive429s = 0;
   apiCalls = 0;
@@ -998,7 +1000,10 @@ function _onFetchComplete(gen, completed, total, savedExpansions) {
 
 // Trim _allFetched to ALL_FETCHED_MAX, preserving injected base models.
 function _trimAllFetched() {
-  if (_allFetched.length <= CONFIG.ALL_FETCHED_MAX) return;
+  if (_allFetched.length <= CONFIG.ALL_FETCHED_MAX) {
+    _rebuildAllFetchedMap();
+    return;
+  }
   const pinned = [];
   const droppable = [];
   for (const m of _allFetched) {
@@ -1013,6 +1018,12 @@ function _trimAllFetched() {
   const room = CONFIG.ALL_FETCHED_MAX - pinned.length;
   droppable.length = Math.max(0, Math.min(droppable.length, room));
   _allFetched = droppable.concat(pinned);
+}
+
+// Rebuild the O(1) lookup map from _allFetched. Call after any structural mutation.
+function _rebuildAllFetchedMap() {
+  const m = new Map();
+  for (const model of _allFetched) m.set(model.id, model);
 }
 
 // ── applyFilters (Main "Get Results" Entry Point) ──
@@ -1133,7 +1144,9 @@ function applyFilters(force, deep) {
 // ── Parent Injection (quick mode — no API calls) ──
 function markLocalParents(all, gen) {
   if (isStale(gen)) return;
-  const seen = new Set(all.map(m => m.id));
+  // Map serves as both existence set for inferParent and O(1) parent reference lookup.
+  const byId = new Map();
+  for (const m of all) byId.set(m.id, m);
   for (let i = 0; i < all.length; i++) {
     if (isStale(gen)) return;
     const m = all[i];
@@ -1149,16 +1162,14 @@ function markLocalParents(all, gen) {
     } else {
       const idLower = m.id.toLowerCase();
       if (!RE_Q_EXISTS.test(idLower)) continue;
-      baseId = inferParent(m.id, seen);
+      baseId = inferParent(m.id, byId);
       if (!baseId) continue;
     }
 
-    if (seen.has(baseId)) {
-      const parent = all.find(p => p.id === baseId);
-      if (parent) {
-        parent._injected = true;
-        _injectedBaseIds.add(baseId);
-      }
+    const parent = byId.get(baseId);
+    if (parent) {
+      parent._injected = true;
+      _injectedBaseIds.add(baseId);
     }
   }
 }
@@ -1239,6 +1250,7 @@ async function injectBaseModels(all, onBatch) {
   // hierarchy integrity so quantizations attach to their true parent even when that
   // parent falls outside the active date range (see modelPassesAllFilters).
   all.forEach(m => { if (m._injected && gen === _fetchGeneration) _injectedBaseIds.add(m.id); });
+  _rebuildAllFetchedMap();
   UI.setStatus("");
 }
 
@@ -1502,8 +1514,8 @@ async function tryResolveModelParam(m, gen) {
 
       // Fallback to _allFetched scan (covers injected/visible base models)
       if (!resolved) {
-        const parent = _allFetched.find(f => f.id === candId && f.paramB != null);
-        if (parent) { resolved = parent.paramB; source = 'parent'; }
+        const parent = _allFetchedById.get(candId);
+        if (parent && parent.paramB != null) { resolved = parent.paramB; source = 'parent'; }
       }
     }
   }
@@ -1534,7 +1546,7 @@ async function tryResolveModelParam(m, gen) {
     const ps = source === 'name' ? 'name' : source === 'parent' ? 'parent_inherit' : (source === 'children' && childUsedApi) ? 'child_api' : 'child_name';
     _paramSource.set(m.id, ps);
 
-    const af = _allFetched?.find(x => x.id === m.id);
+    const af = _allFetchedById.get(m.id);
     if (af) af.paramB = resolved;
   }
 
@@ -2757,7 +2769,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
             const pam = st.allBaseModels.find(m => m.id === parentId);
             if (pam && pam.paramB == null) pam.paramB = maxChildParam;
           }
-          const af = _allFetched && _allFetched.find(m => m.id === parentId);
+          const af = _allFetchedById.get(parentId);
           if (af && af.paramB == null) af.paramB = maxChildParam;
         }
       }
