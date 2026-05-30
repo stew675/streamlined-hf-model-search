@@ -94,6 +94,8 @@
   .no-param { color: #f85149; cursor: help; }
   .no-param-maybe { color: #d29922; cursor: help; border-bottom: 1px dotted #d2992266; }
   .derived-param { color: #c084fc; cursor: help; border-bottom: 1px dotted #c084fc66; }
+  .child-data-param { color: #b8860b; cursor: help; border-bottom: 1px dotted #b8860b66; }
+  .parent-inherit-param { color: #e6edf3; cursor: help; border-bottom: 1px dotted #e6edf366; }
   .name-infer-param { color: #58a6ff; cursor: help; border-bottom: 1px dotted #58a6ff66; }
   .metadata-param { color: #7ecf7e; cursor: help; border-bottom: 1px dotted #7ecf7e66; }
   .likes-icon { color: #f85149; margin-left: 2px; }
@@ -347,7 +349,7 @@
 <script defer>
 (function() {
   "use strict";
-const APP_VERSION = '260529.07';
+const APP_VERSION = '260529.08';
 // See DESIGN-LOG.md — version changelog, architecture decisions, and code review rationale.
 let _allFetched, _authorData, _canonicalAuthor;
 
@@ -487,6 +489,8 @@ const _inferredParamIds = new Set();
 const _inferredFromNameIds = new Set();
 const _inferredAttemptedIds = new Set();
 const _deepeningParamIds = new Set();
+const _childDataParamIds = new Set();
+const _parentInheritParamIds = new Set();
 const _deepeningAuthors = new Set(); // Guards against concurrent deepening of same author
 let apiCalls = 0;
 let _consecutive429s = 0;
@@ -1162,8 +1166,14 @@ function paramBadgeHtml(m) {
   if (_inferredFromNameIds.has(m.id)) {
     return `<span class="name-infer-param" title="Inferred from model name pattern">${label}</span>`;
   }
+  if (_childDataParamIds.has(m.id)) {
+    return `<span class="child-data-param" title="Resolved from child model data (API call)">${label}</span>`;
+  }
+  if (_parentInheritParamIds.has(m.id)) {
+    return `<span class="parent-inherit-param" title="Inherited from parent model">${label}</span>`;
+  }
   if (_inferredParamIds.has(m.id)) {
-    return `<span class="derived-param" title="Inferred from child model names or data">${label}</span>`;
+    return `<span class="derived-param" title="Inferred from child model names">${label}</span>`;
   }
   if (_deepeningParamIds.has(m.id)) {
     return `<span class="deepening-param" title="Resolved via direct API fetch">${label}</span>`;
@@ -2189,11 +2199,12 @@ async function resolveParamFromChildren(modelId) {
   // without an API call. Fall back to individual model fetch only when the
   // name lacks a B/M pattern (rare for quant models).
   // Early exit: if 3 non-null results agree on the current maximum, stop.
-  let runningMax = null, maxConfidence = 0;
+  let runningMax = null, maxConfidence = 0, usedApi = false;
   for (let i = 0; i < Math.min(children.length, CONFIG.DERIVED_BATCH_SIZE); i++) {
     const childId = children[i].id;
     let childP = extractParamFromId(childId);
     if (childP === null) {
+      usedApi = true;
       try {
         const full = await fetchJson(`https://huggingface.co/api/models/${childId}?full=true`);
         childP = (full.safetensors && full.safetensors.total != null) ? full.safetensors.total / 1e9 :
@@ -2207,7 +2218,7 @@ async function resolveParamFromChildren(modelId) {
       if (maxConfidence >= 3) break;
     }
   }
-  return runningMax;
+  return { value: runningMax, usedApi };
 }
 
 // ── Level 3: Quant Author Groups ──
@@ -2544,12 +2555,15 @@ async function tryResolveModelParam(m, gen) {
   }
 
   // ③ EXPENSIVE: Child search API calls — ONLY if still unresolved & not attempted
+  let childUsedApi = false;
   if (resolved === null && !_inferredAttemptedIds.has(m.id)) {
     if (isStale(gen)) {
       if (rowEl) rowEl.classList.remove("inferring");
       return false;
     }
-    resolved = await resolveParamFromChildren(m.id);
+    const childResult = await resolveParamFromChildren(m.id);
+    resolved = childResult.value;
+    childUsedApi = childResult.usedApi;
     source = 'children';
   }
 
@@ -2564,7 +2578,9 @@ async function tryResolveModelParam(m, gen) {
     m.paramB = resolved;
     _paramCache.set(m.id, resolved);
     if (source === 'name') _inferredFromNameIds.add(m.id);
-    else _inferredParamIds.add(m.id); // Covers parent inheritance & child search
+    else if (source === 'parent') _parentInheritParamIds.add(m.id);
+    else if (source === 'children' && childUsedApi) _childDataParamIds.add(m.id);
+    else _inferredParamIds.add(m.id); // child name scan only
 
     const af = _allFetched?.find(x => x.id === m.id);
     if (af) af.paramB = resolved;
@@ -2940,6 +2956,8 @@ document.getElementById("clear-cache-btn").addEventListener("click", () => {
   _inferredFromNameIds.clear();
   _inferredAttemptedIds.clear();
   _deepeningParamIds.clear();
+  _childDataParamIds.clear();
+  _parentInheritParamIds.clear();
   _injectedBaseIds.clear();
   _canonicalCache = null;
   _consecutive429s = 0;
