@@ -22,6 +22,21 @@ Design decisions, changelog entries, and architectural rationale for `streamline
 
 ## Version Changelog
 
+### v260529.04 — Two-tier rendering refactoring: Progressive UI layer, re-entrancy elimination
+- **New**: `const UI = { ... }` — Progressive UI Layer providing `setStatus`, `updateCellBadge`, and `queueUpdate` for immediate feedback without structural renders. All status/cell/loading updates routed through it. Batch micro-updates via rAF-gated queue.
+- **New**: `_isRendering` guard on `RenderCoordinator` — hard re-entrancy barrier preventing recursive structural renders. `requestRender()` and `_doFullRender()` both check before proceeding.
+- **New**: `_asyncDeepenPass()` — post-structural-render async pass that deepens expanded authors outside the synchronous render pipeline. Called via `requestAnimationFrame` after `_doFullRender()` completes, so structural re-renders never contain async calls.
+- **New**: `_schedulePostDeepenRender(author, gen)` — filter-boundary-aware structural render trigger for post-deepen results. Only calls `RC.requestRender()` when param resolution changes model visibility (crosses param/date filter boundaries).
+- **New**: `_filterBoundaryChanged(author)` — compares current filtered-model count against last known count for the author. Uses `_lastFilteredCounts` Map to detect visibility changes.
+- **New**: `_deepeningAuthors` Set — guards against concurrent `refreshAuthorL2Section` invocations for the same author.
+- **Changed**: `refreshAllExpanded(force, allowAsync = true)` — new `allowAsync` parameter. When `false`, Phase 1 re-renders L2 from cache without deepening (used by structural pass). When `true`, calls `refreshAuthorL2Section` with deepening (user-triggered). Defaults to `true` for backward compatibility.
+- **Changed**: `deepenBatch` — rewritten to remove all structural render calls. Now uses `UI.queueUpdate(() => UI.updateCellBadge(...))` for progressive badge updates and `_schedulePostDeepenRender()` for throttled structural re-renders (every 4 completions, plus final). The inner `refreshAuthorL2()` function removed entirely.
+- **Changed**: `tryResolveModelParam` — stripped to pure state-mutation + progressive feedback. Signature simplified: `(m, gen)` only (removed `idx`, `author`, `container`, `getFiltered`, `totalBeforeFilter`, `popupSource` params). No calls to `_updateL2ParamCell` or `_rerenderAuthorL2`. Updates state/caches, then queues a progressive badge update.
+- **Changed**: `_onFetchComplete` — throttles structural renders: every 3 completed requests, or on final completion. Previously re-rendered on every single completion.
+- **Removed**: `_updateL2ParamCell()` — replaced by `UI.updateCellBadge()` throughout.
+- **Removed**: `_rerenderAuthorL2()` — replaced by progressive cell updates + `_schedulePostDeepenRender()` for structural re-render when filter boundaries are crossed.
+- **Flow**: API Request → `UI.setStatus()` [Progressive]; Param Resolve → Cache Update → `UI.updateCellBadge()` [Progressive]; Filter Change / Batch Complete → `RC.requestRender()` [Structural, coalesced] → `_doFullRender()` [Sync-only, guarded by `_isRendering`] → `_asyncDeepenPass()` [Async deepening for expanded sections].
+
 ### v260529.02 — Shared _rerenderAuthorL2 helper, filter-staleness cleanup
 - **Added**: `_rerenderAuthorL2(idx, author, container)` — shared helper for re-reading cached author models, filtering, calling `renderL2`, `refreshAllExpanded()`, and updating L1 counts. Used by both `deepenBatch`'s `refreshAuthorL2()` and the inline derive loop.
 - **Added**: `_updateL2ParamCell(m)` — shared helper for immediate per-model param cell update after resolve. Used in both `deepenBatch` per-model handler and inline derive loop.

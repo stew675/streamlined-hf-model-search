@@ -347,7 +347,7 @@
 <script defer>
 (function() {
   "use strict";
-const APP_VERSION = '260529.03';
+const APP_VERSION = '260529.04';
 // See DESIGN-LOG.md — version changelog, architecture decisions, and code review rationale.
 let _allFetched, _authorData, _canonicalAuthor;
 
@@ -487,6 +487,7 @@ const _inferredParamIds = new Set();
 const _inferredFromNameIds = new Set();
 const _inferredAttemptedIds = new Set();
 const _deepeningParamIds = new Set();
+const _deepeningAuthors = new Set(); // Guards against concurrent deepening of same author
 let _deepenThrottleTimer = null;
 let apiCalls = 0;
 let _consecutive429s = 0;
@@ -1281,10 +1282,11 @@ const RenderCoordinator = {
   
   _renderScheduled: false,
   _savedExpansions: null,
+  _isRendering: false, // Hard guard against re-entrant execution
 
   requestRender(savedExpansions = null) {
     if (savedExpansions) this._savedExpansions = savedExpansions;
-    if (this._renderScheduled) return;
+    if (this._renderScheduled || this._isRendering) return; // Coalesce & block re-entry
     this._renderScheduled = true;
     requestAnimationFrame(() => {
       this._renderScheduled = false;
@@ -1293,6 +1295,8 @@ const RenderCoordinator = {
   },
 
   _doFullRender() {
+    if (this._isRendering) return; // Safety net
+    this._isRendering = true;
     try {
       const saved = this._savedExpansions;
       this._savedExpansions = null;
@@ -1303,11 +1307,38 @@ const RenderCoordinator = {
       this.updateArrows();
       this.pruneExpiredExpansions(new Set(_authorData.map(a => a.author)));
       if (saved) this.saveRestoreExpansions(saved);
-      this.refreshAllExpanded();
+      // Sync-only structural expansion. No async (deepening) inside structural pass.
+      this.refreshAllExpanded(null, false);
     } catch (e) {
       console.error("Render failed", e);
-      const status = document.getElementById("status");
-      if (status) status.textContent = "Render error. Click Get Results to recover.";
+      UI.setStatus("Render error. Click Get Results to recover.");
+    } finally {
+      this._isRendering = false;
+    }
+    // Schedule async deepening pass for expanded sections after sync render completes
+    if (RC.expandedSections.size > 0) {
+      requestAnimationFrame(() => this._asyncDeepenPass());
+    }
+  },
+
+  _asyncDeepenPass() {
+    if (this._isRendering) return; // Don't recurse into structural render
+    // Deepening happens inside refreshAuthorL2Section which has its own
+    // generation guard (_fetchGeneration capture at entry). No additional
+    // guard needed here since this pass is synchronous iteration only.
+    // Phase 1: deepen each expanded author
+    for (const key of RC.expandedSections) {
+      if (!key.startsWith(PREFIX_AUTHOR)) continue;
+      const author = key.slice(PREFIX_AUTHOR.length);
+      const l1Row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
+      if (!l1Row) continue;
+      const idx = parseInt(l1Row.dataset.l1Idx);
+      const inner = document.getElementById(`i1-${idx}`);
+      if (!inner?.isConnected) continue;
+      // Only deepen if L2 data is cached (loadAuthorModels already ran)
+      if (cacheAccess(author)) {
+        refreshAuthorL2Section(idx, author, inner);
+      }
     }
   },
 
@@ -1348,6 +1379,43 @@ const RenderCoordinator = {
 };
 
 const RC = RenderCoordinator; // short alias used throughout call sites
+
+// ── Progressive UI Layer ──
+// Provides immediate feedback (status bars, cell badges) without triggering structural
+// renders. All <td> and <div#status> updates go through this layer. Never calls render
+// functions. Batch micro-updates via queueUpdate to avoid layout thrashing.
+const UI = {
+  statusEl: document.getElementById("status"),
+
+  setStatus(text) { this.statusEl.textContent = text; },
+
+  // Targeted cell badge update — no structural render
+  updateCellBadge(modelId, html) {
+    const row = document.querySelector(`tr.l2-row[data-model="${CSS.escape(modelId)}"]`);
+    if (!row?.isConnected) return;
+    const cell = row.querySelector("td:nth-child(3)");
+    if (cell) cell.innerHTML = html;
+  },
+
+  // Batch progressive micro-updates to avoid layout thrashing
+  _pendingUpdates: [],
+  _flushScheduled: false,
+
+  queueUpdate(fn) {
+    this._pendingUpdates.push(fn);
+    if (!this._flushScheduled) {
+      this._flushScheduled = true;
+      requestAnimationFrame(() => this._flush());
+    }
+  },
+
+  _flush() {
+    this._flushScheduled = false;
+    const batch = this._pendingUpdates.splice(0, 50);
+    for (const fn of batch) fn();
+    if (this._pendingUpdates.length > 0) requestAnimationFrame(() => this._flush());
+  }
+};
 
 const cache = new Map();
 function cacheSet(key, value) {
@@ -1658,10 +1726,10 @@ function renderErrorWithRetry(container, message, retryFn) {
 }
 
 async function deepenBatch(idx, author, container, unknownModels, filterApplied, nonQuantBase, gen) {
-  const statusEl = document.getElementById("status");
   const totalUnk = unknownModels.length;
   let completed = 0;
   unknownModels.forEach(m => _deepeningParamIds.add(m.id));
+  UI.setStatus(`Resolving parameters for ${author}… (0/${totalUnk})`);
   await Promise.all(unknownModels.map((m) => {
     return fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`).then(
       (full) => {
@@ -1673,41 +1741,30 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
           m.paramB = p;
           _paramCache.set(m.id, p);
           _deepeningParamIds.delete(m.id);
+          UI.queueUpdate(() => UI.updateCellBadge(m.id, paramBadgeHtml(m)));
         } else if (_derivedParamEnabled && !_inferredAttemptedIds.has(m.id)) {
-          return tryResolveModelParam(m, gen, idx, author, container,
-            filterApplied, nonQuantBase.length, nonQuantBase)
-            .then(resolved => {
-	      if (resolved && gen === _fetchGeneration) {
-	        _updateL2ParamCell(m);
-                _rerenderAuthorL2(idx, author, container);
-	      }
-            });
+          return tryResolveModelParam(m, gen).then(resolved => {
+            if (resolved && gen === _fetchGeneration) {
+              _deepeningParamIds.delete(m.id);
+            }
+          });
         }
       },
       (e) => { console.warn("Failed to fetch param for", m.id, e); }
     ).finally(() => {
       if (gen !== _fetchGeneration) return;
       completed++;
-      statusEl.textContent = `Resolving parameters for ${author}… (${completed}/${totalUnk})`;
+      UI.setStatus(`Resolving parameters for ${author}… (${completed}/${totalUnk})`);
       if (completed === totalUnk) {
         if (_deepenThrottleTimer) { clearTimeout(_deepenThrottleTimer); _deepenThrottleTimer = null; }
-        if (gen === _fetchGeneration) document.getElementById("status").textContent = "";
-        refreshAuthorL2();
-      } else if (!_deepenThrottleTimer) {
-        _deepenThrottleTimer = setTimeout(() => {
-          _deepenThrottleTimer = null;
-          if (gen !== _fetchGeneration) return;
-          refreshAuthorL2();
-        }, 250);
+        UI.setStatus("");
+        inheritParentParams(unknownModels, (cacheAccess(author) || []).concat(nonQuantBase));
+        _schedulePostDeepenRender(author, gen);
+      } else if (completed % 4 === 0) {
+        _schedulePostDeepenRender(author, gen);
       }
     });
   }));
-  function refreshAuthorL2() {
-    const models = cacheAccess(author);
-    if (!models) return;
-    inheritParentParams(unknownModels, models);
-    _rerenderAuthorL2(idx, author, container);
-  }
 }
 
 function inheritParentParams(unknownModels, baseModels) {
@@ -1726,65 +1783,68 @@ function inheritParentParams(unknownModels, baseModels) {
     }
   }
 }
-function _updateL2ParamCell(m) {
-  const row = document.querySelector(`tr.l2-row[data-model="${CSS.escape(m.id)}"]`);
-  if (row) {
-    const cell = row.querySelector("td:nth-child(3)");
-    if (cell) cell.innerHTML = paramBadgeHtml(m);
-  }
+// Filter-boundary change tracking: only trigger structural render when param
+// resolution crosses a filter boundary (changing which models are visible).
+let _lastFilteredCounts = new Map(); // author → count
+function _filterBoundaryChanged(author) {
+  const baseModels = cacheAccess(author);
+  if (!baseModels) return true;
+  const nqb = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
+  const current = nqb.filter(m => modelPassesAllFilters(m)).length;
+  const prev = _lastFilteredCounts.get(author) ?? current;
+  _lastFilteredCounts.set(author, current);
+  return current !== prev;
 }
 
-function _rerenderAuthorL2(idx, author, container) {
-  const models = cacheAccess(author);
-  if (!models) return;
-  const nqb = models.filter(m2 => !m2._orphanQuant && !m2._nestedQuant);
-  const filtered = nqb.filter(m2 => modelPassesAllFilters(m2));
-  renderL2(idx, author, filtered, container, nqb.length, nqb);
-  refreshAllExpanded();
-  const l1Row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
-  if (l1Row) {
-    const cells = l1Row.querySelectorAll("td");
-    cells[1].textContent = filtered.length;
-    cells[2].textContent = fmt(filtered.reduce((s, m2) => s + m2.downloads, 0));
-    cells[3].textContent = fmt(filtered.reduce((s, m2) => s + m2.likes, 0));
+// Schedule a structural render after deepening completes, but only if visibility
+// of models changed (i.e., param resolution moved models into/out of param filter range).
+function _schedulePostDeepenRender(author, gen) {
+  if (gen !== _fetchGeneration) return;
+  if (_filterBoundaryChanged(author)) {
+    RC.requestRender();
   }
+  // If no filter boundary was crossed, progressive badge updates are sufficient
 }
 
 function refreshAuthorL2Section(idx, author, container) {
-  const baseModels = cacheAccess(author);
-  if (!baseModels) return;
-  const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
-  const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
-  renderL2(idx, author, filtered, container, nonQuantBase.length, nonQuantBase);
-  const freshUnknowns = filtered.filter(m => m.paramB === null && !_deepeningParamIds.has(m.id));
-  if (freshUnknowns.length > 0) {
-    const gen = _fetchGeneration;
-    deepenBatch(idx, author, container, freshUnknowns,
-      () => nonQuantBase.filter(m => modelPassesAllFilters(m)),
-      nonQuantBase, gen);
-  }
-  if (_derivedParamEnabled) {
-    const deepenedNotInferred = filtered.filter(m =>
-      m.paramB === null && _deepeningParamIds.has(m.id) && !_inferredAttemptedIds.has(m.id));
-    if (deepenedNotInferred.length > 0) {
+  if (_deepeningAuthors.has(author)) return; // already deepening
+  _deepeningAuthors.add(author);
+  try {
+    const baseModels = cacheAccess(author);
+    if (!baseModels) return;
+    const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
+    const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
+    renderL2(idx, author, filtered, container, nonQuantBase.length, nonQuantBase);
+    const freshUnknowns = filtered.filter(m => m.paramB === null && !_deepeningParamIds.has(m.id));
+    if (freshUnknowns.length > 0) {
       const gen = _fetchGeneration;
-      inheritParentParams(deepenedNotInferred, nonQuantBase);
-      const getFiltered = () => nonQuantBase.filter(m2 => modelPassesAllFilters(m2));
-      (async () => {
-        for (const m of deepenedNotInferred) {
-          if (gen !== _fetchGeneration) return;
-          if (m.paramB != null) continue; // resolved by inheritParentParams above
-          const resolved = await tryResolveModelParam(m, gen, idx, author, container,
-            getFiltered, nonQuantBase.length, nonQuantBase);
-	  if (resolved && gen === _fetchGeneration) {
-	    _updateL2ParamCell(m);
-            _rerenderAuthorL2(idx, author, container);
-	  }
-        }
-        if (gen !== _fetchGeneration) return;
-        document.getElementById("status").textContent = "";
-      })();
+      deepenBatch(idx, author, container, freshUnknowns,
+        () => nonQuantBase.filter(m => modelPassesAllFilters(m)),
+        nonQuantBase, gen);
     }
+    if (_derivedParamEnabled) {
+      const deepenedNotInferred = filtered.filter(m =>
+        m.paramB === null && _deepeningParamIds.has(m.id) && !_inferredAttemptedIds.has(m.id));
+      if (deepenedNotInferred.length > 0) {
+        const gen = _fetchGeneration;
+        inheritParentParams(deepenedNotInferred, nonQuantBase);
+        (async () => {
+          for (const m of deepenedNotInferred) {
+            if (gen !== _fetchGeneration) return;
+            if (m.paramB != null) continue;
+            const resolved = await tryResolveModelParam(m, gen);
+            if (resolved && gen === _fetchGeneration) {
+              _deepeningParamIds.delete(m.id);
+            }
+          }
+          if (gen !== _fetchGeneration) return;
+          UI.setStatus("");
+          _schedulePostDeepenRender(author, gen);
+        })();
+      }
+    }
+  } finally {
+    _deepeningAuthors.delete(author);
   }
 }
 
@@ -2358,7 +2418,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 // Three phases because L1 must exist before L2 can be found inside it, etc.
 // expandedSections keys use stable identifiers (a|author, m|modelId, g|parentId|author)
 // so restoration is robust even if DOM indices shift after re-render.
-function refreshAllExpanded(force) {
+function refreshAllExpanded(force, allowAsync = true) {
   // Phase 1: re-expand L1 author rows
   for (const key of RC.expandedSections) {
     if (!key.startsWith(PREFIX_AUTHOR)) continue;
@@ -2383,7 +2443,17 @@ function refreshAllExpanded(force) {
       if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
     }
     const idx = parseInt(row.dataset.l1Idx);
-    refreshAuthorL2Section(idx, author, inner);
+    if (allowAsync) {
+      refreshAuthorL2Section(idx, author, inner);
+    } else {
+      // Sync-only: show cached L2 without deepening
+      const baseModels = cacheAccess(author);
+      if (baseModels) {
+        const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
+        const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
+        renderL2(idx, author, filtered, inner, nonQuantBase.length, nonQuantBase);
+      }
+    }
   }
 
   // Phase 2: re-expand L2 model rows
@@ -2476,32 +2546,31 @@ function applyLocalFilters() {
 }
 const debouncedSliderUpdate = debounce(applyLocalFilters, CONFIG.DEBOUNCE_MS);
 
-async function tryResolveModelParam(m, gen, idx, author, container, getFiltered, totalBeforeFilter, popupSource) {
+async function tryResolveModelParam(m, gen) {
   const rowEl = document.querySelector(`tr.l2-row[data-model="${CSS.escape(m.id)}"]`);
   if (rowEl) rowEl.classList.add("inferring");
-  document.getElementById("status").textContent =
-    `Resolving params for ${m.id.split("/").slice(1).join("/")}…`;
+  UI.setStatus(`Resolving params for ${m.id.split("/").slice(1).join("/")}…`);
   let resolved = null, fromName = false;
   resolved = extractParamFromId(m.id);
   if (resolved !== null) fromName = true;
   if (resolved === null) {
     if (gen !== _fetchGeneration) { if (rowEl) rowEl.classList.remove("inferring"); return false; }
-    // Fall through to children-based inference when nothing is in the name.
     resolved = await resolveParamFromChildren(m.id);
   }
   if (rowEl) rowEl.classList.remove("inferring");
   if (_inferredAttemptedIds.size > 5000) _inferredAttemptedIds.clear();
   _inferredAttemptedIds.add(m.id);
-  if (resolved === null) return false;
+  if (resolved === null) {
+    UI.queueUpdate(() => UI.updateCellBadge(m.id, paramBadgeHtml(m)));
+    return false;
+  }
   m.paramB = resolved;
   _paramCache.set(m.id, resolved);
   (fromName ? _inferredFromNameIds : _inferredParamIds).add(m.id);
-  // Sync _allFetched so modelPassesAllFilters sees the resolved value directly.
   const af = _allFetched && _allFetched.find(x => x.id === m.id);
   if (af) af.paramB = resolved;
-  if (gen !== _fetchGeneration) return true;
-  // Skip per-model renderL2 + refreshAllExpanded — data is already synced to shared state
-  // (_allFetched, _paramCache). Callers batch-render after all resolves complete.
+  // Progressive feedback only — no structural render
+  UI.queueUpdate(() => UI.updateCellBadge(m.id, paramBadgeHtml(m)));
   return true;
 }
 
@@ -2588,11 +2657,14 @@ function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
 }
 
 // Called by each independent completion handler to update status and trigger render.
+// Throttles structural renders: every 3 requests, or on final completion.
 function _onFetchComplete(gen, completed, total, savedExpansions) {
   if (gen !== _fetchGeneration) return;
-  const status = document.getElementById("status");
-  status.textContent = `Fetching models… (${completed}/${total})`;
-  recomputeAndRenderWithoutDerive(savedExpansions);
+  UI.setStatus(`Fetching models… (${completed}/${total})`);
+  const shouldRebuild = completed % 3 === 0 || completed === total;
+  if (shouldRebuild) {
+    recomputeAndRenderWithoutDerive(savedExpansions);
+  }
 }
 
 // Trim _allFetched to ALL_FETCHED_MAX, preserving injected base models.
@@ -2719,8 +2791,7 @@ function applyFilters(force, deep) {
       _trimAllFetched();
 
       if (deep) {
-        const status = document.getElementById("status");
-        status.textContent = `Resolving base models…`;
+        UI.setStatus(`Resolving base models…`);
         try {
           await injectBaseModels(_allFetched, (() => {
             let renderCounter = 0;
@@ -2748,10 +2819,10 @@ function applyFilters(force, deep) {
 
       if (gen !== _fetchGeneration) return;
       recomputeAndRender(savedExpansions);
-      document.getElementById("status").textContent = "";
+      UI.setStatus("");
     } catch (e) {
       console.warn("applyFilters error:", e);
-      document.getElementById("status").textContent = "Error: " + e.message;
+      UI.setStatus("Error: " + e.message);
     } finally {
       reenable();
       document.getElementById("main-table").setAttribute("aria-busy", "false");
@@ -2989,7 +3060,6 @@ async function injectBaseModels(all, onBatch) {
   markLocalParents(all, gen);
   if (gen !== _fetchGeneration) return;
   const seenAuthors = new Set(all.map(m => m.id.split("/")[0]));
-  const status = document.getElementById("status");
   const injected = [];
   const fetchQueue = new Map();
   const seen = new Set(all.map(m => m.id));
@@ -3043,7 +3113,7 @@ async function injectBaseModels(all, onBatch) {
     ).finally(() => {
       if (gen !== _fetchGeneration) return;
       completed++;
-      status.textContent = `Resolving base models… (${completed}/${totalRequests})`;
+      UI.setStatus(`Resolving base models… (${completed}/${totalRequests})`);
       if (onBatch) onBatch();
     });
   });
@@ -3058,10 +3128,9 @@ async function injectBaseModels(all, onBatch) {
   // hierarchy integrity so quantizations attach to their true parent even when that
   // parent falls outside the active date range (see modelPassesAllFilters).
   all.forEach(m => { if (m._injected && gen === _fetchGeneration) _injectedBaseIds.add(m.id); });
-  status.textContent = "";
+  UI.setStatus("");
 }
 function _initApp() {
-  const status = document.getElementById("status");
   document.getElementById("ds-from").max = CONFIG.DATE_SLIDER_MAX;
   document.getElementById("ds-to").max = CONFIG.DATE_SLIDER_MAX;
   document.getElementById("ps-from").max = CONFIG.PARAM_SLIDER_MAX;
@@ -3099,7 +3168,7 @@ function _initApp() {
   markDirty();
   document.getElementById("api-counter").textContent = "API Requests: 0";
   document.getElementById("version").textContent = "Version: " + APP_VERSION;
-  status.textContent = "Select your filters, then click Get Quick Results or Get Deep Results.";
+  UI.setStatus("Select your filters, then click Get Quick Results or Get Deep Results.");
   renderMain([]);
 }
 if (document.readyState === 'loading') {

@@ -21,6 +21,9 @@ When making changes to the source code, read `DESIGN-LOG.md` first if your chang
 - **Level discrimination**: `<th>` elements carry `data-level="2|3|4"` so sort handlers reject events from nested levels even after `innerHTML` detaches the target from the DOM.
 - **Generation guard**: All async functions that mutate shared state capture `const gen = _fetchGeneration` at entry and check `if (gen !== _fetchGeneration) return;` before any side-effect. The queue manager checks generation both at dequeue time and post-fetch. See DESIGN-LOG.md "Architecture Decisions" for rationale.
 - **CSS.escape**: Any query selector interpolating user-controlled strings (author names, model IDs) must use `CSS.escape()` to prevent broken queries or injection.
+- **Two-tier rendering**: `UI` object handles progressive feedback (status bar, cell badges) via `setStatus`/`queueUpdate` — never touches table structure. `RenderCoordinator` (`RC`) handles structural renders (table rebuilds) via `requestRender`/`_doFullRender` — synchronous only, guarded by `_isRendering`. Async deepening runs in a separate `_asyncDeepenPass` pass after the sync render completes.
+- **No structural renders from resolution paths**: `tryResolveModelParam`, `deepenBatch`, and the inline derive loop update state/caches only, queue progressive badge updates via `UI.queueUpdate()`, and schedule structural renders via `_schedulePostDeepenRender` only when filter boundaries are crossed.
+- **`refreshAllExpanded(force, allowAsync = true)`**: New `allowAsync` parameter. When `false` (structural pass), renders L2 from cache without deepening. When `true` (user-triggered), deepens via `refreshAuthorL2Section`. The structural pass uses `false`; filter/slider/click handlers use `true` (default).
 
 ## Testing
 
@@ -46,6 +49,9 @@ Open in browser, validate:
 19. Clear Cache clears everything, preserves filter/slider state
 20. `_allFetched` does not exceed 16,384 entries
 21. Progressive rendering: status line shows `Fetching models… (N/M)` as each request completes; L1 updates incrementally during fetch
+22. Param badge updates progressively as deepening resolves each model (no full table re-render per resolution)
+23. Structural re-renders are throttled: not every `_onFetchComplete` call triggers one (every 3rd or final)
+24. `_isRendering` guard prevents re-entrant structural renders (rapid filter changes coalesce)
 
 ## Common Pitfalls
 
@@ -58,3 +64,6 @@ Open in browser, validate:
 - **Param deepening**: Only fires for the single expanded author, in batches of 4, and only for models passing current date/param filters.
 - **Search endpoint limitations**: Search API (`/api/models?search=...`) never returns `safetensors` or `config` data even with `full=true`. Individual model API does — hence deepening for models without B/M suffix.
 - **Detached event target**: Capture `const inner = e.target.closest(".detail-inner")` in a variable before any `innerHTML` replacement (which detaches the target, making `closest()` return null). The `data-level` attribute on `<th>` provides a secondary guard.
+- **Progressive vs Structural separation**: Never call `UI.setStatus` or `UI.queueUpdate` from inside `_doFullRender` (structural path). Never call `RT.requestRender` from inside progressive update handlers. Resolution functions (`tryResolveModelParam`, `deepenBatch`) must only update state/caches and queue progressive feedback — no direct structural renders.
+- **`_filterBoundaryChanged` tracking**: `_lastFilteredCounts` Map tracks per-author filtered counts. `_schedulePostDeepenRender` uses this to decide whether a structural render is needed after param resolution. If no filter boundary was crossed, progressive badge updates are sufficient.
+- **`_deepeningAuthors` guard**: Prevents concurrent `refreshAuthorL2Section` invocations for the same author. Set is added-to at entry, removed in `finally` block.
