@@ -347,7 +347,7 @@
 <script defer>
 (function() {
   "use strict";
-const APP_VERSION = '260529.05';
+const APP_VERSION = '260529.06';
 // See DESIGN-LOG.md — version changelog, architecture decisions, and code review rationale.
 let _allFetched, _authorData, _canonicalAuthor;
 
@@ -1756,7 +1756,6 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
       UI.setStatus(`Resolving parameters for ${author}… (${completed}/${totalUnk})`);
       if (completed === totalUnk) {
         UI.setStatus("");
-        inheritParentParams(unknownModels, (cacheAccess(author) || []).concat(nonQuantBase));
       }
       // Call unconditionally — _filterBoundaryChange + RAF coalescing prevent wasted renders
       _schedulePostDeepenRender(author, gen);
@@ -1764,22 +1763,6 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
   }));
 }
 
-function inheritParentParams(unknownModels, baseModels) {
-  for (const m of unknownModels) {
-    if (m.paramB != null) continue;
-    const bits = m.id.split('/');
-    let name = bits[1];
-    while (name.length > 0) {
-      const dash = name.lastIndexOf('-');
-      if (dash <= 0) break;
-      name = name.substring(0, dash);
-      const candId = bits[0] + '/' + name;
-      const parent = baseModels.find(b => b.id === candId && b.paramB != null) ||
-        (_allFetched || []).find(f => f.id === candId && f.paramB != null);
-      if (parent) { m.paramB = parent.paramB; _paramCache.set(m.id, parent.paramB); _inferredFromNameIds.add(m.id); break; }
-    }
-  }
-}
 // Filter-boundary change tracking: only trigger structural render when param
 // resolution crosses a filter boundary (changing which models are visible).
 let _lastFilteredCounts = new Map(); // author → count
@@ -1824,7 +1807,6 @@ function refreshAuthorL2Section(idx, author, container) {
         m.paramB === null && _deepeningParamIds.has(m.id) && !_inferredAttemptedIds.has(m.id));
       if (deepenedNotInferred.length > 0) {
         const gen = _fetchGeneration;
-        inheritParentParams(deepenedNotInferred, nonQuantBase);
         (async () => {
           for (const m of deepenedNotInferred) {
             if (gen !== _fetchGeneration) return;
@@ -2547,28 +2529,67 @@ async function tryResolveModelParam(m, gen) {
   const rowEl = document.querySelector(`tr.l2-row[data-model="${CSS.escape(m.id)}"]`);
   if (rowEl) rowEl.classList.add("inferring");
   UI.setStatus(`Resolving params for ${m.id.split("/").slice(1).join("/")}…`);
-  let resolved = null, fromName = false;
-  resolved = extractParamFromId(m.id);
-  if (resolved !== null) fromName = true;
-  if (resolved === null) {
-    if (gen !== _fetchGeneration) { if (rowEl) rowEl.classList.remove("inferring"); return false; }
-    resolved = await resolveParamFromChildren(m.id);
+
+  let resolved = null;
+  let source = 'none';
+
+  // ① FREE: Name pattern extraction (B/M suffixes)
+  if ((resolved = extractParamFromId(m.id)) !== null) {
+    source = 'name';
   }
-  if (rowEl) rowEl.classList.remove("inferring");
+
+  // ② FREE: Parent param inheritance (iterative suffix stripping)
+  if (resolved === null) {
+    const bits = m.id.split('/');
+    let name = bits[1];
+    while (name.length > 0) {
+      const dash = name.lastIndexOf('-');
+      if (dash <= 0) break;
+      name = name.substring(0, dash);
+      const candId = bits[0] + '/' + name;
+
+      // Check param cache first (fastest path for already-resolved parents)
+      const cachedP = _paramCache.get(candId);
+      if (cachedP != null) { resolved = cachedP; source = 'parent'; break; }
+
+      // Fallback to _allFetched scan (covers injected/visible base models)
+      if (!resolved) {
+        const parent = (_allFetched || []).find(f => f.id === candId && f.paramB != null);
+        if (parent) { resolved = parent.paramB; source = 'parent'; }
+      }
+    }
+  }
+
+  // ③ EXPENSIVE: Child search API calls — ONLY if still unresolved & not attempted
+  if (resolved === null && !_inferredAttemptedIds.has(m.id)) {
+    if (gen !== _fetchGeneration) {
+      if (rowEl) rowEl.classList.remove("inferring");
+      return false;
+    }
+    resolved = await resolveParamFromChildren(m.id);
+    source = 'children';
+  }
+
+  // Mark as attempted to prevent future expensive retries on re-expansion/filter changes
   if (_inferredAttemptedIds.size > 5000) _inferredAttemptedIds.clear();
   _inferredAttemptedIds.add(m.id);
-  if (resolved === null) {
-    UI.queueUpdate(() => UI.updateCellBadge(m.id, paramBadgeHtml(m)));
-    return false;
+
+  if (rowEl) rowEl.classList.remove("inferring");
+
+  // Commit to state & cache only on success
+  if (resolved !== null) {
+    m.paramB = resolved;
+    _paramCache.set(m.id, resolved);
+    if (source === 'name') _inferredFromNameIds.add(m.id);
+    else _inferredParamIds.add(m.id); // Covers parent inheritance & child search
+
+    const af = _allFetched?.find(x => x.id === m.id);
+    if (af) af.paramB = resolved;
   }
-  m.paramB = resolved;
-  _paramCache.set(m.id, resolved);
-  (fromName ? _inferredFromNameIds : _inferredParamIds).add(m.id);
-  const af = _allFetched && _allFetched.find(x => x.id === m.id);
-  if (af) af.paramB = resolved;
-  // Progressive feedback only — no structural render
+
+  // Progressive UI update only — no structural render
   UI.queueUpdate(() => UI.updateCellBadge(m.id, paramBadgeHtml(m)));
-  return true;
+  return resolved !== null;
 }
 
 

@@ -22,6 +22,11 @@ Design decisions, changelog entries, and architectural rationale for `streamline
 
 ## Version Changelog
 
+### v260529.06 — Zero-waste tryResolveModelParam pipeline with built-in parent inheritance
+- **Changed**: `tryResolveModelParam` — deterministic 3-step pipeline (name regex → parent inheritance → child search API). Parent inheritance via iterative suffix stripping checks `_paramCache` then `_allFetched` before the expensive `resolveParamFromChildren` API path. Generation guard moved to only before the API call (steps 1–2 are synchronous). Models resolved via parent inheritance get purple `_inferredParamIds` badge (same as child search). `_inferredAttemptedIds` prevents re-attempts on re-expansion.
+- **Removed**: `inheritParentParams()` function and both call sites — parent inheritance logic is now embedded in `tryResolveModelParam` step 2, making the standalone post-deepen pass redundant. The batch-level call in `deepenBatch.finally()` and the inline call in `refreshAuthorL2Section`'s derive loop both removed.
+- **Rationale**: Prior sequencing flaw: `tryResolveModelParam` fired `resolveParamFromChildren` (2 search APIs + up to 10 individual fetches) for models whose parent was already resolved, because parent inheritance only ran later in `deepenBatch.finally()`. The new pipeline guarantees zero wasted API calls: free paths are always exhausted first, and the expensive child-search path is only reached as an absolute last resort.
+
 ### v260529.05 — Remove artificial display throttling
 - **Removed**: `_deepenThrottleTimer` — dead variable; its last remaining `clearTimeout` in `deepenBatch` was a no-op since the timer was never assigned.
 - **Removed**: `% 3` modulo gate in `_onFetchComplete` — structural render now fires on every fetch completion. RAF coalescing (`_renderScheduled` + `requestAnimationFrame`) prevents render storms.
