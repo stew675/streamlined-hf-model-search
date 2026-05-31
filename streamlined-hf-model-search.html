@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260530.10';
+const APP_VERSION = '260530.11';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _allFetched = [];
 let _allFetchedById = new Map();
@@ -1024,6 +1024,7 @@ function _trimAllFetched() {
 function _rebuildAllFetchedMap() {
   const m = new Map();
   for (const model of _allFetched) m.set(model.id, model);
+  _allFetchedById = m;
 }
 
 // ── applyFilters (Main "Get Results" Entry Point) ──
@@ -2414,7 +2415,7 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
           UI.queueUpdate(() => UI.updateCellBadge(m.id, paramBadgeHtml(m)));
         }
       },
-      (e) => { console.warn("Failed to fetch param for", m.id, e); }
+      (e) => { console.warn("Failed to fetch param for", m.id, e); _deepeningParamIds.delete(m.id); }
     ).finally(() => {
       if (isStale(gen)) return;
       completed++;
