@@ -819,8 +819,23 @@ const RenderCoordinator = {
     }
   },
 
-  getDetailSort(levelKey) {
+getDetailSort(levelKey) {
+    // Try tree-based sort state first (refactor Step 7), fall back to legacy Map
+    if (levelKey.startsWith("l2-")) {
+      const author = levelKey.slice(3);
+      const l1Node = _expansionMap.byPath.get('/' + author);
+      if (l1Node && l1Node.sortKey) return { key: l1Node.sortKey, asc: l1Node.sortAsc };
+    }
     return this._state.detailSort[levelKey];
+  },
+  setDetailSort(levelKey, value) {
+    this._state.detailSort[levelKey] = value;
+    // Also store in tree node (refactor Step 7)
+    if (levelKey.startsWith("l2-")) {
+      const author = levelKey.slice(3);
+      const l1Node = _expansionMap.byPath.get('/' + author);
+      if (l1Node) { l1Node.sortKey = value.key; l1Node.sortAsc = value.asc; }
+    }
   },
 
   getExpandedList() {
@@ -2990,6 +3005,11 @@ async function loadAuthorModels(idx, author, container) {
     }));
 
     cacheSet(author, baseModels);
+
+     // Sync newly-fetched models into unified database (refactor Step 7)
+      for (const m of baseModels) {
+        if (!_modelDb.has(m.id)) _modelDb.set(m.id, m);
+      }
 
     const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
     const filterApplied = () => nonQuantBase.filter(m => modelPassesAllFilters(m));
