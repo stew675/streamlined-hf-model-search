@@ -430,7 +430,7 @@ const _expansionMap = {
     }
   },
 
-  // Walk tree and collect expanded nodes at a given level (replaces expandedSections iteration)
+  // Walk tree and collect expanded nodes at a given level
   getExpandedAtLevel(level) {
     const result = [];
     if (!_modelTree.root) return result;
@@ -703,7 +703,6 @@ const RenderCoordinator = {
   _state: {
     l1Sort: { key: "totalDownloads", asc: false },
     detailSort: {},
-    expandedSections: new Set(),
     textFilters: {
       l1Author: "",
       l2Model: "",
@@ -811,21 +810,16 @@ getDetailSort(levelKey) {
       const l1Node = _expansionMap.byPath.get('/' + author);
       if (l1Node) { l1Node.sortKey = value.key; l1Node.sortAsc = value.asc; }
     }
-  },
-
-  getExpandedList() {
-    return [...this._state.expandedSections];
-  },
+},
 
   renderL1: null,
   updateArrows: null,
   pruneExpiredExpansions: null,
   refreshAllExpanded: null,
 
-  get sortKey() { return this._state.l1Sort.key; },
+   get sortKey() { return this._state.l1Sort.key; },
   get sortAsc() { return this._state.l1Sort.asc; },
   get detailSort() { return this._state.detailSort; },
-  get expandedSections() { return this._state.expandedSections; },
   get _l1AuthorFilter() { return this._state.textFilters.l1Author; },
   get _l2ModelFilter() { return this._state.textFilters.l2Model; },
   get _l3AuthorFilter() { return this._state.textFilters.l3Author; },
@@ -921,7 +915,6 @@ function resetAppState() {
   _trendingAdded = 0;
 fetchedTrending = false;
    updateRateLimitUI(false);
-  RenderCoordinator.expandedSections.clear();
   // Clear renderData on all tree nodes
   for (const [, node] of _modelTree.byPath) node.renderData = null;
 }
