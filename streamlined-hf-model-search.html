@@ -1141,12 +1141,13 @@ function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
 }
 
 // Called by each independent completion handler to update status and trigger render.
-// RAF coalescing in requestRender() handles burst protection — no modulo gate needed.
-function _onFetchComplete(gen, completed, total, savedExpansions) {
-  if (isStale(gen)) return;
-  UI.setStatus(`Fetching models… (${completed}/${total})`);
-  recomputeAndRender(savedExpansions);
-}
+  // RAF coalescing in requestRender() handles burst protection — no modulo gate needed.
+  function _onFetchComplete(gen, completed, total, savedExpansions) {
+    if (isStale(gen)) return;
+    UI.setStatus(`Fetching models… (${completed}/${total})`);
+    _treeDirty = true; // New models may have arrived — force tree rebuild on next render
+    recomputeAndRender(savedExpansions);
+  }
 
 // Trim _allFetched to ALL_FETCHED_MAX, preserving injected base models.
 function _trimAllFetched() {
@@ -1575,19 +1576,19 @@ function resolveTrueBase(baseId, byIdMap) {
 }
 
 // Integrate discovered children into the unified model database.
-// Sets _treeDirty so next structural render rebuilds tree with new models (Pass 2).
 function integrateDiscoveredChildren(parentModelId, rawModels) {
   if (!rawModels.length) return;
 
-  // Normalize and add to unified database
   for (const m of rawModels) {
     const nm = normalizeModel(m);
     _modelDb.set(nm.id, nm);
   }
 
-  // Mark tree dirty — next structural render will rebuild with discovered children
   _treeDirty = true;
 }
+
+// Mark tree dirty when new models are injected (e.g., injectBaseModels adds missing parents).
+function markTreeDirty() { _treeDirty = true; }
 
 // ── Tree Stats (for dev verification) ──
 function treeStats() {
