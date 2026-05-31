@@ -491,8 +491,6 @@ const _Q_PATTERN = Q_METHODS.join("|");
 const RE_Q_EXISTS = new RegExp(`\\b(?:${_Q_PATTERN})\\b`, 'i');
 const RE_Q_MATCH = new RegExp(`\\b(?:${_Q_PATTERN})\\b`, 'gi');
 const RE_Q_STRIP = new RegExp(`-(?:${_Q_PATTERN})$`, 'i');
-const RE_B_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Bb](?![a-zA-Z])/;
-const RE_M_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Mm](?![a-zA-Z])/;
 
 // ── Filter Display Constants ──
 const FILTER_DISPLAY = ["awq", "fp4", "fp8", "finetune", "gguf", "mlx", "safetensors", "others"];
@@ -1424,14 +1422,28 @@ function matchesTaskFilter(pipelineTag) {
 // ── Parameter Extraction ──
 //   extractParamFromId → getParamCount → resolveParamFromChildren → tryResolveModelParam
 function extractParamFromId(id) {
-  const bMatch = id.match(RE_B_PARAM);
-  if (bMatch) {
-    const v = parseFloat(bMatch[1]);
+  // Pattern 1: Strict — no letter or digit before the number.
+  // Catches -7B, -22B, -125m etc. but NOT 8x7B (x blocks) nor partial 2B in 22B.
+  const strictB = id.match(/(?<![a-zA-Z\d])(\d+(?:\.\d+)?)[Bb](?![a-zA-Z])/);
+  if (strictB) {
+    const v = parseFloat(strictB[1]);
     if (v >= 0.001 && v <= 2000) return v;
   }
-  const mMatch = id.match(RE_M_PARAM);
-  if (mMatch) {
-    const v = parseFloat(mMatch[1]) / 1000;
+  const strictM = id.match(/(?<![a-zA-Z\d])(\d+(?:\.\d+)?)[Mm](?![a-zA-Z])/);
+  if (strictM) {
+    const v = parseFloat(strictM[1]) / 1000;
+    if (v >= 0.001 && v <= 2000) return v;
+  }
+  // Pattern 2: MoE — 8x7B, 8x22B (letter before the multiplier is allowed)
+  const moeB = id.match(/\d+[xX](\d+(?:\.\d+)?)[bB](?![a-zA-Z])/);
+  if (moeB) {
+    const v = parseFloat(moeB[1]);
+    if (v >= 0.001 && v <= 2000) return v;
+  }
+  // Pattern 3: Active-param — A14B (letter A before number)
+  const actB = id.match(/(?<![a-zA-Z])[aA](\d+(?:\.\d+)?)[bB](?![a-zA-Z])/);
+  if (actB) {
+    const v = parseFloat(actB[1]);
     if (v >= 0.001 && v <= 2000) return v;
   }
   return null;
