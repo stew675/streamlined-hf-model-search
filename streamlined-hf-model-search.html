@@ -1145,7 +1145,6 @@ function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
   function _onFetchComplete(gen, completed, total, savedExpansions) {
     if (isStale(gen)) return;
     UI.setStatus(`Fetching models… (${completed}/${total})`);
-    _treeDirty = true; // New models may have arrived — force tree rebuild on next render
     recomputeAndRender(savedExpansions);
   }
 
@@ -1506,7 +1505,7 @@ function buildModelTree() {
     let trueBase = resolveTrueBase(baseId, byId);
     if (!trueBase) continue;
 
-    const l2Node = _modelTree.byModelId.get(trueBase);
+    let l2Node = _modelTree.byModelId.get(trueBase);
     if (!l2Node) {
       // Base model not in tree (filtered out or canonical copy). Create a placeholder L2 node.
       const baseAuthor = trueBase.split("/")[0];
