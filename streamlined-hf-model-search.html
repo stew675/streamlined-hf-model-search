@@ -884,6 +884,10 @@ const _inflightChildren = new Map();
 
 // ── DOM Reference Cache ──
 const _domCache = new Map();
+// L2 render data keyed by author — serves as fallback when tree hasn't been rebuilt after loadAuthorModels
+const _l2RenderData = new Map();
+// L3 render data keyed by parentId — fallback when tree hasn't been rebuilt after loadChildren
+const _l3RenderData = new Map();
 function cacheDomRef(key, ref) { if (ref && ref.row.isConnected) _domCache.set(key, ref); }
 function invalidateDomKey(key) { _domCache.delete(key); }
 function invalidateDomPrefix(prefix) { for (const k of _domCache) if (k[0].startsWith(prefix)) _domCache.delete(k[0]); }
@@ -1097,7 +1101,7 @@ function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
 
 // Called by each independent completion handler to update status and trigger render.
   // RAF coalescing in requestRender() handles burst protection — no modulo gate needed.
-  function _onFetchComplete(gen, completed, total, savedExpansions) {
+  function _onFetchComplete(gen, completed, total) {
     if (isStale(gen)) return;
     UI.setStatus(`Fetching models… (${completed}/${total})`);
     // Only update status bar during fetch — don't render with partial data.
@@ -1164,7 +1168,7 @@ if (newTasks.length === 0 && !needUntagged && fetchedTrending && !deep) {
           _trendingAdded = _mergeRequestResult(await fetchTrendingModels(), gen, null, null);
           fetchedTrending = true;
         } catch (e) { console.warn("fetchTrendingModels error:", e); }
-        finally { _onFetchComplete(gen, ++_fetchCompleted, totalRequests, savedExpansions); }
+        finally { _onFetchComplete(gen, ++_fetchCompleted, totalRequests); }
       }
 
       // Fire each task's sorts as independent requests — no pairing, no batching.
@@ -1175,7 +1179,7 @@ if (newTasks.length === 0 && !needUntagged && fetchedTrending && !deep) {
             _mergeRequestResult(await fetchFn(), gen, tag, filterFn);
             if (onDone) onDone();
           } catch (e) { console.warn("fetch error for", tag || "special", e); }
-          finally { _onFetchComplete(gen, ++_fetchCompleted, totalRequests, savedExpansions); }
+          finally { _onFetchComplete(gen, ++_fetchCompleted, totalRequests); }
         })());
       };
       for (const tag of newTasks) {
@@ -2780,10 +2784,12 @@ function setupL2Events(container) {
   const l2Click = function(e) {
     const inner = e.target.closest(".detail-inner");
     if (inner && inner !== this) return;
-    // Prefer TreeNode.renderData, fall back to Map during transition
+    // Get renderData: prefer TreeNode, fall back to _l2RenderData Map when tree hasn't been rebuilt after loadAuthorModels
     const author = this.dataset.l2Author;
+    let s = null;
     const l1Node = _expansionMap.getNode(`${PREFIX_AUTHOR}${author}`);
-    const s = l1Node && l1Node.renderData;
+    if (l1Node) s = l1Node.renderData;
+    if (!s) s = _l2RenderData.get(author);
     if (!s) return;
     const th = e.target.closest("thead th");
     if (th) {
@@ -2797,11 +2803,11 @@ function setupL2Events(container) {
       const l2Idx = parseInt(tr.dataset.l2Idx);
       const modelIdx = parseInt(tr.dataset.modelIdx);
       const modelId = tr.dataset.model;
-      const detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
-      const inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
-      const tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
-      const modelKey = `${PREFIX_MODEL}${modelId}`;
-      if (toggleSection(detailRow, tog, modelKey)) {
+const detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
+       const inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
+       const tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
+       const modelKey = `${PREFIX_MODEL}${modelId}`;
+       if (toggleSection(detailRow, tog, modelKey)) {
         cacheDomRef(modelKey, { row: tr, detailRow, inner, toggle: tog });
         const key = `children-${modelId}`;
         const cached = cacheAccess(key);
@@ -2841,6 +2847,8 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
   // Store on TreeNode for event handler access
   const l1Node = _expansionMap.getNode(`${PREFIX_AUTHOR}${author}`);
   if (l1Node) l1Node.renderData = renderData;
+  // Also store in fallback Map — tree may not have this author yet (fetched via loadAuthorModels after initial build)
+  _l2RenderData.set(author, renderData);
 
   if (res.pt) res.pt.wire((p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(models.map(m => m.id)), allBaseModels.length)));
   setupL2Events(container);
@@ -3045,6 +3053,8 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   // Store on L2 TreeNode for event handler access
   const l2Node = _modelTree.byModelId.get(parentId);
   if (l2Node) l2Node.renderData = renderData;
+  // Also store in fallback Map — tree may not have this model yet
+  _l3RenderData.set(parentId, renderData);
 
   if (!container._delegatedL3) {
     // Event delegation: same rationale as L2 — survives innerHTML re-renders.
@@ -3052,8 +3062,11 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
     container.addEventListener("click", function(e) {
       const inner = e.target.closest(".detail-inner");
       if (inner && inner !== this) return;
+      // Get renderData: prefer TreeNode, fall back to _l3RenderData Map when tree hasn't been rebuilt
+      let s = null;
       const l2Node = _modelTree.byModelId.get(this.dataset.l3Parent);
-      const s = l2Node && l2Node.renderData;
+      if (l2Node) s = l2Node.renderData;
+      if (!s) s = _l3RenderData.get(this.dataset.l3Parent);
       if (!s) return;
       const th = e.target.closest("thead th");
       if (th) {
