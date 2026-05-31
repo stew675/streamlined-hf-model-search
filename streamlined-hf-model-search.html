@@ -3277,9 +3277,9 @@ function refreshAllExpanded(force, allowAsync = true) {
     const quants = allChildren.filter(c => c.author === l3Node.id && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
     renderL4(l2Idx, modelIdx, gIdx, modelId, l3Node.id, quants, inner);
   }
+}
 
-
- // ── Text Filter Application ──
+// ── Text Filter Application ──
 // ── Instant (In-memory) filter path ──
 // Text inputs and sliders apply instantly via debounced callbacks (debouncedTextFilter,
 // debouncedSliderUpdate). These re-render from in-memory state only — no API calls,
