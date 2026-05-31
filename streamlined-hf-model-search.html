@@ -359,7 +359,8 @@
 const APP_VERSION = '260531.02';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _allFetched = [];
-let _allFetchedById = new Map();
+// Unified model database — single Map keyed by model ID. Replaces _allFetched + _allFetchedById.
+const _modelDb = new Map();
 let _authorData = [];
 let _canonicalAuthor = {};
 
@@ -817,6 +818,7 @@ function resetAppState() {
   _allFetchedById.clear();
   _canonicalCache = null;
   // Tree state reset (refactor)
+  _modelDb.clear();
   _modelTree.root = null;
   _modelTree.byPath.clear();
   _modelTree.byModelId.clear();
@@ -987,6 +989,9 @@ let _fetchCompleted = 0;      // Number of completed requests
 // Initialize shared fetch state at the start of a new "Get Results" cycle.
 function _initFetchState() {
   if (!_allFetched) _allFetched = [];
+  // Rebuild _modelDb from _allFetched for consistency across generations
+  _modelDb.clear();
+  for (const m of _allFetched) _modelDb.set(m.id, m);
   _fetchSeen = new Set(_allFetched.map(m => m.id));
   _fetchCompleted = 0;
 }
@@ -1000,6 +1005,7 @@ function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
     if (!m.pipeline_tag && pipelineTag) m.pipeline_tag = pipelineTag;
     if (filterFn && !filterFn(m)) continue;
     _allFetched.push(m);
+    _modelDb.set(m.id, m); // unified model database
     added++;
   }
   return added;
@@ -1033,6 +1039,9 @@ function _trimAllFetched() {
   const room = CONFIG.ALL_FETCHED_MAX - pinned.length;
   droppable.length = Math.max(0, Math.min(droppable.length, room));
   _allFetched = droppable.concat(pinned);
+  // Sync unified model database after trim
+  _modelDb.clear();
+  for (const m of _allFetched) _modelDb.set(m.id, m);
 }
 
 // Rebuild the O(1) lookup map from _allFetched. Call after any structural mutation.
@@ -1247,6 +1256,7 @@ async function injectBaseModels(all, onBatch) {
         injected.push(full);
         seen.add(full.id);
         _injectedBaseIds.add(full.id);
+        _modelDb.set(full.id, full); // unified model database
       },
       (err) => {
         console.warn("Failed to fetch base model", err);
@@ -1282,7 +1292,8 @@ async function injectBaseModels(all, onBatch) {
 // See REFACTOR.md for full design rationale.
 
 function buildModelTree() {
-  const all = _allFetched;
+  // Read from unified model database (primary source) or fall back to _allFetched
+  const all = _modelDb.size ? [..._modelDb.values()] : _allFetched;
   if (!all.length) return;
 
   // Reset tree state
