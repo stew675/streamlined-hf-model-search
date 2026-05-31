@@ -365,6 +365,7 @@ let _authorData = [];
 let _canonicalAuthor = {};
 
 // ── Tree State (Refactor: tree-based architecture) ──
+let _treeDirty = false; // Set to true when lazy discovery adds models, triggers rebuild on next render
 const _modelTree = { root: null, byPath: new Map(), byModelId: new Map() };
 
 function makeTreeNode(level, type, id, parent) {
@@ -760,8 +761,10 @@ const RenderCoordinator = {
       // Save expanded paths from current tree before rebuild (refactor Step 5)
       const savedPaths = _expansionMap.collectExpandedPaths();
 
-     // Ensure tree is built once; filter pipeline re-evaluates display flags on every render
-      if (!_modelTree.root && _allFetched.length > 0) {
+     // Rebuild tree when first needed or after lazy discovery adds new models
+      const needsRebuild = !_modelTree.root || _treeDirty;
+      if (needsRebuild && _allFetched.length > 0) {
+        _treeDirty = false;
         buildModelTree();
       }
       runFilterPipeline();
@@ -943,6 +946,7 @@ function resetAppState() {
   _allFetchedById.clear();
   _canonicalCache = null;
   // Tree state reset (refactor)
+  _treeDirty = false;
   _modelDb.clear();
   _modelTree.root = null;
   _modelTree.byPath.clear();
@@ -1570,62 +1574,19 @@ function resolveTrueBase(baseId, byIdMap) {
   return baseId;
 }
 
-// Integrate discovered children into the tree under a specific base model's L2 node.
-// Called by loadChildrenToTree after HF API search returns child models.
+// Integrate discovered children into the unified model database.
+// Sets _treeDirty so next structural render rebuilds tree with new models (Pass 2).
 function integrateDiscoveredChildren(parentModelId, rawModels) {
-  if (!rawModels.length || !_modelTree.root) return;
+  if (!rawModels.length) return;
 
   // Normalize and add to unified database
-  const seen = new Set(_modelDb.keys());
   for (const m of rawModels) {
     const nm = normalizeModel(m);
-    if (!seen.has(nm.id)) {
-      _modelDb.set(nm.id, nm);
-      seen.add(nm.id);
-    }
+    _modelDb.set(nm.id, nm);
   }
 
-  // Find or create the L2 node for this base model
-  let l2Node = _modelTree.byModelId.get(parentModelId);
-  if (!l2Node) {
-    const baseAuthor = parentModelId.split("/")[0];
-    let l1Node = _modelTree.byPath.get('/' + baseAuthor);
-    if (!l1Node) {
-      l1Node = makeTreeNode(1, 'author', baseAuthor, _modelTree.root);
-      _modelTree.root.children.set(baseAuthor, l1Node);
-      _modelTree.byPath.set(l1Node.path, l1Node);
-    }
-    l2Node = makeTreeNode(2, 'basemodel', parentModelId, l1Node);
-    l1Node.children.set(parentModelId, l2Node);
-    _modelTree.byPath.set(l2Node.path, l2Node);
-    _modelTree.byModelId.set(parentModelId, l2Node);
-  }
-
-  // Build L3/L4 nodes for discovered children (Pass 2 logic inline)
-  const byId = new Map(_modelDb.entries());
-  for (const raw of rawModels) {
-    const nm = normalizeModel(raw);
-    const quantAuthor = nm.id.split("/")[0];
-    let l3Node = l2Node.children.get(quantAuthor);
-    if (!l3Node) {
-      l3Node = makeTreeNode(3, 'quantauthor', quantAuthor, l2Node);
-      l2Node.children.set(quantAuthor, l3Node);
-      _modelTree.byPath.set(l3Node.path, l3Node);
-    }
-    let l4Node = l3Node.children.get(nm.id);
-    if (!l4Node) {
-      l4Node = makeTreeNode(4, 'quant', nm.id, l3Node);
-      l4Node.modelRef = nm;
-      l3Node.children.set(nm.id, l4Node);
-      _modelTree.byPath.set(l4Node.path, l4Node);
-      _modelTree.byModelId.set(nm.id, l4Node);
-    } else if (!l4Node.modelRef) {
-      l4Node.modelRef = nm;
-    }
-  }
-
-  // Re-run filter pipeline to update display flags and aggregation
-  runFilterPipeline();
+  // Mark tree dirty — next structural render will rebuild with discovered children
+  _treeDirty = true;
 }
 
 // ── Tree Stats (for dev verification) ──
