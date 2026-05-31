@@ -442,19 +442,7 @@ const _expansionMap = {
     return result;
   },
 
-  // Merge tree-expanded flags into expandedSections without clearing (preserves L3/L4 lazy expansions).
-  mergeIntoSections() {
-    if (!_modelTree.root) return;
-    const walk = (node) => {
-      if (node.expanded) {
-        const key = this.getKey(node);
-        if (key) RC.expandedSections.add(key);
-      }
-      for (const [, child] of node.children) walk(child);
-    };
-    walk(_modelTree.root);
-  }
-};
+ }
 
 // Expose byPath/byModelId on _expansionMap for getNode to use
 Object.defineProperty(_expansionMap, 'byPath', { get: () => _modelTree.byPath });
@@ -724,13 +712,12 @@ const RenderCoordinator = {
     }
   },
 
-  _renderScheduled: false,
-  _savedExpansions: null,
+ _renderScheduled: false,
   _isRendering: false, // Hard guard against re-entrant execution
   _skipL1Sort: false,
 
-  requestRender(savedExpansions = null, skipL1Sort = false) {
-    if (savedExpansions) this._savedExpansions = savedExpansions;
+   requestRender(skipL1Sort = false) {
+    // Expansion state is now tree-only (no saved param needed)
     this._skipL1Sort = skipL1Sort;
     if (this._renderScheduled || this._isRendering) return; // Coalesce & block re-entry
     this._renderScheduled = true;
@@ -740,16 +727,14 @@ const RenderCoordinator = {
     });
   },
 
-  _doFullRender() {
+ _doFullRender() {
     if (this._isRendering) return; // Safety net
     this._isRendering = true;
     try {
-      const savedLegacy = this._savedExpansions;
-      this._savedExpansions = null;
       const skipSort = this._skipL1Sort;
       this._skipL1Sort = false;
 
-      // Save expanded paths from current tree before rebuild
+       // Save expanded paths from current tree before rebuild
       const savedPaths = _expansionMap.collectExpandedPaths();
 
      // Rebuild tree when first needed or after lazy discovery adds new models
@@ -765,8 +750,6 @@ const RenderCoordinator = {
       _domCache.clear(); // renderL1 replaces innerHTML — all cached DOM refs are now detached
       this.updateArrows();
       this.pruneExpiredExpansions(new Set(_authorData.map(a => a.author)));
-      if (savedLegacy) this.saveRestoreExpansions(savedLegacy);
-      _expansionMap.mergeIntoSections();
       // Sync-only structural expansion. No async (deepening) inside structural pass.
       this.refreshAllExpanded(null, false);
     } catch (e) {
@@ -837,7 +820,6 @@ getDetailSort(levelKey) {
   renderL1: null,
   updateArrows: null,
   pruneExpiredExpansions: null,
-  saveRestoreExpansions: null,
   refreshAllExpanded: null,
 
   get sortKey() { return this._state.l1Sort.key; },
@@ -1151,7 +1133,6 @@ function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
 function applyFilters(force, deep) {
   if (!needsUpdate && !force) return;
   needsUpdate = false;
-  const savedExpansions = new Set(RC.expandedSections);
   _fetchGeneration++;
   const gen = _fetchGeneration;
   const quickBtn = document.getElementById("get-quick-results-btn");
@@ -1168,10 +1149,10 @@ function applyFilters(force, deep) {
   const needUntagged = activeSpecialFilters.has("include untagged") && !fetchedUntagged;
   const reenable = () => { quickBtn.disabled = false; deepBtn.disabled = false; };
 
-  // Fast path: no new data needed, just re-render with current filters.
+// Fast path: no new data needed, just re-render with current filters.
 if (newTasks.length === 0 && !needUntagged && fetchedTrending && !deep) {
-     reenable();
-    recomputeAndRender(savedExpansions);
+      reenable();
+     recomputeAndRender();
     return;
   }
 
@@ -1225,7 +1206,7 @@ if (newTasks.length === 0 && !needUntagged && fetchedTrending && !deep) {
       // Tree build: construct hierarchy from fetched data (standalone verification phase)
       buildModelTree();
       runFilterPipeline();
-      recomputeAndRender(savedExpansions);
+      recomputeAndRender();
       UI.setStatus("");
     } catch (e) {
       console.warn("applyFilters error:", e);
@@ -2483,7 +2464,7 @@ function updateArrows() {
 
 // ── DOM Cache & Section Toggle Utilities ──
 //   cacheDomRef / invalidateDomKey / invalidateDomPrefix / _getSectionCached
-//   toggleSection / pruneExpiredExpansions / saveRestoreExpansions / recomputeAndRender
+//   toggleSection / pruneExpiredExpansions / recomputeAndRender
 
 // Unified section toggle: handles expand/collapse DOM and state for all levels.
 // Returns true if section was expanded, false if collapsed.
@@ -2540,14 +2521,8 @@ function pruneExpiredExpansions(renderedAuthors) {
   }
 }
 
-function saveRestoreExpansions(saved) {
-  for (const key of saved) {
-    const node = _expansionMap.getNode(key);
-    if (node && !node.expanded) node.expanded = true;
-  }
-}
-function recomputeAndRender(saved) {
-  RenderCoordinator.requestRender(saved, false);
+function recomputeAndRender() {
+  RenderCoordinator.requestRender(false);
 }
 
 // ── Level 1: Authors ──
@@ -3322,17 +3297,15 @@ function applyTextFilters() {
   RC._state.textFilters.l1Author = document.getElementById("l1-author-filter").value.trim();
   RC._state.textFilters.l2Model = document.getElementById("l2-model-filter").value.trim();
   RC._state.textFilters.l3Author = document.getElementById("l3-author-filter").value.trim();
-  RC._state.textFilters.l4Model = document.getElementById("l4-model-filter").value.trim();
-  const saved = new Set(RenderCoordinator.expandedSections);
-  recomputeAndRender(saved);
+RC._state.textFilters.l4Model = document.getElementById("l4-model-filter").value.trim();
+  recomputeAndRender();
 }
 const debouncedTextFilter = debounce(applyTextFilters, CONFIG.DEBOUNCE_MS);
 
 // Re-render using existing in-memory data — no API calls, no generation bump.
 function applyLocalFilters() {
   if (!_allFetched || _allFetched.length === 0) return;
-  const saved = new Set(RenderCoordinator.expandedSections);
-  recomputeAndRender(saved);
+  recomputeAndRender();
 }
 const debouncedSliderUpdate = debounce(applyLocalFilters, CONFIG.DEBOUNCE_MS);
 
@@ -3342,7 +3315,6 @@ RenderCoordinator.updateArrows = function() {
   updateArrows();
 };
 RenderCoordinator.pruneExpiredExpansions = pruneExpiredExpansions;
-RenderCoordinator.saveRestoreExpansions = saveRestoreExpansions;
 RenderCoordinator.refreshAllExpanded = refreshAllExpanded;
 
 // ═══════════════════════════════════════════════════════════════
@@ -3356,8 +3328,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
   if (th) {
     const key = th.dataset.key;
     RC.setL1Sort(key);
-    const saved = new Set(RC.expandedSections);
-    RC.requestRender(saved, false);
+    RC.requestRender(false);
     return;
   }
   const tr = e.target.closest("tr.l1-row");
@@ -3404,11 +3375,10 @@ document.getElementById("derived-param-chip").addEventListener("click", () => {
 });
 document.getElementById("hide-missing-param-chip").addEventListener("click", () => {
   _hideMissingParamEnabled = !_hideMissingParamEnabled;
-  toggleChipUI(document.getElementById("hide-missing-param-chip"), _hideMissingParamEnabled);
+toggleChipUI(document.getElementById("hide-missing-param-chip"), _hideMissingParamEnabled);
   // Cosmetic-only re-render: infer-missing-params already handled inline
-  // within refreshAuthorL2Section for newly-visible models.
-  const saved = new Set(RC.expandedSections);
-  recomputeAndRender(saved);
+   // within refreshAuthorL2Section for newly-visible models.
+  recomputeAndRender();
 });
 
 // ── Initialization (_initApp) ──
