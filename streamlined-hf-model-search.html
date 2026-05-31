@@ -460,6 +460,29 @@ const _expansionMap = {
 Object.defineProperty(_expansionMap, 'byPath', { get: () => _modelTree.byPath });
 Object.defineProperty(_expansionMap, 'byModelId', { get: () => _modelTree.byModelId });
 
+// Collect all child models for a parent from the tree structure (replaces children cache)
+function getChildrenFromTree(parentId) {
+  const l2Node = _modelTree.byModelId.get(parentId);
+  if (!l2Node || !l2Node.children.size) return [];
+  const results = [];
+  for (const [, l3Node] of l2Node.children) {
+    for (const [, l4Node] of l3Node.children) {
+      const m = l4Node.modelRef;
+      if (!m) continue;
+      results.push({
+        id: m.id,
+        author: l3Node.id,
+        downloads: m.downloads || 0,
+        likes: m.likes || 0,
+        lastModified: m.lastModified || "",
+        pipeline_tag: m.pipeline_tag || "",
+        q_method: l4Node.qMethod || "derivative",
+      });
+    }
+  }
+  return results;
+}
+
 // ── Pipeline Tag Definitions ──
 const TO_TAGS = [
   // Audio
@@ -1357,6 +1380,16 @@ function buildModelTree() {
       l4Node.modelRef = m;
     } else if (m.downloads > l4Node.modelRef.downloads) {
       l4Node.modelRef = m;
+    }
+
+    // Compute q_method for this quant model and store on L4 node
+    if (!l4Node.qMethod) {
+      const idLower = m.id.toLowerCase();
+      const tagsStr = (m.tags || []).join(" ").toLowerCase();
+      const qSet = new Set();
+      (idLower.match(RE_Q_MATCH) || []).forEach(q => qSet.add(q));
+      (tagsStr.match(RE_Q_MATCH) || []).forEach(q => qSet.add(q));
+      l4Node.qMethod = qSet.size ? [...qSet].join(", ") : "derivative";
     }
   }
 }
@@ -3075,7 +3108,9 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
         const groupKey = `${PREFIX_GROUP}${parentId}|${author}`;
         if (toggleSection(detailRow, tog, groupKey)) {
           cacheDomRef(groupKey, { row: tr, detailRow, inner, toggle: tog });
-          const allChildren = cacheAccess(`children-${parentId}`) || s.children || [];
+          // Try tree first (after rebuild), fall back to cache (before rebuild)
+          let allChildren = getChildrenFromTree(parentId);
+          if (!allChildren.length) allChildren = cacheAccess(`children-${parentId}`) || s.children || [];
           const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
           renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, inner);
           tog?.focus();
@@ -3231,7 +3266,9 @@ function refreshAllExpanded(force, allowAsync = true) {
     if (!detailRow || detailRow.style.display !== "none") continue;
     detailRow.style.display = "";
     if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
-    const children = cacheAccess(`children-${modelId}`);
+    // Try tree first (after rebuild), fall back to cache (before rebuild)
+    let children = getChildrenFromTree(modelId);
+    if (!children.length) children = cacheAccess(`children-${modelId}`);
     if (children) {
       renderL3(l2Idx, modelIdx, modelId, children, inner);
     } else {
@@ -3267,25 +3304,15 @@ function refreshAllExpanded(force, allowAsync = true) {
     if (!detailRow || detailRow.style.display !== "none") continue;
     detailRow.style.display = "";
     if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
-    const allChildren = cacheAccess(`children-${modelId}`) || [];
+// Try tree first (after rebuild), fall back to cache (before rebuild)
+    let allChildren = getChildrenFromTree(modelId);
+    if (!allChildren.length) allChildren = cacheAccess(`children-${modelId}`) || [];
     const quants = allChildren.filter(c => c.author === l3Node.id && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
     renderL4(l2Idx, modelIdx, gIdx, modelId, l3Node.id, quants, inner);
   }
 
-    if (!row || !row.closest(".detail-inner")) continue;
-    const l2Idx = parseInt(row.dataset.l3L2);
-    const modelIdx = parseInt(row.dataset.l3ModelIdx);
-    const gIdx = parseInt(row.dataset.l3Idx);
-    if (!detailRow || detailRow.style.display !== "none") continue;
-    detailRow.style.display = "";
-    if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
-    const allChildren = cacheAccess(`children-${modelId}`) || [];
-    const quants = allChildren.filter(c => c.author === groupAuthor && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
-    renderL4(l2Idx, modelIdx, gIdx, modelId, groupAuthor, quants, inner);
-  }
-}
 
-// ── Text Filter Application ──
+ // ── Text Filter Application ──
 // ── Instant (In-memory) filter path ──
 // Text inputs and sliders apply instantly via debounced callbacks (debouncedTextFilter,
 // debouncedSliderUpdate). These re-render from in-memory state only — no API calls,
