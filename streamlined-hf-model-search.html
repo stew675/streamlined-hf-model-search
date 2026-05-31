@@ -363,6 +363,14 @@ let _allFetchedById = new Map();
 let _authorData = [];
 let _canonicalAuthor = {};
 
+// ── Tree State (Refactor: tree-based architecture) ──
+const _modelTree = { root: null, byPath: new Map(), byModelId: new Map() };
+
+function makeTreeNode(level, type, id, parent) {
+  const path = parent ? `${parent.path}/${id}` : `/${id}`;
+  return { level, type, id, path, parent, children: new Map(), modelRef: null, display: false, expanded: false, canonical: true, aggCount: 0, aggDownloads: 0, aggLikes: 0 };
+}
+
 // ── Pipeline Tag Definitions ──
 const TO_TAGS = [
   // Audio
@@ -803,6 +811,10 @@ function resetAppState() {
   _injectedBaseIds.clear();
   _allFetchedById.clear();
   _canonicalCache = null;
+  // Tree state reset (refactor)
+  _modelTree.root = null;
+  _modelTree.byPath.clear();
+  _modelTree.byModelId.clear();
   _consecutive429s = 0;
   apiCalls = 0;
   _totalBytesReceived = 0;
@@ -1049,6 +1061,7 @@ function applyFilters(force, deep) {
   // Fast path: no new data needed, just re-render with current filters.
   if (newTasks.length === 0 && !needUntagged && fetchedTrending && !deep) {
     markLocalParents(_allFetched, gen);
+    buildModelTree();
     reenable();
     recomputeAndRender(savedExpansions);
     return;
@@ -1128,6 +1141,8 @@ function applyFilters(force, deep) {
       }
 
       if (isStale(gen)) return;
+      // Tree build: construct hierarchy from fetched data (standalone verification phase)
+      buildModelTree();
       recomputeAndRender(savedExpansions);
       UI.setStatus("");
     } catch (e) {
@@ -1251,6 +1266,169 @@ async function injectBaseModels(all, onBatch) {
   all.forEach(m => { if (m._injected && gen === _fetchGeneration) _injectedBaseIds.add(m.id); });
   _rebuildAllFetchedMap();
   UI.setStatus("");
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SECTION 3b: Tree Construction (Refactor — standalone for now)
+// ═══════════════════════════════════════════════════════════════
+
+// Two-pass tree builder. Consumes _allFetched and produces a 4-level hierarchy
+// in _modelTree. Currently standalone — not yet wired into render pipeline.
+// See REFACTOR.md for full design rationale.
+
+function buildModelTree() {
+  const all = _allFetched;
+  if (!all.length) return;
+
+  // Reset tree state
+  _modelTree.root = makeTreeNode(0, 'root', '', null);
+  _modelTree.byPath.clear();
+  _modelTree.byPath.set('/', _modelTree.root);
+  _modelTree.byModelId.clear();
+
+  const knownIds = new Set(all.map(x => x.id));
+  const byId = new Map(all.map(x => [x.id, x]));
+
+  // Canonical tracking: modelName → { best, authors }
+  const canonicalMap = {};
+
+  // ── Pass 1: Base models → L1 author / L2 basemodel nodes ──
+  for (const m of all) {
+    if (!modelPassesAllFilters(m)) continue;
+    if (!isBase(m)) continue;
+    if (isOrphanQuant(m, knownIds)) continue;
+    if (isNestedQuant(m, knownIds, byId)) continue;
+
+    const author = m.id.split("/")[0];
+    let l1Node = _modelTree.byPath.get('/' + author);
+    if (!l1Node) {
+      l1Node = makeTreeNode(1, 'author', author, _modelTree.root);
+      _modelTree.root.children.set(author, l1Node);
+      _modelTree.byPath.set(l1Node.path, l1Node);
+    }
+
+    const modelName = m.id.split("/").slice(1).join("/");
+    let l2Node = l1Node.children.get(m.id);
+    if (!l2Node) {
+      l2Node = makeTreeNode(2, 'basemodel', m.id, l1Node);
+      l1Node.children.set(m.id, l2Node);
+      _modelTree.byPath.set(l2Node.path, l2Node);
+      _modelTree.byModelId.set(m.id, l2Node);
+    }
+
+    if (!l2Node.modelRef) {
+      l2Node.modelRef = m;
+    } else if (m.downloads > l2Node.modelRef.downloads) {
+      l2Node.modelRef = m;
+    }
+
+    // Canonical tracking
+    if (!canonicalMap[modelName]) canonicalMap[modelName] = { best: null, authors: new Set() };
+    const cm = canonicalMap[modelName];
+    cm.authors.add(author);
+    if (!cm.best || m.downloads > cm.best.downloads) cm.best = { author, downloads: m.downloads };
+  }
+
+  // Resolve canonical status for multi-author models
+  for (const modelName in canonicalMap) {
+    const cm = canonicalMap[modelName];
+    if (cm.authors.size <= 1) continue;
+    // Mark non-canonical L2 nodes as non-canonical
+    for (const [, l2Node] of _modelTree.byModelId) {
+      if (l2Node.level !== 2) continue;
+      const nodeModelName = l2Node.id.split("/").slice(1).join("/");
+      if (nodeModelName === modelName && l2Node.modelRef && l2Node.modelRef.id.split("/")[0].toLowerCase() !== cm.best.author.toLowerCase()) {
+        l2Node.canonical = false;
+      }
+    }
+  }
+
+  // ── Pass 2: Derivative models → L3 quant-author / L4 quant nodes ──
+  for (const m of all) {
+    if (!m.cardData || !m.cardData.base_model) continue;
+    const baseId = getBaseModelId(m.cardData);
+    if (!baseId) continue;
+
+    // Resolve true base by following chain
+    let trueBase = resolveTrueBase(baseId, byId);
+    if (!trueBase) continue;
+
+    const l2Node = _modelTree.byModelId.get(trueBase);
+    if (!l2Node) {
+      // Base model not in tree (filtered out or canonical copy). Create a placeholder L2 node.
+      const baseAuthor = trueBase.split("/")[0];
+      let l1Node = _modelTree.byPath.get('/' + baseAuthor);
+      if (!l1Node) {
+        l1Node = makeTreeNode(1, 'author', baseAuthor, _modelTree.root);
+        _modelTree.root.children.set(baseAuthor, l1Node);
+        _modelTree.byPath.set(l1Node.path, l1Node);
+      }
+
+      // Check if L2 node exists but is non-canonical (hidden) — reuse it
+      let existingL2 = l1Node.children.get(trueBase);
+      if (!existingL2) {
+        existingL2 = makeTreeNode(2, 'basemodel', trueBase, l1Node);
+        l1Node.children.set(trueBase, existingL2);
+        _modelTree.byPath.set(existingL2.path, existingL2);
+        _modelTree.byModelId.set(trueBase, existingL2);
+      }
+      // If base model data exists in byId, attach it
+      const baseData = byId.get(trueBase);
+      if (baseData) {
+        existingL2.modelRef = baseData;
+        existingL2.canonical = true;
+      }
+      l2Node = existingL2;
+    }
+
+    // Create L3 quant-author node under the true base's L2 node
+    const quantAuthor = m.id.split("/")[0];
+    let l3Node = l2Node.children.get(quantAuthor);
+    if (!l3Node) {
+      l3Node = makeTreeNode(3, 'quantauthor', quantAuthor, l2Node);
+      l2Node.children.set(quantAuthor, l3Node);
+      _modelTree.byPath.set(l3Node.path, l3Node);
+    }
+
+    // Create L4 quant node under the quant-author
+    let l4Node = l3Node.children.get(m.id);
+    if (!l4Node) {
+      l4Node = makeTreeNode(4, 'quant', m.id, l3Node);
+      l3Node.children.set(m.id, l4Node);
+      _modelTree.byPath.set(l4Node.path, l4Node);
+      _modelTree.byModelId.set(m.id, l4Node);
+    }
+
+    if (!l4Node.modelRef) {
+      l4Node.modelRef = m;
+    } else if (m.downloads > l4Node.modelRef.downloads) {
+      l4Node.modelRef = m;
+    }
+  }
+}
+
+// Follow cardData.base_model chain iteratively until reaching a base model.
+function resolveTrueBase(baseId, byIdMap) {
+  const visited = new Set();
+  let current = baseId;
+  while (current && !visited.has(current)) {
+    visited.add(current);
+    const m = byIdMap.get(current);
+    if (!m || isBase(m)) return current;
+    const next = getBaseModelId(m.cardData);
+    if (!next) return current;
+    current = next;
+  }
+  return baseId;
+}
+
+// ── Tree Stats (for dev verification) ──
+function treeStats() {
+  let l1 = 0, l2 = 0, l3 = 0, l4 = 0;
+  for (const [, n] of _modelTree.byPath) {
+    if (n.level === 1) l1++; else if (n.level === 2) l2++; else if (n.level === 3) l3++; else if (n.level === 4) l4++;
+  }
+  return `Tree: ${l1} authors, ${l2} base models, ${l3} quant authors, ${l4} quants (${_modelTree.byModelId.size} model-bearing nodes)`;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3225,6 +3403,9 @@ if (document.readyState === 'loading') {
 // ── Dev Hooks ──
 // Dev console: expose fetch generation counter for debugging race conditions.
 window.__HF_SEARCH_GEN = () => _fetchGeneration;
+// Dev console: tree stats for verifying tree construction (refactor)
+window.__HF_TREE_STATS = () => treeStats();
+window.__HF_TREE = () => _modelTree;
 
 })();
 </script>
