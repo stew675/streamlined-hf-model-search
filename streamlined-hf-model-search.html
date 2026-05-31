@@ -2952,6 +2952,7 @@ async function loadAuthorModels(idx, author, container) {
       tags: m.tags || [],
       paramB: getParamCount(m),
       pipeline_tag: m.pipeline_tag || "",
+      cardData: m.cardData ? { base_model: m.cardData.base_model } : null,
       _orphanQuant: isOrphanQuant(m, authorKnownIds),
       _nestedQuant: isNestedQuant(m, authorKnownIds, byAuthorId),
       deep_status: 0
