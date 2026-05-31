@@ -2508,7 +2508,6 @@ function _getSectionCached(key) {
 }
 
 function pruneExpiredExpansions(renderedAuthors) {
-  // Tree-based: clear expanded on author nodes that no longer appear in rendered data (refactor Step 5)
   if (_modelTree.root) {
     for (const [, child] of _modelTree.root.children) {
       if (!renderedAuthors.has(child.id)) {
@@ -2516,33 +2515,12 @@ function pruneExpiredExpansions(renderedAuthors) {
       }
     }
   }
-  // Legacy compatibility: also prune from expandedSections Set (remove after Step 7)
-  for (const key of [...RenderCoordinator.expandedSections]) {
-    if (!key.startsWith(PREFIX_AUTHOR)) continue;
-    const author = key.slice(PREFIX_AUTHOR.length);
-    if (!renderedAuthors.has(author)) {
-      invalidateDomKey(key);
-      invalidateDomPrefix(PREFIX_MODEL + author + "/");
-      invalidateDomPrefix(PREFIX_GROUP + author + "/");
-      RenderCoordinator.expandedSections.delete(key);
-      for (const child of [...RenderCoordinator.expandedSections]) {
-        if (child.startsWith(PREFIX_MODEL + author + "/") || child.startsWith(PREFIX_GROUP + author + "/")) {
-          RenderCoordinator.expandedSections.delete(child);
-        }
-      }
-    }
-  }
 }
 
 function saveRestoreExpansions(saved) {
-  // Restore from legacy saved Set by setting expanded flags on tree nodes (refactor Step 5)
   for (const key of saved) {
     const node = _expansionMap.getNode(key);
     if (node && !node.expanded) node.expanded = true;
-  }
-  // Legacy compatibility: also restore into expandedSections Set (remove after Step 7)
-  for (const key of saved) {
-    if (!RenderCoordinator.expandedSections.has(key)) RenderCoordinator.expandedSections.add(key);
   }
 }
 function recomputeAndRender(saved) {
@@ -3253,18 +3231,17 @@ function refreshAllExpanded(force, allowAsync = true) {
     }
   }
 
-  // Phase 3: re-expand L3 quant author group rows
-  for (const key of RC.expandedSections) {
-    if (!key.startsWith(PREFIX_GROUP)) continue;
-    const parts = key.split("|");
-    const modelId = parts[1];
-    const groupAuthor = parts.slice(2).join("|");
+ // Phase 3: re-expand L3 quant author group rows (tree-based iteration)
+  for (const l3Node of _expansionMap.getExpandedAtLevel(3)) {
+    const modelId = l3Node.parent.modelRef ? l3Node.parent.modelRef.id : null;
+    if (!modelId) continue;
+    const key = `${PREFIX_GROUP}${modelId}|${l3Node.id}`;
     let ref = _getSectionCached(key), row, detailRow, inner, tog;
     if (ref) {
       ({ row, detailRow, inner, tog } = ref);
     } else {
-      row = document.querySelector(`tr.l3-row[data-l3-parent="${CSS.escape(modelId)}"][data-l3-author="${CSS.escape(groupAuthor)}"]`);
-      if (!row || !row.closest(".detail-inner")) continue;
+      row = document.querySelector(`tr.l3-row[data-l3-parent="${CSS.escape(modelId)}"][data-l3-author="${CSS.escape(l3Node.id)}"]`);
+      if (!row) continue;
       const l2Idx = parseInt(row.dataset.l3L2);
       const modelIdx = parseInt(row.dataset.l3ModelIdx);
       const gIdx = parseInt(row.dataset.l3Idx);
@@ -3273,6 +3250,18 @@ function refreshAllExpanded(force, allowAsync = true) {
       tog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
       cacheDomRef(key, { row, detailRow, inner, toggle: tog });
     }
+
+    if (!row || !row.closest(".detail-inner")) continue;
+    const l2Idx = parseInt(row.dataset.l3L2);
+    const modelIdx = parseInt(row.dataset.l3ModelIdx);
+    const gIdx = parseInt(row.dataset.l3Idx);
+    if (!detailRow || detailRow.style.display !== "none") continue;
+    detailRow.style.display = "";
+    if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
+    const allChildren = cacheAccess(`children-${modelId}`) || [];
+    const quants = allChildren.filter(c => c.author === l3Node.id && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
+    renderL4(l2Idx, modelIdx, gIdx, modelId, l3Node.id, quants, inner);
+  }
 
     if (!row || !row.closest(".detail-inner")) continue;
     const l2Idx = parseInt(row.dataset.l3L2);
