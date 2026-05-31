@@ -776,6 +776,32 @@ function cacheAccess(key) {
 const _inflightChildren = new Map();
 
 
+// ── Tree Data Structures (Refactored Architecture) ──
+// Replaces _allFetched with a Map-keyed model database and a 4-level
+// TreeNode hierarchy. Built by two-pass construction (Phase 1 of refactor).
+// The rendering pipeline becomes a simple recursive walk of display/expanded flags.
+const _modelDb = new Map(); // Map<string, normalizedModel> — replaces _allFetched
+const _modelTree = {
+  root: null,       // TreeNode (level-0 synthetic root, set by buildTreePass1)
+  byPath: new Map(),// string → TreeNode (O(1) path lookup)
+  byModelId: new Map() // string → TreeNode (L2 or L4 node)
+};
+function createTreeNode(level, type, id, modelRef) {
+  return {
+    level, type, id,
+    parent: null,
+    children: new Map(),
+    modelRef: modelRef || null,
+    display: true,
+    expanded: false,
+    canonical: true,
+    aggCount: 0,
+    aggDownloads: 0,
+    aggLikes: 0
+  };
+}
+
+
 // ── DOM Reference Cache ──
 const _domCache = new Map();
 function cacheDomRef(key, ref) { if (ref && ref.row.isConnected) _domCache.set(key, ref); }
@@ -814,6 +840,10 @@ function resetAppState() {
   RenderCoordinator._levelState.l3.clear();
   RenderCoordinator._levelState.l4.clear();
   RenderCoordinator.expandedSections.clear();
+  _modelDb.clear();
+  _modelTree.byPath.clear();
+  _modelTree.byModelId.clear();
+  _modelTree.root = null;
 }
 
 // ── Slider RAF Throttling ──
@@ -983,6 +1013,7 @@ function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
     if (!m.pipeline_tag && pipelineTag) m.pipeline_tag = pipelineTag;
     if (filterFn && !filterFn(m)) continue;
     _allFetched.push(m);
+    _modelDb.set(m.id, m);  // dual-write to tree database
     added++;
   }
   return added;
@@ -997,9 +1028,11 @@ function _onFetchComplete(gen, completed, total, savedExpansions) {
 }
 
 // Trim _allFetched to ALL_FETCHED_MAX, preserving injected base models.
+// Also syncs _modelDb to match _allFetched after trim.
 function _trimAllFetched() {
   if (_allFetched.length <= CONFIG.ALL_FETCHED_MAX) {
     _rebuildAllFetchedMap();
+    _syncModelDbFromAllFetched();
     return;
   }
   const pinned = [];
@@ -1016,6 +1049,19 @@ function _trimAllFetched() {
   const room = CONFIG.ALL_FETCHED_MAX - pinned.length;
   droppable.length = Math.max(0, Math.min(droppable.length, room));
   _allFetched = droppable.concat(pinned);
+  _syncModelDbFromAllFetched();
+}
+
+// Keep _modelDb in sync with _allFetched after structural mutations.
+// During the dual-write transition period, _allFetched is the source of truth.
+function _syncModelDbFromAllFetched() {
+  const ids = new Set(_allFetched.map(m => m.id));
+  for (const [id] of _modelDb) {
+    if (!ids.has(id)) _modelDb.delete(id);
+  }
+  for (const m of _allFetched) {
+    if (!_modelDb.has(m.id)) _modelDb.set(m.id, m);
+  }
 }
 
 // Rebuild the O(1) lookup map from _allFetched. Call after any structural mutation.
@@ -1125,6 +1171,7 @@ function applyFilters(force, deep) {
         // is static and re-injecting would waste API calls. Clear Cache or a fresh deep
         // fetch resets the set (injectBaseModels calls .clear()).
         markLocalParents(_allFetched, gen);
+        rebuildTree();
       }
 
       if (isStale(gen)) return;
@@ -1242,6 +1289,7 @@ async function injectBaseModels(all, onBatch) {
 
   if (isStale(gen)) return;
   all.push(...injected);
+  for (const m of injected) _modelDb.set(m.id, m);  // dual-write to tree database
 
   // Final reconciliation: guarantee every model flagged as _injected is whitelisted
   // in _injectedBaseIds. Generation guards or Pass 1/Pass 2 races can cause flagged
@@ -1250,6 +1298,7 @@ async function injectBaseModels(all, onBatch) {
   // parent falls outside the active date range (see modelPassesAllFilters).
   all.forEach(m => { if (m._injected && gen === _fetchGeneration) _injectedBaseIds.add(m.id); });
   _rebuildAllFetchedMap();
+  rebuildTree();  // build tree from _modelDb now that all data is in
   UI.setStatus("");
 }
 
@@ -1630,6 +1679,142 @@ function _schedulePostDeepenRender(author, gen) {
     RC.requestRender(null, true);
   }
 }
+
+// ── Tree Construction (Refactored Architecture) ──
+//   resolveTrueBase → buildTreePass1 → buildTreePass2
+// Follows cardData.base_model chain iteratively to find the true base ancestor.
+// Stops when chain is exhausted or the next hop is not in _modelDb.
+// Max 10 hops with cycle detection via visited Set.
+function resolveTrueBase(modelId) {
+  let current = modelId;
+  const visited = new Set();
+  for (let i = 0; i < 10; i++) {
+    visited.add(current);
+    const m = _modelDb.get(current);
+    if (!m || !m.cardData) return current;
+    const baseId = getBaseModelId(m.cardData);
+    if (!baseId || visited.has(baseId)) return current;
+    current = baseId;
+  }
+  return current;
+}
+
+// Pass 1: Scans _modelDb for all base models and creates L1/L2 nodes.
+// Canonical dedup: for each model name with >1 author, only the highest-download
+// copy gets canonical=true; non-canonical copies start hidden (display=false).
+// Initializes _modelTree.root and populates byPath / byModelId lookups.
+function buildTreePass1() {
+  const root = createTreeNode(0, 'root', '');
+  _modelTree.root = root;
+  _modelTree.byPath.clear();
+  _modelTree.byModelId.clear();
+
+  const seenNames = new Map();
+  for (const [modelId, model] of _modelDb) {
+    if (!isBase(model)) continue;
+    const author = modelId.split('/')[0];
+    const name = modelId.split('/').slice(1).join('/');
+    const existing = seenNames.get(name);
+    if (!existing) {
+      seenNames.set(name, {
+        bestDownloads: model.downloads || 0,
+        bestAuthor: author,
+        bestAuthorLower: author.toLowerCase(),
+        authors: new Map()
+      });
+      seenNames.get(name).authors.set(author.toLowerCase(), author);
+    } else {
+      existing.authors.set(author.toLowerCase(), author);
+      if ((model.downloads || 0) > existing.bestDownloads) {
+        existing.bestDownloads = model.downloads || 0;
+        existing.bestAuthor = author;
+        existing.bestAuthorLower = author.toLowerCase();
+      }
+    }
+  }
+
+  const l1Nodes = new Map();
+  for (const [modelId, model] of _modelDb) {
+    if (!isBase(model)) continue;
+    const author = modelId.split('/')[0];
+    const name = modelId.split('/').slice(1).join('/');
+
+    if (!l1Nodes.has(author)) {
+      const n = createTreeNode(1, 'author', author);
+      root.children.set(author, n);
+      n.parent = root;
+      _modelTree.byPath.set(author, n);
+      l1Nodes.set(author, n);
+    }
+
+    const l2Node = createTreeNode(2, 'basemodel', modelId, model);
+    l1Nodes.get(author).children.set(modelId, l2Node);
+    l2Node.parent = l1Nodes.get(author);
+    _modelTree.byPath.set(modelId, l2Node);
+    _modelTree.byModelId.set(modelId, l2Node);
+
+    const ni = seenNames.get(name);
+    if (ni && ni.authors.size > 1) {
+      l2Node.canonical = author.toLowerCase() === ni.bestAuthorLower;
+      l2Node.display = l2Node.canonical;
+    }
+  }
+}
+
+// Pass 2: Scans _modelDb for non-base models and attaches them to their true
+// base model ancestor via resolveTrueBase. Naturally flattens quant-of-quant
+// chains. Creates L3 (quant author) and L4 (quant) nodes under the correct L2.
+// If the true base lacks a tree node, creates a placeholder L2.
+function buildTreePass2() {
+  for (const [modelId, model] of _modelDb) {
+    if (isBase(model)) continue;
+    const trueBase = resolveTrueBase(modelId);
+    if (!trueBase) continue;
+
+    let l2Node = _modelTree.byModelId.get(trueBase);
+    if (!l2Node || l2Node.level !== 2) {
+      const author = trueBase.split('/')[0];
+      if (!_modelTree.byPath.has(author)) {
+        const l1Node = createTreeNode(1, 'author', author);
+        _modelTree.root.children.set(author, l1Node);
+        l1Node.parent = _modelTree.root;
+        _modelTree.byPath.set(author, l1Node);
+      }
+      const l1Node = _modelTree.byPath.get(author);
+      const placeholder = createTreeNode(2, 'basemodel', trueBase, null);
+      placeholder.canonical = false;
+      placeholder.display = false;
+      l1Node.children.set(trueBase, placeholder);
+      placeholder.parent = l1Node;
+      _modelTree.byPath.set(trueBase, placeholder);
+      _modelTree.byModelId.set(trueBase, placeholder);
+      l2Node = placeholder;
+    }
+
+    const quantAuthor = modelId.split('/')[0];
+    const l3Key = quantAuthor;
+    let l3Node = l2Node.children.get(l3Key);
+    if (!l3Node) {
+      l3Node = createTreeNode(3, 'quantauthor', quantAuthor);
+      l2Node.children.set(l3Key, l3Node);
+      l3Node.parent = l2Node;
+    }
+
+    const l4Node = createTreeNode(4, 'quant', modelId, model);
+    l3Node.children.set(modelId, l4Node);
+    l4Node.parent = l3Node;
+    _modelTree.byModelId.set(modelId, l4Node);
+  }
+}
+
+// Rebuilds the entire tree from _modelDb. Call after _modelDb is fully populated
+// or after significant data changes. For incremental updates (lazy discovery),
+// use integrateDiscoveredChildren instead.
+function rebuildTree() {
+  buildTreePass1();
+  buildTreePass2();
+}
+
 
 // ── Sort Utilities ──
 //   sortCoerce → _cmp → sortRows
