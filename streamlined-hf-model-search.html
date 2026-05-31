@@ -1934,6 +1934,32 @@ function walkFilterL4(node) {
   };
 }
 
+// Returns a flat array of child model objects for a given parent (L2) model ID
+// by traversing the tree (L3 → L4 nodes). Each entry matches the format that
+// renderL3 / renderL4 expect (id, author, q_method, downloads, likes, etc.).
+function getTreeChildren(parentId) {
+  const l2Node = _modelTree.byModelId.get(parentId);
+  if (!l2Node || l2Node.level !== 2) return [];
+  const out = [];
+  for (const l3Node of l2Node.children.values()) {
+    for (const l4Node of l3Node.children.values()) {
+      const ref = l4Node.modelRef;
+      if (!ref) continue;
+      const qMatch = (ref.id || '').toLowerCase().match(RE_Q_MATCH) || [];
+      out.push({
+        id: ref.id,
+        author: ref.id.split('/')[0],
+        downloads: ref.downloads || 0,
+        likes: ref.likes || 0,
+        lastModified: ref.lastModified || '',
+        pipeline_tag: ref.pipeline_tag || '',
+        q_method: ref.q_method || qMatch.map(q => q.toUpperCase()).join(', ') || 'derivative'
+      });
+    }
+  }
+  return out;
+}
+
 
 // ── Sort Utilities ──
 //   sortCoerce → _cmp → sortRows
@@ -3101,6 +3127,21 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
 
       newEntry.results = results;
       cacheSet(cacheKey, results);
+      // Dual-write fetched children to _modelDb so the tree has them
+      for (const c of results) {
+        if (!_modelDb.has(c.id)) {
+          _modelDb.set(c.id, {
+            id: c.id,
+            downloads: c.downloads,
+            likes: c.likes,
+            lastModified: c.lastModified,
+            pipeline_tag: c.pipeline_tag || '',
+            q_method: c.q_method,
+            cardData: { base_model: parentId }
+          });
+        }
+      }
+      rebuildTree();
       if (container.isConnected) renderL3(l2Idx, modelIdx, parentId, results, container);
     } catch (err) {
       if (container.isConnected) renderErrorWithRetry(container, userFriendlyError(err), () => {
@@ -3198,7 +3239,8 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
         const groupKey = `${PREFIX_GROUP}${parentId}|${author}`;
         if (toggleSection(detailRow, tog, groupKey)) {
           cacheDomRef(groupKey, { row: tr, detailRow, inner, toggle: tog });
-          const allChildren = cacheAccess(`children-${parentId}`) || s.children || [];
+          const allChildren = getTreeChildren(parentId);
+          if (allChildren.length === 0 && s.children && s.children.length > 0) allChildren.push(...s.children);
           const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
           renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, inner);
           tog?.focus();
@@ -3355,8 +3397,8 @@ function refreshAllExpanded(force, allowAsync = true) {
     if (!detailRow || detailRow.style.display !== "none") continue;
     detailRow.style.display = "";
     if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
-    const children = cacheAccess(`children-${modelId}`);
-    if (children) {
+    const children = getTreeChildren(modelId);
+    if (children.length > 0) {
       renderL3(l2Idx, modelIdx, modelId, children, inner);
     } else {
       inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
@@ -3392,7 +3434,7 @@ function refreshAllExpanded(force, allowAsync = true) {
     if (!detailRow || detailRow.style.display !== "none") continue;
     detailRow.style.display = "";
     if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
-    const allChildren = cacheAccess(`children-${modelId}`) || [];
+    const allChildren = getTreeChildren(modelId);
     const quants = allChildren.filter(c => c.author === groupAuthor && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
     renderL4(l2Idx, modelIdx, gIdx, modelId, groupAuthor, quants, inner);
   }
