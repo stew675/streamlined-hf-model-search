@@ -2065,7 +2065,7 @@ function sortRows(rows, key, asc, subKey) {
     if (r === 0 && subKey && x[key] === y[key]) {
       r = _cmp(sortCoerce(x[subKey], subKey), sortCoerce(y[subKey], subKey));
     }
-    return r || x.id.localeCompare(y.id);
+    return r || (x.id || x.author).localeCompare(y.id || y.author);
   };
   return rows.slice().sort(asc ? cmp : (a, b) => -cmp(a, b));
 }
@@ -2716,7 +2716,8 @@ function toggleSection(detailRow, tog, key, descendantPrefixes) {
     tog.classList.add("open");
     tog.setAttribute("aria-expanded", "true");
     RC.expandedSections.add(key);
-    _expansionMap.getNode(key).expanded = true;
+ const node = _expansionMap.getNode(key);
+if (node) node.expanded = true;
   } else {
     detailRow.style.display = "none";
     tog.classList.remove("open");
