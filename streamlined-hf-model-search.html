@@ -643,7 +643,22 @@ const RenderCoordinator = {
       const skipSort = this._skipL1Sort;
       this._skipL1Sort = false;
 
-      _authorData = computeAuthorData();
+      // Tree-based filter pipeline: run filter eval + parent propagation + aggregation
+      runFilterPipeline();
+      // Build _authorData from tree for backward compatibility with existing renderMain
+      const treeAuthorData = [];
+      if (_modelTree.root) {
+        for (const [author, l1Node] of _modelTree.root.children) {
+          if (!l1Node.display) continue;
+          treeAuthorData.push({
+            author,
+            count: l1Node.aggCount,
+            totalDownloads: l1Node.aggDownloads,
+            totalLikes: l1Node.aggLikes
+          });
+        }
+      }
+      _authorData = treeAuthorData;
       this.renderL1(_authorData, skipSort);
       _domCache.clear(); // renderL1 replaces innerHTML — all cached DOM refs are now detached
       this.updateArrows();
@@ -1596,6 +1611,8 @@ async function tryResolveModelParam(m, gen) {
 
     const af = _allFetchedById.get(m.id);
     if (af) af.paramB = resolved;
+    const dbEntry = _modelDb.get(m.id);
+    if (dbEntry) dbEntry.paramB = resolved;
   }
 
   // Progressive UI update only — no structural render
@@ -1813,6 +1830,108 @@ function buildTreePass2() {
 function rebuildTree() {
   buildTreePass1();
   buildTreePass2();
+}
+
+
+// ── Tree Filter Pipeline (Refactored Architecture) ──
+//   passesTreeNodeFilters → passesL4Filters → runFilterPipeline
+// Single recursive walk over _modelTree that evaluates filters, propagates
+// parent activation (quants reactivate their base model), and aggregates stats.
+// Replaces the flat scan in computeAuthorData + the injection bypass system.
+
+// Filters an L2 (base model) node. Same as modelPassesAllFilters but WITHOUT
+// the _injectedBaseIds date bypass — parent propagation in the tree walk
+// handles reactivating parents whose quants pass filters.
+function passesTreeNodeFilters(m) {
+  const tf2 = RC._state.textFilters.l2Model;
+  if (tf2 && !m.id.split("/").slice(1).join("/").toLowerCase().includes(tf2.toLowerCase())) return false;
+  if (!isInDateRange(m.lastModified)) return false;
+  const tag = m.pipeline_tag;
+  if (!tag && !activeSpecialFilters.has("include untagged")) return false;
+  const pb = m.paramB != null ? m.paramB : getParamCount(m);
+  if (!isInParamRange(pb)) return false;
+  if (_hideMissingParamEnabled && pb === null) return false;
+  if (!matchesTaskFilter(tag)) return false;
+  if (tag && !activeTaskFilters.has(tag)) return false;
+  const qMethods = getOrphanQuantMethod(m.id);
+  if (qMethods.length > 0) {
+    const matchesAny = qMethods.some(qm => activeFilters.has(qMethodToCategory(qm)));
+    if (!matchesAny) return false;
+  }
+  return true;
+}
+
+// Filters an L4 (quant) node. Simpler than L2: no param/slider/task filters.
+function passesL4Filters(m) {
+  if (!isInDateRange(m.lastModified)) return false;
+  if (!matchesFilter(getOrphanQuantMethod(m.id).join(', ') || m.q_method)) return false;
+  const tag = m.pipeline_tag;
+  if (!tag && !activeSpecialFilters.has("include untagged")) return false;
+  return true;
+}
+
+// Single recursive tree walk: evaluates filters, propagates parent activation,
+// and accumulates stats. Sets node.display and node.agg{Count,Downloads,Likes}.
+function runFilterPipeline() {
+  if (!_modelTree.root) return;
+  for (const l1Node of _modelTree.root.children.values()) {
+    walkFilterL1(l1Node);
+  }
+}
+function walkFilterL1(node) {
+  let count = 0, dl = 0, lk = 0;
+  for (const l2Node of node.children.values()) {
+    const r = walkFilterL2(l2Node);
+    count += r.count; dl += r.downloads; lk += r.likes;
+  }
+  node.aggCount = count;
+  node.aggDownloads = dl;
+  node.aggLikes = lk;
+  node.display = count > 0;
+}
+function walkFilterL2(node) {
+  const ref = node.modelRef;
+  let passes = ref ? passesTreeNodeFilters(ref) : false;
+  node.display = passes;
+  let count = passes ? 1 : 0;
+  let dl = passes && ref ? ref.downloads : 0;
+  let lk = passes && ref ? ref.likes : 0;
+  for (const l3Node of node.children.values()) {
+    const r = walkFilterL3(l3Node);
+    count += r.count; dl += r.downloads; lk += r.likes;
+  }
+  // Parent propagation: quants outside date range reactivate their parent
+  if (!passes && count > 0) {
+    node.display = true;
+    dl += ref ? ref.downloads : 0;
+    lk += ref ? ref.likes : 0;
+  }
+  node.aggCount = count;
+  node.aggDownloads = dl;
+  node.aggLikes = lk;
+  return { count, downloads: dl, likes: lk };
+}
+function walkFilterL3(node) {
+  let count = 0, dl = 0, lk = 0;
+  for (const l4Node of node.children.values()) {
+    const r = walkFilterL4(l4Node);
+    count += r.count; dl += r.downloads; lk += r.likes;
+  }
+  node.display = count > 0;
+  node.aggCount = count;
+  node.aggDownloads = dl;
+  node.aggLikes = lk;
+  return { count, downloads: dl, likes: lk };
+}
+function walkFilterL4(node) {
+  const ref = node.modelRef;
+  const passes = ref ? passesL4Filters(ref) : false;
+  node.display = passes;
+  return {
+    count: passes ? 1 : 0,
+    downloads: passes && ref ? ref.downloads : 0,
+    likes: passes && ref ? ref.likes : 0
+  };
 }
 
 
@@ -2603,6 +2722,8 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
         if (p !== null) {
           m.paramB = p;
           _paramCache.set(m.id, p);
+          const dbEntry = _modelDb.get(m.id);
+          if (dbEntry) dbEntry.paramB = p;
           UI.queueUpdate(() => UI.updateCellBadge(m.id, paramBadgeHtml(m)));
         }
         success = true;
@@ -2704,6 +2825,15 @@ async function loadAuthorModels(idx, author, container) {
     }
 
     if (isStale(gen) || !container.isConnected) return;
+
+    // Dual-write fetched models to _modelDb so the tree has this author's data
+    for (const m of models) {
+      if (!_modelDb.has(m.id)) {
+        _modelDb.set(m.id, m);
+      }
+    }
+    rebuildTree();
+
     refreshAuthorL2Section(idx, author, container);
   } catch (err) {
     renderErrorWithRetry(container, userFriendlyError(err), () => {
@@ -3182,12 +3312,19 @@ function refreshAllExpanded(force, allowAsync = true) {
     if (allowAsync) {
       refreshAuthorL2Section(idx, author, inner);
     } else {
-      // Sync-only: show cached L2 without deepening
-      const baseModels = cacheAccess(author);
-      if (baseModels) {
-        const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
-        const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
-        renderL2(idx, author, filtered, inner, nonQuantBase.length, nonQuantBase);
+      // Sync-only: show cached L2 without deepening (from tree)
+      const l1Node = _modelTree.byPath.get(author);
+      if (l1Node && l1Node.children.size > 0) {
+        const allModels = [];
+        const filtered = [];
+        for (const l2Node of l1Node.children.values()) {
+          if (!l2Node.modelRef || !l2Node.canonical) continue; // skip placeholders & non-canonical
+          allModels.push(l2Node.modelRef);
+          if (l2Node.display) {
+            filtered.push(l2Node.modelRef);
+          }
+        }
+        renderL2(idx, author, filtered, inner, allModels.length, allModels);
       }
     }
   }

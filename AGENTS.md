@@ -53,6 +53,12 @@ Open in browser, validate:
 23. Structural re-renders are throttled: not every `_onFetchComplete` call triggers one (every 3rd or final)
 24. `_isRendering` guard prevents re-entrant structural renders (rapid filter changes coalesce)
 
+## Standalone Validation Tests
+
+The tree construction, filter pipeline, and sync rendering logic can be tested standalone by extracting the code section between `const _modelTree = {` and `Sort Utilities` from `streamlined-hf-model-search.html`, converting `const`/`let` to `var`, and running under Node.js. Fixed at `/tmp/phase5-test.js`. Run with `node /tmp/phase5-test.js`.
+
+**Critical mocks**: `activeTaskFilters` must be populated with test pipeline tags (e.g. `'text-generation'`) before calling `passesTreeNodeFilters`, or the `tag && !activeTaskFilters.has(tag)` check rejects all models. Runtime overrides (assignments like `matchesTaskFilter = function(t){return true;}`) must come *after* the extracted code block to shadow hoisted function declarations.
+
 ## Common Pitfalls
 
 - **Data attribute names**: `data-l3-model-idx` ≠ `data-l3-model`. Always verify matching.
