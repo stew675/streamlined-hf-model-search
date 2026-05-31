@@ -361,7 +361,6 @@ const APP_VERSION = '260531.02';
 let _allFetched = [];
 let _allFetchedById = new Map();
 let _authorData = [];
-let _canonicalAuthor = {};
 
 // ── Pipeline Tag Definitions ──
 const TO_TAGS = [
@@ -587,9 +586,6 @@ const _inflightFetches = new Map();
 const _workQueue = [];
 let _inflightCount = 0;
 let _dequeueScheduled = false;
-
-// ── Canonical Dedup Cache ──
-let _canonicalCache = null;
 
 // ── Popup Timer State ──
 const _popupTimers = new Map(); // el → timeout handle
@@ -843,7 +839,6 @@ function resetAppState() {
   _inferredAttemptedIds.clear();
   _injectedBaseIds.clear();
   _allFetchedById.clear();
-  _canonicalCache = null;
   _consecutive429s = 0;
   apiCalls = 0;
   _totalBytesReceived = 0;
@@ -1413,43 +1408,6 @@ function isNestedQuant(m, knownIds, allFetchedMap) {
   return parent ? !isBase(parent) : false;
 }
 
-// ── Canonical Author Dedup ──
-function buildCanonicalAuthors() {
-  if (_canonicalCache && _canonicalCache.ref === _allFetched) {
-    _canonicalAuthor = _canonicalCache.result;
-    return;
-  }
-  _canonicalAuthor = {};
-  // Single-pass: for each name, track the best (highest-download) author and whether
-  // multiple authors exist. Only names with >1 distinct author go into canonical map.
-  const byName = {};
-  _allFetched.forEach(m => {
-    const name = m.id.split("/").slice(1).join("/");
-    const parts = m.id.split("/");
-    const authorLower = parts[0].toLowerCase();
-    const entry = { author: authorLower, raw: parts[0], downloads: m.downloads || 0 };
-    if (!byName[name]) {
-      byName[name] = { best: entry, authors: new Set([authorLower]) };
-    } else {
-      const g = byName[name];
-      g.authors.add(authorLower);
-      if (entry.downloads > g.best.downloads) g.best = entry;
-    }
-  });
-  for (const name in byName) {
-    if (byName[name].authors.size > 1) {
-      _canonicalAuthor[name] = byName[name].best.raw;
-    }
-  }
-  _canonicalCache = { result: _canonicalAuthor, ref: _allFetched };
-}
-
-function isCanonicalCopy(m) {
-  const name = m.id.split("/").slice(1).join("/");
-  return _canonicalAuthor && _canonicalAuthor[name] !== undefined &&
-    _canonicalAuthor[name].toLowerCase() !== m.id.split("/")[0].toLowerCase();
-}
-
 // ── Pipeline Tag Resolution ──
 function resolveTasks() {
   return TO_TAGS.filter(t => {
@@ -1621,7 +1579,7 @@ async function tryResolveModelParam(m, gen) {
 }
 
 // ── Filter Pipeline ──
-//   matchesFilter → qMethodToCategory → resolveTasks → matchesTaskFilter → modelPassesAllFilters → computeAuthorData
+//   matchesFilter → qMethodToCategory → resolveTasks → matchesTaskFilter → modelPassesAllFilters
 function matchesFilter(qMethod) {
   if (!qMethod) return true;
   const methods = qMethod.toLowerCase().split(",").map(s => s.trim());
@@ -1656,27 +1614,6 @@ function modelPassesAllFilters(m) {
   }
   return true;
 }
-function computeAuthorData() {
-  buildCanonicalAuthors();
-  const all = _allFetched;
-  const knownIds = new Set(all.map(x => x.id));
-  const byId = new Map(all.map(x => [x.id, x]));
-  const map = {};
-  all.forEach(m => {
-    if (!modelPassesAllFilters(m)) return;
-    if (!isBase(m)) return;
-    if (isOrphanQuant(m, knownIds)) return;
-    if (isNestedQuant(m, knownIds, byId)) return;
-    if (isCanonicalCopy(m)) return;
-    const author = m.id.split("/")[0];
-    if (!map[author]) map[author] = { author, count: 0, totalDownloads: 0, totalLikes: 0 };
-    map[author].count++;
-    map[author].totalDownloads += m.downloads || 0;
-    map[author].totalLikes += m.likes || 0;
-  });
-  return Object.values(map);
-}
-
 // ── Filter Boundary Tracking ──
 function _filterBoundaryChanged(author) {
   const baseModels = cacheAccess(author);
@@ -1837,7 +1774,7 @@ function rebuildTree() {
 //   passesTreeNodeFilters → passesL4Filters → runFilterPipeline
 // Single recursive walk over _modelTree that evaluates filters, propagates
 // parent activation (quants reactivate their base model), and aggregates stats.
-// Replaces the flat scan in computeAuthorData + the injection bypass system.
+// Replaces the flat scan in modelPassesAllFilters + the injection bypass system.
 
 // Filters an L2 (base model) node. Same as modelPassesAllFilters but WITHOUT
 // the _injectedBaseIds date bypass — parent propagation in the tree walk
