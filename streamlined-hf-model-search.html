@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260530.11';
+const APP_VERSION = '260531.01';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _allFetched = [];
 let _allFetchedById = new Map();
@@ -527,7 +527,6 @@ let _derivedParamEnabled = false;
 let _hideMissingParamEnabled = false;
 const _paramSource = new Map(); // modelId → 'name'|'parent_inherit'|'child_name'|'child_api'|'deepen'|'metadata'
 const _inferredAttemptedIds = new Set();
-const _deepeningParamIds = new Set(); // In-flight guard for models currently being deepened
 const _deepeningAuthors = new Set(); // Guards against concurrent deepening of same author
 
 // ── API Counter & Rate Limit UI ──
@@ -801,7 +800,6 @@ function resetAppState() {
   _popupTimers.clear();
   _paramSource.clear();
   _inferredAttemptedIds.clear();
-  _deepeningParamIds.clear();
   _injectedBaseIds.clear();
   _allFetchedById.clear();
   _canonicalCache = null;
@@ -2229,7 +2227,7 @@ function paramBadgeHtml(m) {
     return '<span class="no-param-maybe" title="No parameter count — enable Infer Missing Params to attempt resolution">—</span>';
   }
   const label = paramValueToLabel(m.paramB);
-  if (_deepeningParamIds.has(m.id)) {
+  if (m.deep_status === 1) {
     return `<span class="deepening-param" title="Resolved via direct API fetch">${label}</span>`;
   }
   const ps = _paramSource.get(m.id);
@@ -2399,7 +2397,7 @@ function renderMain(authorData, skipSort) {
 async function deepenBatch(idx, author, container, unknownModels, filterApplied, nonQuantBase, gen) {
   const totalUnk = unknownModels.length;
   let completed = 0;
-  unknownModels.forEach(m => _deepeningParamIds.add(m.id));
+  unknownModels.forEach(m => m.deep_status = 1);
   UI.setStatus(`Resolving parameters for ${author}… (0/${totalUnk})`);
   await Promise.all(unknownModels.map((m) => {
     return fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`).then(
@@ -2411,13 +2409,13 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
         if (p !== null) {
           m.paramB = p;
           _paramCache.set(m.id, p);
-          _deepeningParamIds.delete(m.id);
           UI.queueUpdate(() => UI.updateCellBadge(m.id, paramBadgeHtml(m)));
         }
       },
-      (e) => { console.warn("Failed to fetch param for", m.id, e); _deepeningParamIds.delete(m.id); }
+      (e) => { console.warn("Failed to fetch param for", m.id, e); }
     ).finally(() => {
       if (isStale(gen)) return;
+      m.deep_status = 2;
       completed++;
       UI.setStatus(`Resolving parameters for ${author}… (${completed}/${totalUnk})`);
       if (completed === totalUnk) {
@@ -2438,7 +2436,7 @@ async function refreshAuthorL2Section(idx, author, container) {
     const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
     renderL2(idx, author, filtered, container, nonQuantBase.length, nonQuantBase);
     _lastFilteredCounts.set(author, filtered.length);
-    const freshUnknowns = filtered.filter(m => m.paramB === null && !_deepeningParamIds.has(m.id));
+    const freshUnknowns = filtered.filter(m => m.paramB === null && (m.deep_status || 0) === 0);
     const gen = _fetchGeneration;
     if (freshUnknowns.length > 0) {
       await deepenBatch(idx, author, container, freshUnknowns,
@@ -2452,10 +2450,8 @@ async function refreshAuthorL2Section(idx, author, container) {
         for (const m of stillUnknown) {
           if (isStale(gen)) return;
           if (m.paramB != null) continue;
+          console.assert(m.deep_status === 2, `${m.id}: Infer Missing Params ran before deepening completed`);
           const resolved = await tryResolveModelParam(m, gen);
-          if (resolved && gen === _fetchGeneration) {
-            _deepeningParamIds.delete(m.id);
-          }
         }
         if (isStale(gen)) return;
         UI.setStatus("");
@@ -2490,7 +2486,8 @@ async function loadAuthorModels(idx, author, container) {
       paramB: getParamCount(m),
       pipeline_tag: m.pipeline_tag || "",
       _orphanQuant: isOrphanQuant(m, authorKnownIds),
-      _nestedQuant: isNestedQuant(m, authorKnownIds, byAuthorId)
+      _nestedQuant: isNestedQuant(m, authorKnownIds, byAuthorId),
+      deep_status: 0
     }));
 
     cacheSet(author, baseModels);

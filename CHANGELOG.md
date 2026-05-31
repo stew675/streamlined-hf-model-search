@@ -1,5 +1,9 @@
 # Changelog — Streamlined HF Model Search
 
+### v260531.01 — Eliminate Deepening Re-queue Bug
+
+Replaced the global `_deepeningParamIds` Set with a `deep_status` field on each L2 model object (0=not attempted, 1=in-flight, 2=complete). This prevents `_asyncDeepenPass` from re-queuing models that already completed deepening when structural renders fire after param resolution crosses filter boundaries — which was causing ~2x API calls for authors with many unresolved params. Also added a `console.assert` guard in the Infer Missing Params path to catch ordering violations, and removed redundant `_deepeningParamIds.delete()` calls from the `tryResolveModelParam` branch.
+
 ### v260530.11 — Code Review Fixes
 
 Fixed `_rebuildAllFetchedMap()` not assigning to `_allFetchedById` (critical bug — all `_allFetchedById.get()` calls silently returned undefined). Fixed `_deepeningParamIds` leak on fetch failure in `deepenBatch` so a failed individual fetch no longer permanently prevents re-attempts for that model.
