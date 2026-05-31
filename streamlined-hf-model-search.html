@@ -372,6 +372,111 @@ function makeTreeNode(level, type, id, parent) {
   return { level, type, id, path, parent, children: new Map(), modelRef: null, display: false, expanded: false, canonical: true, aggCount: 0, aggDownloads: 0, aggLikes: 0, sortKey: null, sortAsc: false };
 }
 
+// ── Expansion key ↔ TreeNode bridge helpers (refactor Step 5) ──
+// Translates string expansion keys to tree paths and vice versa.
+const _expansionMap = {
+  // String key → TreeNode
+  getNode(key) {
+    if (!key) return null;
+    if (key.startsWith(PREFIX_AUTHOR)) {
+      const author = key.slice(PREFIX_AUTHOR.length);
+      return this.byPath.get('/' + author);
+    }
+    if (key.startsWith(PREFIX_MODEL)) {
+      const modelId = key.slice(PREFIX_MODEL.length);
+      return this.byModelId.get(modelId);
+    }
+    if (key.startsWith(PREFIX_GROUP)) {
+      const rest = key.slice(PREFIX_GROUP.length);
+      const pipeIdx = rest.indexOf("|");
+      if (pipeIdx === -1) return null;
+      const parentId = rest.slice(0, pipeIdx);
+      const author = rest.slice(pipeIdx + 1);
+      const l2Node = this.byModelId.get(parentId);
+      if (!l2Node) return null;
+      return l2Node.children.get(author);
+    }
+    return null;
+  },
+
+  // TreeNode → string key
+  getKey(node) {
+    if (!node || !_modelTree.root) return null;
+    if (node.level === 1) return PREFIX_AUTHOR + node.id;
+    if (node.level === 2 && node.modelRef) return PREFIX_MODEL + node.modelRef.id;
+    if (node.level >= 3) {
+      const parent = node.parent;
+      if (!parent || !parent.modelRef) return null;
+      return PREFIX_GROUP + parent.modelRef.id + "|" + node.id;
+    }
+    return null;
+  },
+
+  // Collect all expanded node paths from current tree (for save/restore across rebuilds)
+  collectExpandedPaths() {
+    const paths = new Set();
+    if (!_modelTree.root) return paths;
+    const walk = (node) => {
+      if (node.expanded) paths.add(node.path);
+      for (const [, child] of node.children) walk(child);
+    };
+    walk(_modelTree.root);
+    return paths;
+  },
+
+  // Restore expanded flags on rebuilt tree from saved paths
+  restoreExpandedPaths(savedPaths) {
+    if (!_modelTree.root || !savedPaths.size) return;
+    for (const [path, node] of _modelTree.byPath) {
+      if (savedPaths.has(path)) node.expanded = true;
+    }
+  },
+
+  // Walk tree and collect expanded nodes at a given level (replaces expandedSections iteration)
+  getExpandedAtLevel(level) {
+    const result = [];
+    if (!_modelTree.root) return result;
+    const walk = (node) => {
+      if (node.expanded && node.level === level) result.push(node);
+      for (const [, child] of node.children) walk(child);
+    };
+    walk(_modelTree.root);
+    return result;
+  },
+
+  // Sync tree-expanded flags back into expandedSections Set (bridge during transition).
+  // After full migration (Step 7), this can be removed.
+  syncExpandedSections() {
+    RC.expandedSections.clear();
+    if (!_modelTree.root) return;
+    const walk = (node) => {
+      if (node.expanded) {
+        const key = this.getKey(node);
+        if (key) RC.expandedSections.add(key);
+      }
+      for (const [, child] of node.children) walk(child);
+    };
+    walk(_modelTree.root);
+  },
+
+  // Merge tree-expanded flags into expandedSections without clearing (preserves L3/L4 lazy expansions).
+  mergeIntoSections() {
+    if (!_modelTree.root) return;
+    const walk = (node) => {
+      if (node.expanded) {
+        const key = this.getKey(node);
+        if (key) RC.expandedSections.add(key);
+      }
+      for (const [, child] of node.children) walk(child);
+    };
+    walk(_modelTree.root);
+  }
+};
+
+// Expose byPath/byModelId on _expansionMap for getNode to use
+Object.defineProperty(_expansionMap, 'byPath', { get: () => _modelTree.byPath });
+Object.defineProperty(_expansionMap, 'byModelId', { get: () => _modelTree.byModelId });
+
 // ── Pipeline Tag Definitions ──
 const TO_TAGS = [
   // Audio
@@ -647,22 +752,29 @@ const RenderCoordinator = {
     if (this._isRendering) return; // Safety net
     this._isRendering = true;
     try {
-      const saved = this._savedExpansions;
+      const savedLegacy = this._savedExpansions;
       this._savedExpansions = null;
       const skipSort = this._skipL1Sort;
       this._skipL1Sort = false;
 
+      // Save expanded paths from current tree before rebuild (refactor Step 5)
+      const savedPaths = _expansionMap.collectExpandedPaths();
+
      // Ensure tree is built and filtered (refactor: tree-based author data)
       if (!_modelTree.root && _allFetched.length > 0) {
         buildModelTree();
+      } else {
+        buildModelTree();
       }
       runFilterPipeline();
+      _expansionMap.restoreExpandedPaths(savedPaths);
       _authorData = computeAuthorDataFromTree();
       this.renderL1(_authorData, skipSort);
       _domCache.clear(); // renderL1 replaces innerHTML — all cached DOM refs are now detached
       this.updateArrows();
       this.pruneExpiredExpansions(new Set(_authorData.map(a => a.author)));
-      if (saved) this.saveRestoreExpansions(saved);
+      if (savedLegacy) this.saveRestoreExpansions(savedLegacy);
+      _expansionMap.mergeIntoSections();
       // Sync-only structural expansion. No async (deepening) inside structural pass.
       this.refreshAllExpanded(null, false);
     } catch (e) {
@@ -672,7 +784,8 @@ const RenderCoordinator = {
       this._isRendering = false;
     }
     // Schedule async deepening pass for expanded sections after sync render completes
-    if (RC.expandedSections.size > 0) {
+    const l1Expanded = _expansionMap.getExpandedAtLevel(1);
+    if (l1Expanded.length > 0) {
       requestAnimationFrame(() => this._asyncDeepenPass());
     }
   },
@@ -683,9 +796,8 @@ const RenderCoordinator = {
     // rendered L2 at the correct filter state. This async pass only deepens unknown
     // params (deepenBatch + derived param resolution) without re-rendering L2, so
     // L3/L4 expansions survive the deepening cycle.
-    for (const key of RC.expandedSections) {
-      if (!key.startsWith(PREFIX_AUTHOR)) continue;
-      const author = key.slice(PREFIX_AUTHOR.length);
+    for (const l1Node of _expansionMap.getExpandedAtLevel(1)) {
+      const author = l1Node.id;
       const l1Row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
       if (!l1Row) continue;
       const idx = parseInt(l1Row.dataset.l1Idx);
@@ -2638,12 +2750,15 @@ function toggleSection(detailRow, tog, key, descendantPrefixes) {
     tog.classList.add("open");
     tog.setAttribute("aria-expanded", "true");
     RC.expandedSections.add(key);
+    _expansionMap.getNode(key).expanded = true;
   } else {
     detailRow.style.display = "none";
     tog.classList.remove("open");
     tog.setAttribute("aria-expanded", "false");
     invalidateDomKey(key);
     RC.expandedSections.delete(key);
+    const node = _expansionMap.getNode(key);
+    if (node) clearExpandedRecursive(node);
     if (descendantPrefixes) {
       const prefixes = Array.isArray(descendantPrefixes) ? descendantPrefixes : [descendantPrefixes];
       prefixes.forEach(p => invalidateDomPrefix(p));
@@ -2655,6 +2770,12 @@ function toggleSection(detailRow, tog, key, descendantPrefixes) {
   return expanding;
 }
 
+// Clear expanded flag on a node and all its descendants (replaces cascade-delete from Set).
+function clearExpandedRecursive(node) {
+  node.expanded = false;
+  for (const [, child] of node.children) clearExpandedRecursive(child);
+}
+
 // Cache-then-query helper for section DOM refs used by refreshAllExpanded phases.
 // Returns cached ref if valid, null otherwise.
 function _getSectionCached(key) {
@@ -2664,6 +2785,15 @@ function _getSectionCached(key) {
 }
 
 function pruneExpiredExpansions(renderedAuthors) {
+  // Tree-based: clear expanded on author nodes that no longer appear in rendered data (refactor Step 5)
+  if (_modelTree.root) {
+    for (const [, child] of _modelTree.root.children) {
+      if (!renderedAuthors.has(child.id)) {
+        clearExpandedRecursive(child);
+      }
+    }
+  }
+  // Legacy compatibility: also prune from expandedSections Set (remove after Step 7)
   for (const key of [...RenderCoordinator.expandedSections]) {
     if (!key.startsWith(PREFIX_AUTHOR)) continue;
     const author = key.slice(PREFIX_AUTHOR.length);
@@ -2682,6 +2812,12 @@ function pruneExpiredExpansions(renderedAuthors) {
 }
 
 function saveRestoreExpansions(saved) {
+  // Restore from legacy saved Set by setting expanded flags on tree nodes (refactor Step 5)
+  for (const key of saved) {
+    const node = _expansionMap.getNode(key);
+    if (node && !node.expanded) node.expanded = true;
+  }
+  // Legacy compatibility: also restore into expandedSections Set (remove after Step 7)
   for (const key of saved) {
     if (!RenderCoordinator.expandedSections.has(key)) RenderCoordinator.expandedSections.add(key);
   }
@@ -3313,10 +3449,10 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 // ── Refresh & Re-expansion ──
 //   refreshAllExpanded
 function refreshAllExpanded(force, allowAsync = true) {
-  // Phase 1: re-expand L1 author rows
-  for (const key of RC.expandedSections) {
-    if (!key.startsWith(PREFIX_AUTHOR)) continue;
-    const author = key.slice(PREFIX_AUTHOR.length);
+  // Phase 1: re-expand L1 author rows (tree-based iteration, refactored Step 5)
+  for (const l1Node of _expansionMap.getExpandedAtLevel(1)) {
+    const author = l1Node.id;
+    const key = `${PREFIX_AUTHOR}${author}`;
     let ref = _getSectionCached(key), row, detailRow, inner, tog;
     if (ref) {
       ({ row, detailRow, inner, tog } = ref);
@@ -3350,10 +3486,11 @@ function refreshAllExpanded(force, allowAsync = true) {
     }
   }
 
-  // Phase 2: re-expand L2 model rows
-  for (const key of RC.expandedSections) {
-    if (!key.startsWith(PREFIX_MODEL)) continue;
-    const modelId = key.slice(PREFIX_MODEL.length);
+  // Phase 2: re-expand L2 model rows (tree-based iteration, refactored Step 5)
+  for (const l2Node of _expansionMap.getExpandedAtLevel(2)) {
+    const modelId = l2Node.modelRef ? l2Node.modelRef.id : null;
+    if (!modelId) continue;
+    const key = `${PREFIX_MODEL}${modelId}`;
     let ref = _getSectionCached(key), row, detailRow, inner, tog;
     if (ref) {
       ({ row, detailRow, inner, tog } = ref);
