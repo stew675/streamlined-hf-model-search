@@ -363,7 +363,6 @@ const _modelDb = new Map(); // Unified model database — O(1) lookup, replaces 
 let _authorData = [];
 // ── Tree State (Refactor: tree-based architecture) ──
 let _treeDirty = false; // Set to true when lazy discovery adds models, triggers rebuild on next render
-const _loadingAuthors = new Set(); // Authors currently being fetched (loadAuthorModels in progress)
 const _modelTree = { root: null, byPath: new Map(), byModelId: new Map() };
 
 function makeTreeNode(level, type, id, parent) {
@@ -615,12 +614,7 @@ let _trendingAdded = 0;
 // not just the fetch itself. AbortController would need a parallel mechanism anyway.
 let _fetchGeneration = 0;
 
-// ── Injection & Inference Tracking ──
-// Injected base models bypass the date filter. Cleared on deep re-fetch (injectBaseModels)
-// and Clear Cache, but intentionally NOT cleared on quick re-fetch: models that were
-// previously injected should remain visible since upstream data is static and re-injecting
-// would waste API calls without changing results.
-const _injectedBaseIds = new Set();
+// ── Inference Tracking ──
 let _derivedParamEnabled = false;
 let _hideMissingParamEnabled = false;
 const _paramSource = new Map(); // modelId → 'name'|'parent_inherit'|'child_name'|'child_api'|'deepen'|'metadata'
@@ -904,9 +898,6 @@ function cacheDomRef(key, ref) { if (ref && ref.row.isConnected) _domCache.set(k
 function invalidateDomKey(key) { _domCache.delete(key); }
 function invalidateDomPrefix(prefix) { for (const k of _domCache) if (k[0].startsWith(prefix)) _domCache.delete(k[0]); }
 
-// ── Filter Boundary Tracking ──
-const _lastFilteredCounts = new Map(); // author → count
-
 // ── State Reset (Clear Cache) ──
 function resetAppState() {
   _fetchGeneration++;
@@ -922,9 +913,8 @@ function resetAppState() {
   _popupTimers.clear();
   _paramSource.clear();
    _inferredAttemptedIds.clear();
-   _injectedBaseIds.clear();
-   // Tree state reset (refactor)
-  _treeDirty = false;
+  // Tree state reset (refactor)
+   _treeDirty = false;
   _modelDb.clear();
   _modelTree.root = null;
   _modelTree.byPath.clear();
@@ -933,9 +923,8 @@ function resetAppState() {
   apiCalls = 0;
   _totalBytesReceived = 0;
   _trendingAdded = 0;
-  fetchedTrending = false;
-  _lastFilteredCounts.clear();
-  updateRateLimitUI(false);
+fetchedTrending = false;
+   updateRateLimitUI(false);
   RenderCoordinator._levelState.l2.clear();
   RenderCoordinator._levelState.l3.clear();
   RenderCoordinator._levelState.l4.clear();
@@ -1129,23 +1118,17 @@ function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
     // happens after Promise.allSettled completes (line 1290-1293).
   }
 
-// Trim _allFetched to ALL_FETCHED_MAX, preserving injected base models.
+// Trim _allFetched to ALL_FETCHED_MAX.
   function _trimAllFetched() {
    if (_allFetched.length <= CONFIG.ALL_FETCHED_MAX) return;
-   const pinned = [];
-  const droppable = [];
-  for (const m of _allFetched) {
-    if (_injectedBaseIds.has(m.id)) pinned.push(m);
-    else droppable.push(m);
-  }
-  droppable.sort((a, b) => {
+    const droppable = [..._allFetched];
+   droppable.sort((a, b) => {
     const da = a.lastModified ? new Date(a.lastModified).getTime() : 0;
     const db = b.lastModified ? new Date(b.lastModified).getTime() : 0;
     return db !== da ? db - da : (b.id || '').localeCompare(a.id || '');
   });
-  const room = CONFIG.ALL_FETCHED_MAX - pinned.length;
-  droppable.length = Math.max(0, Math.min(droppable.length, room));
-  _allFetched = droppable.concat(pinned);
+ droppable.length = Math.min(droppable.length, CONFIG.ALL_FETCHED_MAX);
+   _allFetched = droppable;
   // Sync unified model database after trim
   _modelDb.clear();
   for (const m of _allFetched) _modelDb.set(m.id, m);
@@ -1173,9 +1156,8 @@ function applyFilters(force, deep) {
   const reenable = () => { quickBtn.disabled = false; deepBtn.disabled = false; };
 
   // Fast path: no new data needed, just re-render with current filters.
-  if (newTasks.length === 0 && !needUntagged && fetchedTrending && !deep) {
-    markLocalParents(_allFetched, gen);
-    reenable();
+if (newTasks.length === 0 && !needUntagged && fetchedTrending && !deep) {
+     reenable();
     recomputeAndRender(savedExpansions);
     return;
   }
@@ -1223,35 +1205,8 @@ function applyFilters(force, deep) {
       await Promise.allSettled(promises);
       if (isStale(gen)) return;
 
-      // Post-fetch processing: trim, inject/mark parents, final render.
+      // Post-fetch processing: trim, final render. Injection replaced by tree-based reachability.
       _trimAllFetched();
-
-      if (deep) {
-        UI.setStatus(`Resolving base models…`);
-        try {
-          await injectBaseModels(_allFetched, (() => {
-            let renderCounter = 0;
-            return () => {
-              renderCounter++;
-              if (isStale(gen)) return;
-              if (renderCounter % 2 !== 0) return;
-              const saved = new Set(RC.expandedSections);
-              recomputeAndRender(saved);
-            };
-          })());
-        } catch (e) {
-          console.warn("Base model injection error:", e);
-        }
-      } else {
-        // Quick mode: mark parents already in _allFetched so quants outside the date
-        // range still keep their parent visible (the data is already in hand — no API
-        // calls needed, just a local scan).
-        // _injectedBaseIds is intentionally NOT cleared here — models injected during
-        // a prior deep fetch should persist across quick re-fetches since upstream data
-        // is static and re-injecting would waste API calls. Clear Cache or a fresh deep
-        // fetch resets the set (injectBaseModels calls .clear()).
-        markLocalParents(_allFetched, gen);
-      }
 
       if (isStale(gen)) return;
       // Tree build: construct hierarchy from fetched data (standalone verification phase)
@@ -1267,123 +1222,10 @@ function applyFilters(force, deep) {
       document.getElementById("main-table").setAttribute("aria-busy", "false");
     }
   })();
-}
+ }
 
-// ── Parent Injection (quick mode — no API calls) ──
-function markLocalParents(all, gen) {
-  if (isStale(gen)) return;
-  // Map serves as both existence set for inferParent and O(1) parent reference lookup.
-  const byId = new Map();
-  for (const m of all) byId.set(m.id, m);
-  for (let i = 0; i < all.length; i++) {
-    if (isStale(gen)) return;
-    const m = all[i];
-    if (!isInDateRange(m.lastModified)) continue;
-
-    let baseId = null;
-    const cd = m.cardData;
-    const bm = cd && cd.base_model;
-
-    if (bm) {
-      baseId = getBaseModelId(cd);
-      if (!baseId) continue;
-    } else {
-      const idLower = m.id.toLowerCase();
-      if (!RE_Q_EXISTS.test(idLower)) continue;
-      baseId = inferParent(m.id, byId);
-      if (!baseId) continue;
-    }
-
-    const parent = byId.get(baseId);
-    if (parent) {
-      parent._injected = true;
-      _injectedBaseIds.add(baseId);
-    }
-  }
-}
-
-// ── Parent Injection (deep mode — fetches via queue) ──
-async function injectBaseModels(all, onBatch) {
-  const gen = _fetchGeneration;
-  if (isStale(gen)) return;
-  _injectedBaseIds.clear();  // Reset on deep fetch — fresh injection pass will repopulate.
-  markLocalParents(all, gen);
-  if (isStale(gen)) return;
-  const seenAuthors = new Set(all.map(m => m.id.split("/")[0]));
-  const injected = [];
-  const fetchQueue = new Map();
-  const seen = new Set(all.map(m => m.id));
-
-  for (let i = 0; i < all.length; i++) {
-    if (isStale(gen)) return;
-    const m = all[i];
-    if (!isInDateRange(m.lastModified)) continue;
-
-    let baseId = null;
-    const cd = m.cardData;
-    const bm = cd && cd.base_model;
-
-    if (bm) {
-      baseId = getBaseModelId(cd);
-      if (!baseId) continue;
-    } else {
-      const idLower = m.id.toLowerCase();
-      if (!RE_Q_EXISTS.test(idLower)) continue;
-      baseId = inferParent(m.id, seen);
-      if (!baseId) continue;
-    }
-
-    if (!seen.has(baseId) && bm && !isBase(m)) {
-      const baseAuthor = baseId.split("/")[0];
-      if (!seenAuthors.has(baseAuthor)) {
-        if (!fetchQueue.has(baseId)) {
-          fetchQueue.set(baseId, true);
-        }
-      }
-    }
-  }
-
-  const baseIds = [...fetchQueue.keys()];
-  let completed = 0;
-  const totalRequests = baseIds.length;
-  const promises = baseIds.map((baseId) => {
-    return fetchJson(`https://huggingface.co/api/models/${baseId}?full=true`).then(
-      (raw) => {
-        if (isStale(gen)) return null;
-        const full = normalizeModel(raw);
-        full.paramB = getParamCount(full);
-        full._injected = true;
-        injected.push(full);
-        seen.add(full.id);
-        _injectedBaseIds.add(full.id);
-        _modelDb.set(full.id, full); // unified model database
-      },
-      (err) => {
-        console.warn("Failed to fetch base model", err);
-      }
-    ).finally(() => {
-      if (isStale(gen)) return;
-      completed++;
-      UI.setStatus(`Resolving base models… (${completed}/${totalRequests})`);
-      if (onBatch) onBatch();
-    });
-  });
-  await Promise.all(promises);
-
-  if (isStale(gen)) return;
-  all.push(...injected);
-
-  // Final reconciliation: guarantee every model flagged as _injected is whitelisted
-  // in _injectedBaseIds. Generation guards or Pass 1/Pass 2 races can cause flagged
-  // parents to slip through earlier set additions. This ensures
-  // hierarchy integrity so quantizations attach to their true parent even when that
-  // parent falls outside the active date range (see modelPassesAllFilters).
-  all.forEach(m => { if (m._injected && gen === _fetchGeneration) _injectedBaseIds.add(m.id); });
-  UI.setStatus("");
-}
-
-// ═══════════════════════════════════════════════════════════════
-// SECTION 3b: Tree Construction (Refactor — standalone for now)
+ // ═══════════════════════════════════════════════════════════════
+ // SECTION 3b: Tree Construction (Refactor — standalone for now)
 // ═══════════════════════════════════════════════════════════════
 
 // Two-pass tree builder. Consumes _allFetched and produces a 4-level hierarchy
@@ -1556,7 +1398,7 @@ function integrateDiscoveredChildren(parentModelId, rawModels) {
   _treeDirty = true;
 }
 
-// Mark tree dirty when new models are injected (e.g., injectBaseModels adds missing parents).
+// Mark tree dirty — triggers rebuild on next render.
 function markTreeDirty() { _treeDirty = true; }
 
 // ── Tree Stats (for dev verification) ──
@@ -1570,8 +1412,7 @@ function treeStats() {
 
 // ── Filter Pipeline (Tree Walk) ──
 // Single recursive walk: evaluates filters on model nodes, propagates parent
-// activation upward, and aggregates stats bottom-up. Replaces computeAuthorData(),
-// _injectedBaseIds injection, and boundary tracking.
+// activation upward, and aggregates stats bottom-up. Replaces computeAuthorData() and injection.
 
 function runFilterPipeline() {
   if (!_modelTree.root || !_allFetched.length) return;
@@ -1612,8 +1453,7 @@ function evaluateTreeNode(node) {
     childCount += r.count; childDl += r.downloads; childLk += r.likes;
   }
 
-  // Parent propagation: if any child is active, this node becomes visible too
-  // (equivalent to current _injectedBaseIds behavior)
+ // Parent propagation: if any child is active, this node becomes visible too
   const effectiveDisplay = selfDisplay || (childCount > 0);
   node.display = effectiveDisplay;
 
@@ -1668,8 +1508,8 @@ function computeAuthorDataFromTree() {
 // ── Data Normalization ──
 // Transforms raw API payloads into the canonical internal model shape.
 // Intentionally drops sha, siblings, config, library_name, private, and all other API fields
-// (~60% memory savings in _allFetched). Callers: S3 (_mergeRequestResult, injectBaseModels),
-// S4 (resolveParamFromChildren), S6 (loadAuthorModels, loadChildren).
+// (~60% memory savings). Callers: S3 (_mergeRequestResult), S4 (resolveParamFromChildren),
+ // S6 (loadAuthorModels, loadChildren).
 function normalizeModel(m) {
   return {
     id: m.id,
@@ -1947,8 +1787,8 @@ function qMethodToCategory(method) {
 function modelPassesAllFilters(m) {
   const tf2 = RC._state.textFilters.l2Model;
   if (tf2 && !m.id.split("/").slice(1).join("/").toLowerCase().includes(tf2.toLowerCase())) return false;
-  if (!_injectedBaseIds.has(m.id) && !isInDateRange(m.lastModified)) return false;
-  const tag = m.pipeline_tag;
+if (!isInDateRange(m.lastModified)) return false;
+   const tag = m.pipeline_tag;
   if (!tag && !activeSpecialFilters.has("include untagged")) return false;
   const pb = m.paramB != null ? m.paramB : getParamCount(m);
   if (!isInParamRange(pb)) return false;
@@ -1965,30 +1805,6 @@ function modelPassesAllFilters(m) {
   }
   return true;
 }
-// ── Filter Boundary Tracking ──
-function _filterBoundaryChanged(author) {
-  const baseModels = cacheAccess(author);
-  if (!baseModels) return true;
-  const nqb = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
-  const current = nqb.filter(m => modelPassesAllFilters(m)).length;
-  const prev = _lastFilteredCounts.get(author) ?? current;
-  _lastFilteredCounts.set(author, current);
-  return current !== prev;
-}
-
-// Schedule a structural render after deepening completes, but only if visibility
-// of models changed (i.e., param resolution moved models into/out of param filter range).
-function _schedulePostDeepenRender(author, gen) {
-  if (isStale(gen)) return;
-  // Skip intermediate renders while author's initial load is still in progress.
-  // This prevents cascade of _doFullRender cycles during deepening that cause
-  // L2 to collapse/refreeze. Final render happens naturally after loadAuthorModels completes.
-  if (_loadingAuthors.has(author)) return;
-  if (_filterBoundaryChanged(author)) {
-    RC.requestRender(null, true);
-  }
-}
-
 // ── Sort Utilities ──
 //   sortCoerce → _cmp → sortRows
 const _NUMERIC_SORT_KEYS = new Set(["downloads", "likes", "totalDownloads", "totalLikes", "count", "paramB"]);
@@ -2813,13 +2629,11 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
       if (isStale(gen)) return;
       m.deep_status = success ? 2 : 0;
       completed++;
-      UI.setStatus(`Resolving parameters for ${author}… (${completed}/${totalUnk})`);
-      if (completed === totalUnk) {
-        UI.setStatus("");
-      }
-      // Call unconditionally — _filterBoundaryChange + RAF coalescing prevent wasted renders
-      _schedulePostDeepenRender(author, gen);
-    });
+     UI.setStatus(`Resolving parameters for ${author}… (${completed}/${totalUnk})`);
+       if (completed === totalUnk) {
+         UI.setStatus("");
+       }
+     });
   }));
 }
 async function refreshAuthorL2Section(idx, author, container, skipRender) {
@@ -2830,11 +2644,10 @@ async function refreshAuthorL2Section(idx, author, container, skipRender) {
     if (!baseModels) return;
     const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
     const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
-    if (!skipRender) {
+   if (!skipRender) {
       renderL2(idx, author, filtered, container, nonQuantBase.length, nonQuantBase);
     }
-    _lastFilteredCounts.set(author, filtered.length);
-    const freshUnknowns = filtered.filter(m => m.paramB === null && (m.deep_status || 0) === 0);
+     const freshUnknowns = filtered.filter(m => m.paramB === null && (m.deep_status || 0) === 0);
     const gen = _fetchGeneration;
     if (freshUnknowns.length > 0) {
       await deepenBatch(idx, author, container, freshUnknowns,
@@ -2851,26 +2664,22 @@ async function refreshAuthorL2Section(idx, author, container, skipRender) {
           console.assert(m.deep_status === 2, `${m.id}: Infer Missing Params ran before deepening completed`);
           const resolved = await tryResolveModelParam(m, gen);
         }
-        if (isStale(gen)) return;
-        UI.setStatus("");
-        _schedulePostDeepenRender(author, gen);
-      }
-    }
-  } finally {
+      if (isStale(gen)) return;
+         UI.setStatus("");
+       }
+     }
+   } finally {
     _deepeningAuthors.delete(author);
   }
 }
 async function loadAuthorModels(idx, author, container) {
-  const gen = _fetchGeneration;
-  _loadingAuthors.add(author);
-  try {
+   const gen = _fetchGeneration;
+   try {
     const raw = cacheAccess(author + "_models") || await fetchJson(
       `https://huggingface.co/api/models?author=${author}&sort=downloads&direction=-1&limit=${CONFIG.AUTHOR_LIMIT}&full=true&cardData=true`
     );
     const models = raw.map(normalizeModel);
     cacheSet(author + "_models", models);
-
-    markLocalParents(models, gen);
 
     const authorKnownIds = new Set(models.map(x => x.id));
     const byAuthorId = new Map(models.map(x => [x.id, x]));
@@ -2892,9 +2701,9 @@ async function loadAuthorModels(idx, author, container) {
 
     cacheSet(author, baseModels);
 
-     // Sync newly-fetched models into unified database (refactor Step 7)
-     // Only INSERT new entries — never overwrite existing ones. Existing entries from
-     // search results or injectBaseModels have richer data (cardData, safetensors, gguf).
+    // Sync newly-fetched models into unified database (refactor Step 7)
+      // Only INSERT new entries — never overwrite existing ones. Existing entries from
+      // search results have richer data (cardData, safetensors, gguf).
      // The lightweight cache objects here lack cardData, and overwriting would cause
      // isBase() to misclassify derivatives as base models on subsequent tree rebuilds.
      // Param resolution during deepening syncs back to _modelDb via tryResolveModelParam/deepenBatch.
@@ -2917,22 +2726,15 @@ async function loadAuthorModels(idx, author, container) {
     }
 
    if (isStale(gen) || !container.isConnected) return;
-    await refreshAuthorL2Section(idx, author, container);
-    // After deepening completes, check if filter boundaries changed and render once.
-    // This replaces the cascade of intermediate _schedulePostDeepenRender calls that were blocked.
-    if (!isStale(gen)) {
-      _schedulePostDeepenRender(author, gen);
-    }
-  } catch (err) {
+   await refreshAuthorL2Section(idx, author, container);
+   } catch (err) {
     renderErrorWithRetry(container, userFriendlyError(err), () => {
       if (container.isConnected) loadAuthorModels(idx, author, container);
     });
-  } finally {
-    _loadingAuthors.delete(author);
-  }
-}
+   }
+ }
 
-// ── Level 2: Base Models ──
+ // ── Level 2: Base Models ──
 //   thHtml / renderL2Empty / buildL2TableHtml / setupL2Events / renderL2 / loadChildren
 function thHtml(c, state, level, colindex) {
   const isSorted = state.key === c.key;
