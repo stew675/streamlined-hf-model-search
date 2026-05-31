@@ -367,6 +367,7 @@ let _canonicalAuthor = {};
 
 // ── Tree State (Refactor: tree-based architecture) ──
 let _treeDirty = false; // Set to true when lazy discovery adds models, triggers rebuild on next render
+const _loadingAuthors = new Set(); // Authors currently being fetched (loadAuthorModels in progress)
 const _modelTree = { root: null, byPath: new Map(), byModelId: new Map() };
 
 function makeTreeNode(level, type, id, parent) {
@@ -2044,6 +2045,10 @@ function _filterBoundaryChanged(author) {
 // of models changed (i.e., param resolution moved models into/out of param filter range).
 function _schedulePostDeepenRender(author, gen) {
   if (isStale(gen)) return;
+  // Skip intermediate renders while author's initial load is still in progress.
+  // This prevents cascade of _doFullRender cycles during deepening that cause
+  // L2 to collapse/refreeze. Final render happens naturally after loadAuthorModels completes.
+  if (_loadingAuthors.has(author)) return;
   if (_filterBoundaryChanged(author)) {
     RC.requestRender(null, true);
   }
@@ -2919,6 +2924,7 @@ async function refreshAuthorL2Section(idx, author, container, skipRender) {
 }
 async function loadAuthorModels(idx, author, container) {
   const gen = _fetchGeneration;
+  _loadingAuthors.add(author);
   try {
     const raw = cacheAccess(author + "_models") || await fetchJson(
       `https://huggingface.co/api/models?author=${author}&sort=downloads&direction=-1&limit=${CONFIG.AUTHOR_LIMIT}&full=true&cardData=true`
@@ -2972,6 +2978,8 @@ async function loadAuthorModels(idx, author, container) {
     renderErrorWithRetry(container, userFriendlyError(err), () => {
       if (container.isConnected) loadAuthorModels(idx, author, container);
     });
+  } finally {
+    _loadingAuthors.delete(author);
   }
 }
 
