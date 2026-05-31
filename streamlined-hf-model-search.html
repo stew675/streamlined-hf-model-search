@@ -369,7 +369,7 @@ const _modelTree = { root: null, byPath: new Map(), byModelId: new Map() };
 
 function makeTreeNode(level, type, id, parent) {
   const path = parent ? `${parent.path}/${id}` : `/${id}`;
-  return { level, type, id, path, parent, children: new Map(), modelRef: null, display: false, expanded: false, canonical: true, aggCount: 0, aggDownloads: 0, aggLikes: 0 };
+  return { level, type, id, path, parent, children: new Map(), modelRef: null, display: false, expanded: false, canonical: true, aggCount: 0, aggDownloads: 0, aggLikes: 0, sortKey: null, sortAsc: false };
 }
 
 // ── Pipeline Tag Definitions ──
