@@ -2466,32 +2466,31 @@ function updateArrows() {
 //   cacheDomRef / invalidateDomKey / invalidateDomPrefix / _getSectionCached
 //   toggleSection / pruneExpiredExpansions / recomputeAndRender
 
-// Unified section toggle: handles expand/collapse DOM and state for all levels.
+// Unified section toggle: handles expand/collapse DOM and tree state for all levels.
 // Returns true if section was expanded, false if collapsed.
-// descendantPrefixes is optional — used at L1/L2 to cascade-delete child keys on collapse.
-function toggleSection(detailRow, tog, key, descendantPrefixes) {
+function toggleSection(detailRow, tog, key) {
   const expanding = detailRow.style.display === "none";
   if (expanding) {
     detailRow.style.display = "";
     tog.classList.add("open");
     tog.setAttribute("aria-expanded", "true");
-    RC.expandedSections.add(key);
- const node = _expansionMap.getNode(key);
-if (node) node.expanded = true;
+    const node = _expansionMap.getNode(key);
+    if (node) node.expanded = true;
   } else {
     detailRow.style.display = "none";
     tog.classList.remove("open");
     tog.setAttribute("aria-expanded", "false");
     invalidateDomKey(key);
-    RC.expandedSections.delete(key);
     const node = _expansionMap.getNode(key);
     if (node) clearExpandedRecursive(node);
-    if (descendantPrefixes) {
-      const prefixes = Array.isArray(descendantPrefixes) ? descendantPrefixes : [descendantPrefixes];
-      prefixes.forEach(p => invalidateDomPrefix(p));
-      for (const k of [...RC.expandedSections]) {
-        if (prefixes.some(p => k.startsWith(p))) RC.expandedSections.delete(k);
-      }
+    // Invalidate descendant DOM cache prefixes on collapse
+    if (key.startsWith(PREFIX_AUTHOR)) {
+      const author = key.slice(PREFIX_AUTHOR.length);
+      invalidateDomPrefix(PREFIX_MODEL + author + "/");
+      invalidateDomPrefix(PREFIX_GROUP + author + "/");
+    } else if (key.startsWith(PREFIX_MODEL)) {
+      const modelId = key.slice(PREFIX_MODEL.length);
+      invalidateDomPrefix(PREFIX_GROUP + modelId + "|");
     }
   }
   return expanding;
@@ -2809,7 +2808,7 @@ function setupL2Events(container) {
       const inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
       const tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
       const modelKey = `${PREFIX_MODEL}${modelId}`;
-      if (toggleSection(detailRow, tog, modelKey, `${PREFIX_GROUP}${modelId}|`)) {
+      if (toggleSection(detailRow, tog, modelKey)) {
         cacheDomRef(modelKey, { row: tr, detailRow, inner, toggle: tog });
         const key = `children-${modelId}`;
         const cached = cacheAccess(key);
@@ -3339,7 +3338,7 @@ document.querySelector("#main-table").addEventListener("click", e => {
     const inner = document.getElementById(`i1-${idx}`);
     const tog = document.getElementById(`t1-${idx}`);
     const authorKey = `${PREFIX_AUTHOR}${author}`;
-    if (toggleSection(detailRow, tog, authorKey, [`${PREFIX_MODEL}${author}/`, `${PREFIX_GROUP}${author}/`])) {
+    if (toggleSection(detailRow, tog, authorKey)) {
       cacheDomRef(authorKey, { row: tr, detailRow, inner, toggle: tog });
       if (cacheAccess(author)) {
         refreshAuthorL2Section(idx, author, inner);
