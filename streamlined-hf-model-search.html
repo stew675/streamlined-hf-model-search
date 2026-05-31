@@ -1714,7 +1714,9 @@ function buildTreePass2() {
         _modelTree.byPath.set(author, l1Node);
       }
       const l1Node = _modelTree.byPath.get(author);
-      const placeholder = createTreeNode(2, 'basemodel', trueBase, null);
+      const paramFromName = extractParamFromId(trueBase);
+      const stubRef = paramFromName !== null ? { id: trueBase, paramB: paramFromName } : null;
+      const placeholder = createTreeNode(2, 'basemodel', trueBase, stubRef);
       placeholder.canonical = false;
       placeholder.display = false;
       l1Node.children.set(trueBase, placeholder);
