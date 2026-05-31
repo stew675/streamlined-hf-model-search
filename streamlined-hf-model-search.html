@@ -87,7 +87,7 @@
   tr.l2-row.row-odd td, tr.l3-row.row-odd td { background: #0f1318; }
 
   .badge { display: inline-block; font-size: 0.7rem; padding: 1px 6px; border-radius: 12px;
-           background: #1f6feb33; color: #58a6ff; border: 1px solid #1f6feb55; margin: 1px 2px; box-shadow: 0 0 4px #1f6feb22; }
+    background: #1f6feb33; color: #58a6ff; border: 1px solid #1f6feb55; margin: 1px 2px; box-shadow: 0 0 4px #1f6feb22; }
   .badge.deriv { background: #23863633; color: #3fb950; border-color: #23863655; box-shadow: 0 0 4px #23863622; }
   .badge.orphan { background: #d2992233; color: #e3b341; border-color: #d2992255; box-shadow: 0 0 4px #d2992222; }
 
@@ -286,15 +286,15 @@
   <div class="ps-legend" id="ps-legend"></div>
 </div>
 <div id="task-bars">
-<div class="chip-group" id="from-bar" role="group" aria-label="Input modality filters">
-  <h3 class="filter-label">From PipeLine Classes:</h3>
-</div>
-<div class="chip-group" id="to-bar" role="group" aria-label="Output modality filters">
-  <h3 class="filter-label">To PipeLine Classes:</h3>
-</div>
-<div class="chip-group" id="special-bar" role="group" aria-label="Special filters">
-  <h3 class="filter-label">Untagged PipeLines:</h3>
-</div>
+  <div class="chip-group" id="from-bar" role="group" aria-label="Input modality filters">
+    <h3 class="filter-label">From PipeLine Classes:</h3>
+  </div>
+  <div class="chip-group" id="to-bar" role="group" aria-label="Output modality filters">
+    <h3 class="filter-label">To PipeLine Classes:</h3>
+  </div>
+  <div class="chip-group" id="special-bar" role="group" aria-label="Special filters">
+    <h3 class="filter-label">Untagged PipeLines:</h3>
+  </div>
 </div>
 <div id="activated-types" class="task-bar-row">
   <h3 class="filter-label">Activated Pipeline Tags:</h3>
@@ -303,9 +303,9 @@
   <h3 class="filter-label">Available Pipeline Tags:</h3>
 </div>
 <div id="filter-row">
-<div class="chip-group" id="filter-bar" role="group" aria-label="Quantization type filters">
-  <h3 class="filter-label">Quant Types:</h3>
-</div>
+  <div class="chip-group" id="filter-bar" role="group" aria-label="Quantization type filters">
+    <h3 class="filter-label">Quant Types:</h3>
+  </div>
 </div>
 <div id="sort-announce" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></div>
 <div id="button-row">
@@ -323,14 +323,14 @@
   <span id="rate-limit-notice" style="display:none; padding:3px 10px; background:#d2992233; border:1px solid #d2992266; border-radius:6px; margin-left:8px; font-size:0.72rem; color:#e3b341; white-space:nowrap;">⚠️ Rate limited — backoff applied</span>
 </div>
 <div id="text-filter-row">
-    <label for="l1-author-filter"><b>L1 Author:</b></label>
-    <span class="fiw"><input type="text" id="l1-author-filter" placeholder="All authors (pinned top)" title="Pins matching authors to the top of L1; does not hide non-matching authors." autocomplete="off"><button type="button" class="fic" data-for="l1-author-filter" aria-label="Clear">✕</button></span>
-    <label for="l2-model-filter"><b>L2 Model ID:</b></label>
-    <span class="fiw"><input type="text" id="l2-model-filter" placeholder="Any base model" title="Filters base models across all authors. L1 counts will update to reflect only matching models." autocomplete="off"><button type="button" class="fic" data-for="l2-model-filter" aria-label="Clear">✕</button></span>
-    <label for="l3-author-filter"><b>L3 Author:</b></label>
-    <span class="fiw"><input type="text" id="l3-author-filter" placeholder="Any quant author" title="Filters quant authors within already-expanded L2 sections." autocomplete="off"><button type="button" class="fic" data-for="l3-author-filter" aria-label="Clear">✕</button></span>
-    <label for="l4-model-filter"><b>L4 Model ID:</b></label>
-    <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" title="Filters individual quant models within already-expanded L3 sections." autocomplete="off"><button type="button" class="fic" data-for="l4-model-filter" aria-label="Clear">✕</button></span>
+  <label for="l1-author-filter"><b>L1 Author:</b></label>
+  <span class="fiw"><input type="text" id="l1-author-filter" placeholder="All authors (pinned top)" title="Pins matching authors to the top of L1; does not hide non-matching authors." autocomplete="off"><button type="button" class="fic" data-for="l1-author-filter" aria-label="Clear">✕</button></span>
+  <label for="l2-model-filter"><b>L2 Model ID:</b></label>
+  <span class="fiw"><input type="text" id="l2-model-filter" placeholder="Any base model" title="Filters base models across all authors. L1 counts will update to reflect only matching models." autocomplete="off"><button type="button" class="fic" data-for="l2-model-filter" aria-label="Clear">✕</button></span>
+  <label for="l3-author-filter"><b>L3 Author:</b></label>
+  <span class="fiw"><input type="text" id="l3-author-filter" placeholder="Any quant author" title="Filters quant authors within already-expanded L2 sections." autocomplete="off"><button type="button" class="fic" data-for="l3-author-filter" aria-label="Clear">✕</button></span>
+  <label for="l4-model-filter"><b>L4 Model ID:</b></label>
+  <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" title="Filters individual quant models within already-expanded L3 sections." autocomplete="off"><button type="button" class="fic" data-for="l4-model-filter" aria-label="Clear">✕</button></span>
 </div>
 <div id="scope-notice">Top 500 by downloads + top 500 by recent updates per pipeline tag, plus 1000 trending models — broader coverage of popular and recently active models. Older or niche models may not appear; use <a href="https://huggingface.co/models" target="_blank" rel="noopener noreferrer" aria-label="Hugging Face Search (opens in new tab)">HF Search</a> for full coverage.</div>
 <table id="main-table" aria-label="Authors and base model counts">
@@ -612,13 +612,13 @@ const RenderCoordinator = {
       l4Model: ""
     }
   },
-  
+
   _levelState: {
     l2: new Map(),
     l3: new Map(),
     l4: new Map()
   },
-  
+
   _renderScheduled: false,
   _savedExpansions: null,
   _isRendering: false, // Hard guard against re-entrant execution
@@ -1474,7 +1474,7 @@ async function resolveParamFromChildren(modelId) {
       try {
         const full = await fetchJson(`https://huggingface.co/api/models/${childId}?full=true`);
         childP = (full.safetensors && full.safetensors.total != null) ? full.safetensors.total / 1e9 :
-                 (full.gguf && full.gguf.total != null) ? full.gguf.total / 1e9 : null;
+            (full.gguf && full.gguf.total != null) ? full.gguf.total / 1e9 : null;
       } catch (e) { /* skip */ }
     }
     if (childP !== null) {
@@ -2473,7 +2473,7 @@ async function loadAuthorModels(idx, author, container) {
       `https://huggingface.co/api/models?author=${author}&sort=downloads&direction=-1&limit=${CONFIG.AUTHOR_LIMIT}&full=true&cardData=true`
     );
     const models = raw.map(normalizeModel);
-   cacheSet(author + "_models", models);
+    cacheSet(author + "_models", models);
 
     markLocalParents(models, gen);
 
@@ -3184,12 +3184,12 @@ function _initApp() {
     clearTimeout(_resizeTimer);
     _resizeTimer = setTimeout(() => { updateDateUI(); updateParamUI(); }, 50);
   });
- sliderResize.observe(document.getElementById("date-slider"));
-   sliderResize.observe(document.getElementById("param-slider"));
-   window.addEventListener("scroll", hideAllPopups, { passive: true });
-   window.addEventListener("resize", debounce(hideAllPopups, 100), { passive: true });
-   document.addEventListener("visibilitychange", () => { if (document.hidden) hideAllPopups(); }, { passive: true });
-   reseedActiveTaskFilters();
+  sliderResize.observe(document.getElementById("date-slider"));
+  sliderResize.observe(document.getElementById("param-slider"));
+  window.addEventListener("scroll", hideAllPopups, { passive: true });
+  window.addEventListener("resize", debounce(hideAllPopups, 100), { passive: true });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) hideAllPopups(); }, { passive: true });
+  reseedActiveTaskFilters();
   syncFilterChips();
   document.getElementById("l1-author-filter").addEventListener("input", debouncedTextFilter);
   document.getElementById("l2-model-filter").addEventListener("input", debouncedTextFilter);
