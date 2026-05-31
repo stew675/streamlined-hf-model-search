@@ -2960,10 +2960,13 @@ async function loadAuthorModels(idx, author, container) {
     cacheSet(author, baseModels);
 
      // Sync newly-fetched models into unified database (refactor Step 7)
-     // Always upsert to ensure tree nodes reference the same objects as cache,
-     // so param resolution during deepening is visible to evaluateTreeNode.
+     // Only INSERT new entries — never overwrite existing ones. Existing entries from
+     // search results or injectBaseModels have richer data (cardData, safetensors, gguf).
+     // The lightweight cache objects here lack cardData, and overwriting would cause
+     // isBase() to misclassify derivatives as base models on subsequent tree rebuilds.
+     // Param resolution during deepening syncs back to _modelDb via tryResolveModelParam/deepenBatch.
      for (const m of baseModels) {
-       _modelDb.set(m.id, m);
+       if (!_modelDb.has(m.id)) _modelDb.set(m.id, m);
      }
 
     const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
