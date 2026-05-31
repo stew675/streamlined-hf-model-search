@@ -701,12 +701,6 @@ const RenderCoordinator = {
     }
   },
 
-  _levelState: {
-    l2: new Map(),
-    l3: new Map(),
-    l4: new Map()
-  },
-
   _renderScheduled: false,
   _savedExpansions: null,
   _isRendering: false, // Hard guard against re-entrant execution
@@ -827,9 +821,6 @@ getDetailSort(levelKey) {
   get sortAsc() { return this._state.l1Sort.asc; },
   get detailSort() { return this._state.detailSort; },
   get expandedSections() { return this._state.expandedSections; },
-  get l2StateMap() { return this._levelState.l2; },
-  get l3StateMap() { return this._levelState.l3; },
-  get l4StateMap() { return this._levelState.l4; },
   get _l1AuthorFilter() { return this._state.textFilters.l1Author; },
   get _l2ModelFilter() { return this._state.textFilters.l2Model; },
   get _l3AuthorFilter() { return this._state.textFilters.l3Author; },
@@ -925,9 +916,6 @@ function resetAppState() {
   _trendingAdded = 0;
 fetchedTrending = false;
    updateRateLimitUI(false);
-  RenderCoordinator._levelState.l2.clear();
-  RenderCoordinator._levelState.l3.clear();
-  RenderCoordinator._levelState.l4.clear();
   RenderCoordinator.expandedSections.clear();
   // Clear renderData on all tree nodes (refactor Step 6)
   for (const [, node] of _modelTree.byPath) node.renderData = null;
@@ -2734,7 +2722,6 @@ function renderL2Empty(idx, author, container, popupSource) {
   const renderData = { idx, author, models: [], allBaseModels };
   const l1Node = _expansionMap.getNode(`${PREFIX_AUTHOR}${author}`);
   if (l1Node) l1Node.renderData = renderData;
-  RC._levelState.l2.set(author, renderData);
   if (allBaseModels.length > 0) {
     const pt = makePopupTrigger(`l2-empty-${author}`, "No base models match current filters",
       (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), allBaseModels.length)));
@@ -2796,7 +2783,7 @@ function setupL2Events(container) {
     // Prefer TreeNode.renderData, fall back to Map during transition
     const author = this.dataset.l2Author;
     const l1Node = _expansionMap.getNode(`${PREFIX_AUTHOR}${author}`);
-    const s = (l1Node && l1Node.renderData) || RC._levelState.l2.get(author);
+    const s = l1Node && l1Node.renderData;
     if (!s) return;
     const th = e.target.closest("thead th");
     if (th) {
@@ -2851,10 +2838,9 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
   container.dataset.l2Author = author;
   const allBaseModels = popupSource || cacheAccess(author) || [];
   const renderData = { idx, author, models, totalBeforeFilter, allBaseModels };
-  // Store on TreeNode for event handler access (replaces _levelState.l2 Map)
+  // Store on TreeNode for event handler access
   const l1Node = _expansionMap.getNode(`${PREFIX_AUTHOR}${author}`);
   if (l1Node) l1Node.renderData = renderData;
-  RC._levelState.l2.set(author, renderData);
 
   if (res.pt) res.pt.wire((p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(models.map(m => m.id)), allBaseModels.length)));
   setupL2Events(container);
@@ -2971,7 +2957,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
           const pauthor = parentId.split("/")[0];
           // Check TreeNode.renderData first, fall back to Map during transition
           const l1Node = _expansionMap.getNode(`${PREFIX_AUTHOR}${pauthor}`);
-          const st = (l1Node && l1Node.renderData) || RC._levelState.l2.get(pauthor);
+          const st = l1Node && l1Node.renderData;
           if (st) {
             const pm = st.models.find(m => m.id === parentId);
             if (pm && pm.paramB == null) pm.paramB = maxChildParam;
@@ -3056,10 +3042,9 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   container.innerHTML = html;
   container.dataset.l3Parent = parentId;
   const renderData = { l2Idx, modelIdx, parentId, children };
-  // Store on L2 TreeNode for event handler access (replaces _levelState.l3 Map)
+  // Store on L2 TreeNode for event handler access
   const l2Node = _modelTree.byModelId.get(parentId);
   if (l2Node) l2Node.renderData = renderData;
-  RC._levelState.l3.set(parentId, renderData);
 
   if (!container._delegatedL3) {
     // Event delegation: same rationale as L2 — survives innerHTML re-renders.
@@ -3067,9 +3052,8 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
     container.addEventListener("click", function(e) {
       const inner = e.target.closest(".detail-inner");
       if (inner && inner !== this) return;
-      // Prefer TreeNode.renderData, fall back to Map during transition
       const l2Node = _modelTree.byModelId.get(this.dataset.l3Parent);
-      const s = (l2Node && l2Node.renderData) || RC._levelState.l3.get(this.dataset.l3Parent);
+      const s = l2Node && l2Node.renderData;
       if (!s) return;
       const th = e.target.closest("thead th");
       if (th) {
@@ -3152,10 +3136,9 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
   const l4Key = `${parentId}|${author}`;
   container.dataset.l4Key = l4Key;
   const renderData = { l2Idx, modelIdx, gIdx, parentId, author, quants };
-  // Store on L3 TreeNode for event handler access (replaces _levelState.l4 Map)
+  // Store on L3 TreeNode for event handler access
   const l3Node = _expansionMap.getNode(`${PREFIX_GROUP}${parentId}|${author}`);
   if (l3Node) l3Node.renderData = renderData;
-  RC._levelState.l4.set(l4Key, renderData);
 
   if (pt) pt.wire((p) => renderFilteredPopup(p, getFilteredOutModels(quants, new Set(displayed.map(q => q.id)), CONFIG.POPUP_MAX_SAMPLES_L4)));
 
@@ -3164,10 +3147,9 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
     container.addEventListener("click", function(e) {
       const th = e.target.closest("thead th");
       if (!th || th.dataset.level !== "4") return;
-      // Prefer TreeNode.renderData, fall back to Map during transition
       const parts = this.dataset.l4Key.split("|");
       const l3Node = _expansionMap.getNode(`${PREFIX_GROUP}${parts[0]}|${parts.slice(1).join("|")}`);
-      const s = (l3Node && l3Node.renderData) || RC._levelState.l4.get(this.dataset.l4Key);
+      const s = l3Node && l3Node.renderData;
       if (!s) return;
       handleSortClick(th, "4", `l4-${s.parentId}-${s.author}`, "downloads", false, () => {
         renderL4(s.l2Idx, s.modelIdx, s.gIdx, s.parentId, s.author, s.quants, this);
