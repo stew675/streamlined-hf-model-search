@@ -369,7 +369,7 @@ const _modelTree = { root: null, byPath: new Map(), byModelId: new Map() };
 
 function makeTreeNode(level, type, id, parent) {
   const path = parent ? `${parent.path}/${id}` : `/${id}`;
-  return { level, type, id, path, parent, children: new Map(), modelRef: null, display: false, expanded: false, canonical: true, aggCount: 0, aggDownloads: 0, aggLikes: 0, sortKey: null, sortAsc: false };
+  return { level, type, id, path, parent, children: new Map(), modelRef: null, display: false, expanded: false, canonical: true, isOrphanQuant: false, aggCount: 0, aggDownloads: 0, aggLikes: 0, sortKey: null, sortAsc: false };
 }
 
 // ── Expansion key ↔ TreeNode bridge helpers (refactor Step 5) ──
@@ -1424,7 +1424,7 @@ function buildModelTree() {
   for (const m of all) {
     if (!modelPassesAllFilters(m)) continue;
     if (!isBase(m)) continue;
-    if (isOrphanQuant(m, knownIds)) continue; // handled separately in Step 3+
+    const isOrphan = isOrphanQuant(m, knownIds);
     if (isNestedQuant(m, knownIds, byId)) continue;
 
     const author = m.id.split("/")[0];
@@ -1438,9 +1438,12 @@ function buildModelTree() {
     let l2Node = l1Node.children.get(m.id);
     if (!l2Node) {
       l2Node = makeTreeNode(2, 'basemodel', m.id, l1Node);
+      l2Node.isOrphanQuant = isOrphan;
       l1Node.children.set(m.id, l2Node);
       _modelTree.byPath.set(l2Node.path, l2Node);
       _modelTree.byModelId.set(m.id, l2Node);
+    } else if (isOrphan && !l2Node.isOrphanQuant) {
+      l2Node.isOrphanQuant = true;
     }
 
     if (!l2Node.modelRef) {
@@ -1449,12 +1452,15 @@ function buildModelTree() {
       l2Node.modelRef = m;
     }
 
-    // Canonical tracking
-    const modelName = m.id.split("/").slice(1).join("/");
-    if (!canonicalMap[modelName]) canonicalMap[modelName] = { best: null, authors: new Set() };
-    const cm = canonicalMap[modelName];
-    cm.authors.add(author);
-    if (!cm.best || m.downloads > cm.best.downloads) cm.best = { author, downloads: m.downloads };
+    // Canonical tracking (only for non-orphan base models)
+    if (!isOrphan) {
+      const modelName = m.id.split("/").slice(1).join("/");
+      if (!canonicalMap[modelName]) canonicalMap[modelName] = { best: null, authors: new Set() };
+      const cm = canonicalMap[modelName];
+      cm.authors.add(author);
+      if (!cm.best || m.downloads > cm.best.downloads) cm.best = { author, downloads: m.downloads };
+    }
+    continue;
   }
 
   // Resolve canonical status for multi-author models
@@ -1649,7 +1655,7 @@ function evaluateTreeNode(node) {
   let selfDisplay = false;
   if (node.level === 2) {
     selfDisplay = modelPassesAllFilters(node.modelRef);
-    if (!node.canonical) selfDisplay = false; // non-canonical copies hidden by default
+    if (!node.canonical && !node.isOrphanQuant) selfDisplay = false; // non-canonical copies hidden, orphans always shown
   } else if (node.level === 4) {
     selfDisplay = passesQuantModelFilters(node.modelRef);
   }
@@ -1667,6 +1673,7 @@ function evaluateTreeNode(node) {
   node.display = effectiveDisplay;
 
   // Aggregate: include own model stats only if it passes its own filters
+  // Orphan quants are visible at L2 but excluded from parent (L1) aggregation
   const m = node.modelRef;
   let totalDl = childDl + (selfDisplay && m ? (m.downloads || 0) : 0);
   let totalLk = childLk + (selfDisplay && m ? (m.likes || 0) : 0);
@@ -1676,6 +1683,10 @@ function evaluateTreeNode(node) {
   node.aggDownloads = totalDl;
   node.aggLikes = totalLk;
 
+  // Return non-orphan counts to parent for L1 aggregation
+  if (node.isOrphanQuant && selfDisplay) {
+    return { count: totalCount - 1, downloads: totalDl - (m.downloads || 0), likes: totalLk - (m.likes || 0) };
+  }
   return { count: totalCount, downloads: totalDl, likes: totalLk };
 }
 
