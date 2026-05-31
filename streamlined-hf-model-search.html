@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260531.01';
+const APP_VERSION = '260531.02';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _allFetched = [];
 let _allFetchedById = new Map();
@@ -665,10 +665,10 @@ const RenderCoordinator = {
 
   _asyncDeepenPass() {
     if (this._isRendering) return; // Don't recurse into structural render
-    // Deepening happens inside refreshAuthorL2Section which has its own
-    // generation guard (_fetchGeneration capture at entry). No additional
-    // guard needed here since this pass is synchronous iteration only.
-    // Phase 1: deepen each expanded author
+    // The sync structural render (refreshAllExpanded with allowAsync=false) already
+    // rendered L2 at the correct filter state. This async pass only deepens unknown
+    // params (deepenBatch + derived param resolution) without re-rendering L2, so
+    // L3/L4 expansions survive the deepening cycle.
     for (const key of RC.expandedSections) {
       if (!key.startsWith(PREFIX_AUTHOR)) continue;
       const author = key.slice(PREFIX_AUTHOR.length);
@@ -679,7 +679,7 @@ const RenderCoordinator = {
       if (!inner?.isConnected) continue;
       // Only deepen if L2 data is cached (loadAuthorModels already ran)
       if (cacheAccess(author)) {
-        refreshAuthorL2Section(idx, author, inner);
+        refreshAuthorL2Section(idx, author, inner, true);
       }
     }
   },
@@ -1580,6 +1580,14 @@ function modelPassesAllFilters(m) {
   if (_hideMissingParamEnabled && pb === null) return false;
   if (!matchesTaskFilter(tag)) return false;
   if (tag && !activeTaskFilters.has(tag)) return false;
+  // Check quant chip filters: models with quant method tags in their ID
+  // (e.g., same-author fine-tunes like Qwen/Qwen2.5-7B-AWQ) are suppressed
+  // from L2 when their quant chip is toggled off.
+  const qMethods = getOrphanQuantMethod(m.id);
+  if (qMethods.length > 0) {
+    const matchesAny = qMethods.some(qm => activeFilters.has(qMethodToCategory(qm)));
+    if (!matchesAny) return false;
+  }
   return true;
 }
 function computeAuthorData() {
@@ -2428,7 +2436,7 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
     });
   }));
 }
-async function refreshAuthorL2Section(idx, author, container) {
+async function refreshAuthorL2Section(idx, author, container, skipRender) {
   if (_deepeningAuthors.has(author)) return; // already deepening
   _deepeningAuthors.add(author);
   try {
@@ -2436,7 +2444,9 @@ async function refreshAuthorL2Section(idx, author, container) {
     if (!baseModels) return;
     const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
     const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
-    renderL2(idx, author, filtered, container, nonQuantBase.length, nonQuantBase);
+    if (!skipRender) {
+      renderL2(idx, author, filtered, container, nonQuantBase.length, nonQuantBase);
+    }
     _lastFilteredCounts.set(author, filtered.length);
     const freshUnknowns = filtered.filter(m => m.paramB === null && (m.deep_status || 0) === 0);
     const gen = _fetchGeneration;
