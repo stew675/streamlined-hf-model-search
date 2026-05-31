@@ -760,10 +760,8 @@ const RenderCoordinator = {
       // Save expanded paths from current tree before rebuild (refactor Step 5)
       const savedPaths = _expansionMap.collectExpandedPaths();
 
-     // Ensure tree is built and filtered (refactor: tree-based author data)
+     // Ensure tree is built once; filter pipeline re-evaluates display flags on every render
       if (!_modelTree.root && _allFetched.length > 0) {
-        buildModelTree();
-      } else {
         buildModelTree();
       }
       runFilterPipeline();
@@ -1436,8 +1434,9 @@ function buildModelTree() {
   const canonicalMap = {};
 
   // ── Pass 1: Base models → L1 author / L2 basemodel nodes ──
+  // Note: do NOT apply modelPassesAllFilters here — tree construction includes ALL base models.
+  // Filter evaluation (date/param/task) is handled by evaluateTreeNode via node.display flags.
   for (const m of all) {
-    if (!modelPassesAllFilters(m)) continue;
     if (!isBase(m)) continue;
     const isOrphan = isOrphanQuant(m, knownIds);
     if (isNestedQuant(m, knownIds, byId)) continue;
