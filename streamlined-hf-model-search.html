@@ -1985,8 +1985,11 @@ async function tryResolveModelParam(m, gen) {
     const ps = source === 'name' ? 'name' : source === 'parent' ? 'parent_inherit' : (source === 'children' && childUsedApi) ? 'child_api' : 'child_name';
     _paramSource.set(m.id, ps);
 
+    // Sync to all model copies so tree-based filter evaluation sees updated params
     const af = _allFetchedById.get(m.id);
     if (af) af.paramB = resolved;
+    const db = _modelDb.get(m.id);
+    if (db && db !== m) db.paramB = resolved;
   }
 
   // Progressive UI update only — no structural render
@@ -2866,6 +2869,9 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
         if (p !== null) {
           m.paramB = p;
           _paramCache.set(m.id, p);
+          // Sync to unified db so tree-based filter evaluation sees updated param
+          const db = _modelDb.get(m.id);
+          if (db && db !== m) db.paramB = p;
           UI.queueUpdate(() => UI.updateCellBadge(m.id, paramBadgeHtml(m)));
         }
         success = true;
@@ -2954,9 +2960,11 @@ async function loadAuthorModels(idx, author, container) {
     cacheSet(author, baseModels);
 
      // Sync newly-fetched models into unified database (refactor Step 7)
-      for (const m of baseModels) {
-        if (!_modelDb.has(m.id)) _modelDb.set(m.id, m);
-      }
+     // Always upsert to ensure tree nodes reference the same objects as cache,
+     // so param resolution during deepening is visible to evaluateTreeNode.
+     for (const m of baseModels) {
+       _modelDb.set(m.id, m);
+     }
 
     const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
     const filterApplied = () => nonQuantBase.filter(m => modelPassesAllFilters(m));
@@ -2972,8 +2980,13 @@ async function loadAuthorModels(idx, author, container) {
       cells[3].textContent = fmt(dated.reduce((s, m) => s + m.likes, 0));
     }
 
-    if (isStale(gen) || !container.isConnected) return;
-    refreshAuthorL2Section(idx, author, container);
+   if (isStale(gen) || !container.isConnected) return;
+    await refreshAuthorL2Section(idx, author, container);
+    // After deepening completes, check if filter boundaries changed and render once.
+    // This replaces the cascade of intermediate _schedulePostDeepenRender calls that were blocked.
+    if (!isStale(gen)) {
+      _schedulePostDeepenRender(author, gen);
+    }
   } catch (err) {
     renderErrorWithRetry(container, userFriendlyError(err), () => {
       if (container.isConnected) loadAuthorModels(idx, author, container);
