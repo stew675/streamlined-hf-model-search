@@ -2068,27 +2068,6 @@ function modelPassesAllFilters(m) {
   }
   return true;
 }
-function computeAuthorData() {
-  buildCanonicalAuthors();
-  const all = _allFetched;
-  const knownIds = new Set(all.map(x => x.id));
-  const byId = new Map(all.map(x => [x.id, x]));
-  const map = {};
-  all.forEach(m => {
-    if (!modelPassesAllFilters(m)) return;
-    if (!isBase(m)) return;
-    if (isOrphanQuant(m, knownIds)) return;
-    if (isNestedQuant(m, knownIds, byId)) return;
-    if (isCanonicalCopy(m)) return;
-    const author = m.id.split("/")[0];
-    if (!map[author]) map[author] = { author, count: 0, totalDownloads: 0, totalLikes: 0 };
-    map[author].count++;
-    map[author].totalDownloads += m.downloads || 0;
-    map[author].totalLikes += m.likes || 0;
-  });
-  return Object.values(map);
-}
-
 // ── Filter Boundary Tracking ──
 function _filterBoundaryChanged(author) {
   const baseModels = cacheAccess(author);
