@@ -370,7 +370,7 @@ function makeTreeNode(level, type, id, parent) {
    return { level, type, id, path, parent, children: new Map(), modelRef: null, display: false, expanded: false, canonical: true, isOrphanQuant: false, aggCount: 0, aggDownloads: 0, aggLikes: 0, sortKey: null, sortAsc: false, renderData: null };
  }
 
-// ── Expansion key ↔ TreeNode bridge helpers (refactor Step 5) ──
+// ── Expansion key ↔ TreeNode bridge helpers ──
 // Translates string expansion keys to tree paths and vice versa.
 const _expansionMap = {
   // String key → TreeNode
@@ -726,7 +726,7 @@ const RenderCoordinator = {
       const skipSort = this._skipL1Sort;
       this._skipL1Sort = false;
 
-      // Save expanded paths from current tree before rebuild (refactor Step 5)
+      // Save expanded paths from current tree before rebuild
       const savedPaths = _expansionMap.collectExpandedPaths();
 
      // Rebuild tree when first needed or after lazy discovery adds new models
@@ -789,7 +789,7 @@ const RenderCoordinator = {
   },
 
 getDetailSort(levelKey) {
-    // Try tree-based sort state first (refactor Step 7), fall back to legacy Map
+    // Try tree-based sort state first, fall back to legacy Map
     if (levelKey.startsWith("l2-")) {
       const author = levelKey.slice(3);
       const l1Node = _expansionMap.byPath.get('/' + author);
@@ -799,7 +799,7 @@ getDetailSort(levelKey) {
   },
   setDetailSort(levelKey, value) {
     this._state.detailSort[levelKey] = value;
-    // Also store in tree node (refactor Step 7)
+    // Also store in tree node
     if (levelKey.startsWith("l2-")) {
       const author = levelKey.slice(3);
       const l1Node = _expansionMap.byPath.get('/' + author);
@@ -917,7 +917,7 @@ function resetAppState() {
 fetchedTrending = false;
    updateRateLimitUI(false);
   RenderCoordinator.expandedSections.clear();
-  // Clear renderData on all tree nodes (refactor Step 6)
+  // Clear renderData on all tree nodes
   for (const [, node] of _modelTree.byPath) node.renderData = null;
 }
 
@@ -2669,7 +2669,7 @@ async function loadAuthorModels(idx, author, container) {
 
     cacheSet(author, baseModels);
 
-    // Sync newly-fetched models into unified database (refactor Step 7)
+    // Sync newly-fetched models into unified database
       // Only INSERT new entries — never overwrite existing ones. Existing entries from
       // search results have richer data (cardData, safetensors, gguf).
      // The lightweight cache objects here lack cardData, and overwriting would cause
@@ -2970,7 +2970,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       }
 
       newEntry.results = results;
-      // Integrate discovered children into unified database and tree (refactor Step 4)
+      // Integrate discovered children into unified database and tree
       integrateDiscoveredChildren(parentId, rawResults);
 
       cacheSet(cacheKey, results);
@@ -3167,7 +3167,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 // ── Refresh & Re-expansion ──
 //   refreshAllExpanded
 function refreshAllExpanded(force, allowAsync = true) {
-  // Phase 1: re-expand L1 author rows (tree-based iteration, refactored Step 5)
+  // Phase 1: re-expand L1 author rows (tree-based iteration)
   for (const l1Node of _expansionMap.getExpandedAtLevel(1)) {
     const author = l1Node.id;
     const key = `${PREFIX_AUTHOR}${author}`;
@@ -3204,7 +3204,7 @@ function refreshAllExpanded(force, allowAsync = true) {
     }
   }
 
-  // Phase 2: re-expand L2 model rows (tree-based iteration, refactored Step 5)
+  // Phase 2: re-expand L2 model rows (tree-based iteration)
   for (const l2Node of _expansionMap.getExpandedAtLevel(2)) {
     const modelId = l2Node.modelRef ? l2Node.modelRef.id : null;
     if (!modelId) continue;
