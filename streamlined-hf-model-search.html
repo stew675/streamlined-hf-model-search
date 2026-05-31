@@ -819,9 +819,6 @@ function cacheDomRef(key, ref) { if (ref && ref.row.isConnected) _domCache.set(k
 function invalidateDomKey(key) { _domCache.delete(key); }
 function invalidateDomPrefix(prefix) { for (const k of _domCache) if (k[0].startsWith(prefix)) _domCache.delete(k[0]); }
 
-// ── Filter Boundary Tracking ──
-const _lastFilteredCounts = new Map(); // author → count
-
 // ── State Reset (Clear Cache) ──
 function resetAppState() {
   _fetchGeneration++;
@@ -844,7 +841,6 @@ function resetAppState() {
   _totalBytesReceived = 0;
   _trendingAdded = 0;
   fetchedTrending = false;
-  _lastFilteredCounts.clear();
   updateRateLimitUI(false);
   RenderCoordinator._levelState.l2.clear();
   RenderCoordinator._levelState.l3.clear();
@@ -1579,7 +1575,7 @@ async function tryResolveModelParam(m, gen) {
 }
 
 // ── Filter Pipeline ──
-//   matchesFilter → qMethodToCategory → resolveTasks → matchesTaskFilter → modelPassesAllFilters
+//   matchesFilter → qMethodToCategory → resolveTasks → matchesTaskFilter
 function matchesFilter(qMethod) {
   if (!qMethod) return true;
   const methods = qMethod.toLowerCase().split(",").map(s => s.trim());
@@ -1593,43 +1589,14 @@ function qMethodToCategory(method) {
   if (["awq", "finetune", "gguf", "mlx", "fp4", "fp8", "safetensors"].includes(m)) return m;
   return "others";
 }
-function modelPassesAllFilters(m) {
-  const tf2 = RC._state.textFilters.l2Model;
-  if (tf2 && !m.id.split("/").slice(1).join("/").toLowerCase().includes(tf2.toLowerCase())) return false;
-  if (!_injectedBaseIds.has(m.id) && !isInDateRange(m.lastModified)) return false;
-  const tag = m.pipeline_tag;
-  if (!tag && !activeSpecialFilters.has("include untagged")) return false;
-  const pb = m.paramB != null ? m.paramB : getParamCount(m);
-  if (!isInParamRange(pb)) return false;
-  if (_hideMissingParamEnabled && pb === null) return false;
-  if (!matchesTaskFilter(tag)) return false;
-  if (tag && !activeTaskFilters.has(tag)) return false;
-  // Check quant chip filters: models with quant method tags in their ID
-  // (e.g., same-author fine-tunes like Qwen/Qwen2.5-7B-AWQ) are suppressed
-  // from L2 when their quant chip is toggled off.
-  const qMethods = getOrphanQuantMethod(m.id);
-  if (qMethods.length > 0) {
-    const matchesAny = qMethods.some(qm => activeFilters.has(qMethodToCategory(qm)));
-    if (!matchesAny) return false;
-  }
-  return true;
-}
-// ── Filter Boundary Tracking ──
-function _filterBoundaryChanged(author) {
-  const baseModels = cacheAccess(author);
-  if (!baseModels) return true;
-  const nqb = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
-  const current = nqb.filter(m => modelPassesAllFilters(m)).length;
-  const prev = _lastFilteredCounts.get(author) ?? current;
-  _lastFilteredCounts.set(author, current);
-  return current !== prev;
-}
-
-// Schedule a structural render after deepening completes, but only if visibility
-// of models changed (i.e., param resolution moved models into/out of param filter range).
+// ── Post-Deepen Tree Re-evaluation ──
 function _schedulePostDeepenRender(author, gen) {
   if (isStale(gen)) return;
-  if (_filterBoundaryChanged(author)) {
+  const l1Node = _modelTree.byPath.get(author);
+  if (!l1Node) return;
+  const prevCount = l1Node.aggCount;
+  walkFilterL1(l1Node);
+  if (l1Node.aggCount !== prevCount) {
     RC.requestRender(null, true);
   }
 }
@@ -2706,23 +2673,26 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
   }));
 }
 async function refreshAuthorL2Section(idx, author, container, skipRender) {
-  if (_deepeningAuthors.has(author)) return; // already deepening
+  if (_deepeningAuthors.has(author)) return;
   _deepeningAuthors.add(author);
   try {
-    const baseModels = cacheAccess(author);
-    if (!baseModels) return;
-    const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
-    const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
-    if (!skipRender) {
-      renderL2(idx, author, filtered, container, nonQuantBase.length, nonQuantBase);
+    const l1Node = _modelTree.byPath.get(author);
+    if (!l1Node) return;
+    const allModels = [];
+    for (const l2Node of l1Node.children.values()) {
+      if (!l2Node.modelRef || !l2Node.canonical) continue;
+      allModels.push(l2Node.modelRef);
     }
-    _lastFilteredCounts.set(author, filtered.length);
+    const filtered = allModels.filter(m => passesTreeNodeFilters(m));
+    if (!skipRender) {
+      renderL2(idx, author, filtered, container, allModels.length, allModels);
+    }
     const freshUnknowns = filtered.filter(m => m.paramB === null && (m.deep_status || 0) === 0);
     const gen = _fetchGeneration;
     if (freshUnknowns.length > 0) {
       await deepenBatch(idx, author, container, freshUnknowns,
-        () => nonQuantBase.filter(m => modelPassesAllFilters(m)),
-        nonQuantBase, gen);
+        () => allModels.filter(m => passesTreeNodeFilters(m)),
+        allModels, gen);
     }
     if (_derivedParamEnabled) {
       const stillUnknown = filtered.filter(m =>
@@ -2751,43 +2721,7 @@ async function loadAuthorModels(idx, author, container) {
     );
     const models = raw.map(normalizeModel);
     cacheSet(author + "_models", models);
-
     markLocalParents(models, gen);
-
-    const authorKnownIds = new Set(models.map(x => x.id));
-    const byAuthorId = new Map(models.map(x => [x.id, x]));
-    const baseModels = models.filter(m => isBase(m)).map(m => ({
-      id: m.id,
-      downloads: m.downloads || 0,
-      likes: m.likes || 0,
-      created_at: m.createdAt || "",
-      updated_at: m.lastModified || "",
-      lastModified: m.lastModified || "",
-      tags: m.tags || [],
-      paramB: getParamCount(m),
-      pipeline_tag: m.pipeline_tag || "",
-      _orphanQuant: isOrphanQuant(m, authorKnownIds),
-      _nestedQuant: isNestedQuant(m, authorKnownIds, byAuthorId),
-      deep_status: 0
-    }));
-
-    cacheSet(author, baseModels);
-
-    const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
-    const filterApplied = () => nonQuantBase.filter(m => modelPassesAllFilters(m));
-
-    const dated = filterApplied();
-
-    if (isStale(gen)) return;
-    const row = document.querySelector(`.l1-row[data-author="${CSS.escape(author)}"]`);
-    if (row) {
-      const cells = row.querySelectorAll("td");
-      cells[1].textContent = dated.length;
-      cells[2].textContent = fmt(dated.reduce((s, m) => s + m.downloads, 0));
-      cells[3].textContent = fmt(dated.reduce((s, m) => s + m.likes, 0));
-    }
-
-    if (isStale(gen) || !container.isConnected) return;
 
     // Dual-write fetched models to _modelDb so the tree has this author's data
     for (const m of models) {
@@ -2797,6 +2731,20 @@ async function loadAuthorModels(idx, author, container) {
     }
     rebuildTree();
 
+    if (isStale(gen)) return;
+    const row = document.querySelector(`.l1-row[data-author="${CSS.escape(author)}"]`);
+    if (row) {
+      const l1Node = _modelTree.byPath.get(author);
+      const count = l1Node ? l1Node.aggCount : 0;
+      const dl = l1Node ? l1Node.aggDownloads : 0;
+      const lk = l1Node ? l1Node.aggLikes : 0;
+      const cells = row.querySelectorAll("td");
+      cells[1].textContent = count;
+      cells[2].textContent = fmt(dl);
+      cells[3].textContent = fmt(lk);
+    }
+
+    if (isStale(gen) || !container.isConnected) return;
     refreshAuthorL2Section(idx, author, container);
   } catch (err) {
     renderErrorWithRetry(container, userFriendlyError(err), () => {
@@ -2819,9 +2767,8 @@ function thHtml(c, state, level, colindex) {
 }
 
 function renderL2Empty(idx, author, container, popupSource) {
-  const cached = cacheAccess(author);
-  const hasData = (popupSource && popupSource.length > 0) || (cached && cached.length > 0);
-  const allBaseModels = popupSource || cached || [];
+  const hasData = popupSource && popupSource.length > 0;
+  const allBaseModels = popupSource || [];
   RC._levelState.l2.set(author, { idx, author, models: [], allBaseModels });
   if (allBaseModels.length > 0) {
     const pt = makePopupTrigger(`l2-empty-${author}`, "No base models match current filters",
@@ -2902,9 +2849,11 @@ function setupL2Events(container) {
       if (toggleSection(detailRow, tog, modelKey, `${PREFIX_GROUP}${modelId}|`)) {
         cacheDomRef(modelKey, { row: tr, detailRow, inner, toggle: tog });
         const key = `children-${modelId}`;
-        const cached = cacheAccess(key);
-        if (cached) {
-          renderL3(l2Idx, modelIdx, modelId, cached, inner);
+        const treeChildren = getTreeChildren(modelId);
+        if (treeChildren.length > 0) {
+          renderL3(l2Idx, modelIdx, modelId, treeChildren, inner);
+        } else if (cacheAccess(key)) {
+          renderL3(l2Idx, modelIdx, modelId, cacheAccess(key), inner);
         } else {
           inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
           loadChildren(l2Idx, modelIdx, modelId, inner);
@@ -2934,7 +2883,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
   const res = buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state);
   container.innerHTML = res.html;
   container.dataset.l2Author = author;
-  const allBaseModels = popupSource || cacheAccess(author) || [];
+  const allBaseModels = popupSource || [];
   RC._levelState.l2.set(author, { idx, author, models, totalBeforeFilter, allBaseModels });
 
   if (res.pt) res.pt.wire((p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(models.map(m => m.id)), allBaseModels.length)));
