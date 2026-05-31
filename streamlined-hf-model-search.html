@@ -359,6 +359,7 @@
 const APP_VERSION = '260531.02';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _allFetched = [];
+let _allFetchedById = new Map(); // O(1) model lookup — rebuilt by _rebuildAllFetchedMap()
 // Unified model database — single Map keyed by model ID. Replaces _allFetched + _allFetchedById.
 const _modelDb = new Map();
 let _authorData = [];
