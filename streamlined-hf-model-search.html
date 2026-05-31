@@ -2400,6 +2400,7 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
   unknownModels.forEach(m => m.deep_status = 1);
   UI.setStatus(`Resolving parameters for ${author}… (0/${totalUnk})`);
   await Promise.all(unknownModels.map((m) => {
+    let success = false;
     return fetchJson(`https://huggingface.co/api/models/${m.id}?full=true`).then(
       (full) => {
         if (isStale(gen)) return;
@@ -2411,11 +2412,12 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
           _paramCache.set(m.id, p);
           UI.queueUpdate(() => UI.updateCellBadge(m.id, paramBadgeHtml(m)));
         }
+        success = true;
       },
       (e) => { console.warn("Failed to fetch param for", m.id, e); }
     ).finally(() => {
       if (isStale(gen)) return;
-      m.deep_status = 2;
+      m.deep_status = success ? 2 : 0;
       completed++;
       UI.setStatus(`Resolving parameters for ${author}… (${completed}/${totalUnk})`);
       if (completed === totalUnk) {
