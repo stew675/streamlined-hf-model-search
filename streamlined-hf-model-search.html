@@ -651,7 +651,12 @@ const RenderCoordinator = {
       const skipSort = this._skipL1Sort;
       this._skipL1Sort = false;
 
-      _authorData = computeAuthorData();
+     // Ensure tree is built and filtered (refactor: tree-based author data)
+      if (!_modelTree.root && _allFetched.length > 0) {
+        buildModelTree();
+      }
+      runFilterPipeline();
+      _authorData = computeAuthorDataFromTree();
       this.renderL1(_authorData, skipSort);
       _domCache.clear(); // renderL1 replaces innerHTML — all cached DOM refs are now detached
       this.updateArrows();
@@ -1061,7 +1066,6 @@ function applyFilters(force, deep) {
   // Fast path: no new data needed, just re-render with current filters.
   if (newTasks.length === 0 && !needUntagged && fetchedTrending && !deep) {
     markLocalParents(_allFetched, gen);
-    buildModelTree();
     reenable();
     recomputeAndRender(savedExpansions);
     return;
@@ -1143,6 +1147,7 @@ function applyFilters(force, deep) {
       if (isStale(gen)) return;
       // Tree build: construct hierarchy from fetched data (standalone verification phase)
       buildModelTree();
+      runFilterPipeline();
       recomputeAndRender(savedExpansions);
       UI.setStatus("");
     } catch (e) {
@@ -1296,7 +1301,7 @@ function buildModelTree() {
   for (const m of all) {
     if (!modelPassesAllFilters(m)) continue;
     if (!isBase(m)) continue;
-    if (isOrphanQuant(m, knownIds)) continue;
+    if (isOrphanQuant(m, knownIds)) continue; // handled separately in Step 3+
     if (isNestedQuant(m, knownIds, byId)) continue;
 
     const author = m.id.split("/")[0];
@@ -1307,7 +1312,6 @@ function buildModelTree() {
       _modelTree.byPath.set(l1Node.path, l1Node);
     }
 
-    const modelName = m.id.split("/").slice(1).join("/");
     let l2Node = l1Node.children.get(m.id);
     if (!l2Node) {
       l2Node = makeTreeNode(2, 'basemodel', m.id, l1Node);
@@ -1323,6 +1327,7 @@ function buildModelTree() {
     }
 
     // Canonical tracking
+    const modelName = m.id.split("/").slice(1).join("/");
     if (!canonicalMap[modelName]) canonicalMap[modelName] = { best: null, authors: new Set() };
     const cm = canonicalMap[modelName];
     cm.authors.add(author);
@@ -1429,6 +1434,94 @@ function treeStats() {
     if (n.level === 1) l1++; else if (n.level === 2) l2++; else if (n.level === 3) l3++; else if (n.level === 4) l4++;
   }
   return `Tree: ${l1} authors, ${l2} base models, ${l3} quant authors, ${l4} quants (${_modelTree.byModelId.size} model-bearing nodes)`;
+}
+
+// ── Filter Pipeline (Tree Walk) ──
+// Single recursive walk: evaluates filters on model nodes, propagates parent
+// activation upward, and aggregates stats bottom-up. Replaces computeAuthorData(),
+// _injectedBaseIds injection, and boundary tracking.
+
+function runFilterPipeline() {
+  if (!_modelTree.root || !_allFetched.length) return;
+  for (const [, authorNode] of _modelTree.root.children) {
+    evaluateTreeNode(authorNode);
+  }
+}
+
+// Recursive evaluator: returns { count, downloads, likes } from this subtree.
+function evaluateTreeNode(node) {
+  if (!node.modelRef) {
+    // Author node or root — recurse into children first, then aggregate on return
+    let count = 0, dl = 0, lk = 0;
+    for (const [, child] of node.children) {
+      const r = evaluateTreeNode(child);
+      count += r.count; dl += r.downloads; lk += r.likes;
+    }
+    node.aggCount = count;
+    node.aggDownloads = dl;
+    node.aggLikes = lk;
+    node.display = (count > 0);
+    return { count, downloads: dl, likes: lk };
+  }
+
+  // Model-bearing node (L2 basemodel or L4 quant) — evaluate own filters first
+  let selfDisplay = false;
+  if (node.level === 2) {
+    selfDisplay = modelPassesAllFilters(node.modelRef);
+    if (!node.canonical) selfDisplay = false; // non-canonical copies hidden by default
+  } else if (node.level === 4) {
+    selfDisplay = passesQuantModelFilters(node.modelRef);
+  }
+
+  // Recurse into children (L2 basemodels may have L3/L4 quant descendants)
+  let childCount = 0, childDl = 0, childLk = 0;
+  for (const [, child] of node.children) {
+    const r = evaluateTreeNode(child);
+    childCount += r.count; childDl += r.downloads; childLk += r.likes;
+  }
+
+  // Parent propagation: if any child is active, this node becomes visible too
+  // (equivalent to current _injectedBaseIds behavior)
+  const effectiveDisplay = selfDisplay || (childCount > 0);
+  node.display = effectiveDisplay;
+
+  // Aggregate: include own model stats only if it passes its own filters
+  const m = node.modelRef;
+  let totalDl = childDl + (selfDisplay && m ? (m.downloads || 0) : 0);
+  let totalLk = childLk + (selfDisplay && m ? (m.likes || 0) : 0);
+  const totalCount = childCount + (selfDisplay ? 1 : 0);
+
+  node.aggCount = totalCount;
+  node.aggDownloads = totalDl;
+  node.aggLikes = totalLk;
+
+  return { count: totalCount, downloads: totalDl, likes: totalLk };
+}
+
+// Quant-specific filter evaluation for L4 nodes (separate from L2 modelPassesAllFilters)
+function passesQuantModelFilters(m) {
+  if (!isInDateRange(m.lastModified)) return false;
+  if (!matchesFilter(getOrphanQuantMethod(m.id).join(",") || "safetensors")) return false;
+  const tf4 = RC._state.textFilters.l4Model;
+  if (tf4 && !m.id.split("/").slice(1).join("/").toLowerCase().includes(tf4.toLowerCase())) return false;
+  return true;
+}
+
+// ── Tree-Based Author Data (replaces computeAuthorData) ──
+function computeAuthorDataFromTree() {
+  if (!_modelTree.root) return [];
+  const result = [];
+  for (const [, authorNode] of _modelTree.root.children) {
+    if (!authorNode.display) continue;
+    result.push({
+      author: authorNode.id,
+      count: authorNode.aggCount,
+      totalDownloads: authorNode.aggDownloads,
+      totalLikes: authorNode.aggLikes,
+      _treeNode: authorNode // reference for render pipeline integration
+    });
+  }
+  return result;
 }
 
 // ═══════════════════════════════════════════════════════════════
