@@ -1,5 +1,17 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.25 — Perf: Cache expensive filter computations on tree nodes
+
+- `walkFilterL2` now stores `_orphanQuantMethods` on L2 nodes. `buildL2TableHtml`
+  reads this cached array instead of re-running `getOrphanQuantMethod()` per row.
+- `walkFilterL4` now stores `_quantFilterString` on L4 nodes. `renderL3` and
+  `renderL4` read this cached string instead of re-running `getQuantFilterString()`
+  (which involves regex + tag iteration) per displayed child. Major win for models
+  with hundreds of quants.
+- `renderL3` now uses `l3Node.aggCount` / `l3Node.aggDownloads` when no L3 text
+  filter is active, avoiding redundant `reduce` passes over displayed children.
+  Only computes from scratch when `RC._state.textFilters.l3Author` is set.
+
 ### v260601.24 — Fix: L3 Updated Date Computed from Displayed Children + L2 Fallback
 
 - `renderL3` now computes `maxLastModified` directly from the `displayedL4` array

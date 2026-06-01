@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.24';
+const APP_VERSION = '260601.25';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -1860,6 +1860,7 @@ function walkFilterL2(node) {
   }
 
   const qMethods = ref ? getOrphanQuantMethod(ref.id) : [];
+  node._orphanQuantMethods = qMethods;
   const selfQuantMatch = qMethods.length > 0 && qMethods.some(qm => activeFilters.has(qMethodToCategory(qm)));
   const hasOrphanQuant = qMethods.length > 0;
   let includeSelf = passes && (!hasOrphanQuant || selfQuantMatch);
@@ -1913,8 +1914,10 @@ function walkFilterL3(node) {
 }
 function walkFilterL4(node) {
   const ref = node.modelRef;
+  const qStr = ref ? getQuantFilterString(ref) : 'derivative';
+  node._quantFilterString = qStr;
   node._filterDate = ref ? isInDateRange(ref.lastModified) : false;
-  node._filterQuant = ref ? matchesFilter(getQuantFilterString(ref)) : false;
+  node._filterQuant = ref ? matchesFilter(qStr) : false;
   node._filterTask = ref ? matchesTaskFilter(ref.pipeline_tag) : false;
   node._filterUntagged = ref ? (!(!ref.pipeline_tag && !activeSpecialFilters.has("include untagged"))) : false;
   node.display = node._filterDate && node._filterQuant && node._filterTask && node._filterUntagged;
@@ -2849,7 +2852,8 @@ function buildL2TableHtml(idx, author, sorted, state) {
   l2Cols.forEach((c, i) => { html += thHtml(c, state, "2", i + 1); });
   html += `</tr></thead><tbody>`;
   html += sorted.map((m, mIdx) => {
-    const qMethods = getOrphanQuantMethod(m.id);
+    const l2Node = _modelTree.byModelId.get(m.id);
+    const qMethods = l2Node ? l2Node._orphanQuantMethods : getOrphanQuantMethod(m.id);
     const rowIdx = 2 + mIdx * 2;
     const detailRowIdx = rowIdx + 1;
     const zebra = mIdx % 2 === 0 ? "row-even" : "row-odd";
@@ -3135,8 +3139,8 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
     }, null);
     groups[author] = {
       author,
-      count: displayedL4.length,
-      totalDownloads: displayedL4.reduce((s, n) => s + (n.modelRef?.downloads || 0), 0),
+      count: tf3 ? displayedL4.length : l3Node.aggCount,
+      totalDownloads: tf3 ? displayedL4.reduce((s, n) => s + (n.modelRef?.downloads || 0), 0) : l3Node.aggDownloads,
       maxLastModified: childMaxLM || l2Node.modelRef?.lastModified || null,
       quants: displayedL4.map(n => ({
         id: n.modelRef.id,
@@ -3145,7 +3149,7 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
         likes: n.modelRef.likes || 0,
         lastModified: n.modelRef.lastModified || '',
         pipeline_tag: n.modelRef.pipeline_tag || '',
-        q_method: getQuantFilterString(n.modelRef)
+        q_method: n._quantFilterString || getQuantFilterString(n.modelRef)
       }))
     };
   }
@@ -3248,7 +3252,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
       likes: n.modelRef.likes || 0,
       lastModified: n.modelRef.lastModified || '',
       pipeline_tag: n.modelRef.pipeline_tag || '',
-      q_method: getQuantFilterString(n.modelRef)
+      q_method: n._quantFilterString || getQuantFilterString(n.modelRef)
     }));
 
   const st = RC.getDetailSort(`l4-${parentId}-${author}`) || { key: "downloads", asc: false };
