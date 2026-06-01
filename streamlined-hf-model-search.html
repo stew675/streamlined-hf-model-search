@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.21';
+const APP_VERSION = '260601.22';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -1775,6 +1775,8 @@ function resolveTrueBase(modelOrId) {
     } else {
       const m = getModelRef(current);
       if (!m || !m.cardData) return current;
+      // Stop at same-author fine-tunes / true base models — they're L2 parents.
+      if (isBase(m)) return current;
       baseId = getBaseModelId(m.cardData);
     }
     if (!baseId || visited.has(baseId)) return current;

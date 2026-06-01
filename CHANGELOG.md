@@ -1,5 +1,14 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.22 — Fix: resolveTrueBase Chains Past Same-Author Fine-Tunes
+
+- `resolveTrueBase` now stops when it encounters a model that `isBase` considers a base
+  (same-author derivative or true base), preventing intermediate same-author fine-tunes
+  like `gemma-4-26B-A4B-it` from being skipped in favor of their parent base model.
+  Previously, quants of `google/gemma-4-26B-A4B-it` were incorrectly placed under
+  `google/gemma-4-26B-A4B` because the resolver walked through the `-it` node's
+  `cardData.base_model` chain.
+
 ### v260601.15 — Review Follow-Ups: Date Stability, A11y, Normalization Safety
 
 - Date slider conversion now uses UTC day-start arithmetic to avoid local DST/day-boundary drift while preserving relative-to-now behavior for the upper bound
