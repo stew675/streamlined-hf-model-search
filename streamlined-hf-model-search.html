@@ -934,7 +934,7 @@ function upsertModelIntoTree(model) {
     return;
   }
 
-  const trueBase = resolveTrueBase(modelRef.id);
+  const trueBase = resolveTrueBase(modelRef);
   let l2Node = getModelNode(trueBase);
   if (!l2Node) {
     const trueBaseLower = trueBase.toLowerCase();
@@ -1687,14 +1687,22 @@ function _schedulePostDeepenRender(author, gen) {
 // Follows cardData.base_model chain iteratively to find the true base ancestor.
 // Stops when chain is exhausted or the next hop is not in tree model refs.
 // Max 10 hops with cycle detection via visited Set.
-function resolveTrueBase(modelId) {
-  let current = modelId;
+function resolveTrueBase(modelOrId) {
+  const startId = typeof modelOrId === 'string' ? modelOrId : (modelOrId && modelOrId.id) || '';
+  if (!startId) return startId;
+  let current = startId;
+  const startBase = typeof modelOrId === 'string' ? null : getBaseModelId(modelOrId.cardData);
   const visited = new Set();
   for (let i = 0; i < 10; i++) {
     visited.add(current);
-    const m = getModelRef(current);
-    if (!m || !m.cardData) return current;
-    const baseId = getBaseModelId(m.cardData);
+    let baseId = null;
+    if (current === startId && startBase) {
+      baseId = startBase;
+    } else {
+      const m = getModelRef(current);
+      if (!m || !m.cardData) return current;
+      baseId = getBaseModelId(m.cardData);
+    }
     if (!baseId || visited.has(baseId)) return current;
     current = baseId;
   }
@@ -2888,8 +2896,9 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
   if (entry) {
     await entry.promise;
     if (isStale(gen)) return;
-    if (entry.results && container.isConnected) {
-      renderL3(l2Idx, modelIdx, parentId, entry.results, container);
+    if (entry.ready && container.isConnected) {
+      const treeChildren = getTreeChildren(parentId);
+      renderL3(l2Idx, modelIdx, parentId, treeChildren, container);
       return;
     }
     // Inflight entry resolved with no results (fetch failed) or old container was
@@ -2897,7 +2906,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
     // rendered, rather than leaving it stuck in "Fetching..." state.
   }
 
-  const newEntry = { promise: null, results: null };
+  const newEntry = { promise: null, ready: false };
   newEntry.promise = (async () => {
     try {
       const modelName = parentId.split("/").slice(1).join("/");
@@ -2983,7 +2992,6 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
         }
       }
 
-      newEntry.results = results;
       // Upsert fetched children into tree-backed store so hierarchy stays in sync
       if (isStale(gen)) return;
       for (const c of results) {
@@ -2997,8 +3005,12 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
           cardData: { base_model: parentId }
         });
       }
+      newEntry.ready = true;
       if (isStale(gen)) return;
-      if (container.isConnected) renderL3(l2Idx, modelIdx, parentId, results, container);
+      if (container.isConnected) {
+        const treeChildren = getTreeChildren(parentId);
+        renderL3(l2Idx, modelIdx, parentId, treeChildren, container);
+      }
     } catch (err) {
       if (isStale(gen)) return;
       if (container.isConnected) renderErrorWithRetry(container, userFriendlyError(err), () => {
