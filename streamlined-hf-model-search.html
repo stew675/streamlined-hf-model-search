@@ -884,10 +884,6 @@ const _inflightChildren = new Map();
 
 // ── DOM Reference Cache ──
 const _domCache = new Map();
-// L2 render data keyed by author — serves as fallback when tree hasn't been rebuilt after loadAuthorModels
-const _l2RenderData = new Map();
-// L3 render data keyed by parentId — fallback when tree hasn't been rebuilt after loadChildren
-const _l3RenderData = new Map();
 function cacheDomRef(key, ref) { if (ref && ref.row.isConnected) _domCache.set(key, ref); }
 function invalidateDomKey(key) { _domCache.delete(key); }
 function invalidateDomPrefix(prefix) { for (const k of _domCache) if (k[0].startsWith(prefix)) _domCache.delete(k[0]); }
@@ -1397,6 +1393,34 @@ function integrateDiscoveredChildren(parentModelId, rawModels) {
   }
 
   _treeDirty = true;
+}
+
+// Integrate a newly-discovered author's base models into the existing tree.
+// Mirrors Pass 1 of buildModelTree but only for this one author — preserves all other nodes' renderData.
+function integrateAuthorIntoTree(author, baseModels) {
+  if (!baseModels.length || !_modelTree.root) return;
+
+  let l1Node = _modelTree.byPath.get('/' + author);
+  if (!l1Node) {
+    l1Node = makeTreeNode(1, 'author', author, _modelTree.root);
+    _modelTree.root.children.set(author, l1Node);
+    _modelTree.byPath.set(l1Node.path, l1Node);
+  }
+
+  const knownIds = new Set(baseModels.map(m => m.id));
+  for (const m of baseModels) {
+    let l2Node = l1Node.children.get(m.id);
+    if (!l2Node) {
+      l2Node = makeTreeNode(2, 'basemodel', m.id, l1Node);
+      l2Node.isOrphanQuant = isOrphanQuant(m, knownIds);
+      l1Node.children.set(m.id, l2Node);
+      _modelTree.byPath.set(l2Node.path, l2Node);
+      _modelTree.byModelId.set(m.id, l2Node);
+    }
+  }
+
+  // Run filter pipeline on just this author's subtree
+  evaluateTreeNode(l1Node);
 }
 
 // Mark tree dirty — triggers rebuild on next render.
@@ -2673,15 +2697,18 @@ async function loadAuthorModels(idx, author, container) {
 
     cacheSet(author, baseModels);
 
-    // Sync newly-fetched models into unified database
+// Sync newly-fetched models into unified database and integrate into tree
       // Only INSERT new entries — never overwrite existing ones. Existing entries from
       // search results have richer data (cardData, safetensors, gguf).
      // The lightweight cache objects here lack cardData, and overwriting would cause
      // isBase() to misclassify derivatives as base models on subsequent tree rebuilds.
      // Param resolution during deepening syncs back to _modelDb via tryResolveModelParam/deepenBatch.
-     for (const m of baseModels) {
-       if (!_modelDb.has(m.id)) _modelDb.set(m.id, m);
-     }
+    for (const m of baseModels) {
+        if (!_modelDb.has(m.id)) _modelDb.set(m.id, m);
+      }
+
+    // Integrate this author's models into the tree so event handlers can find them
+    integrateAuthorIntoTree(author, baseModels.filter(m => !m._orphanQuant && !m._nestedQuant));
 
     const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
     const filterApplied = () => nonQuantBase.filter(m => modelPassesAllFilters(m));
@@ -2784,12 +2811,10 @@ function setupL2Events(container) {
   const l2Click = function(e) {
     const inner = e.target.closest(".detail-inner");
     if (inner && inner !== this) return;
-    // Get renderData: prefer TreeNode, fall back to _l2RenderData Map when tree hasn't been rebuilt after loadAuthorModels
+    // Get renderData from TreeNode — tree is kept in sync via integrateAuthorIntoTree
     const author = this.dataset.l2Author;
-    let s = null;
     const l1Node = _expansionMap.getNode(`${PREFIX_AUTHOR}${author}`);
-    if (l1Node) s = l1Node.renderData;
-    if (!s) s = _l2RenderData.get(author);
+    const s = l1Node && l1Node.renderData;
     if (!s) return;
     const th = e.target.closest("thead th");
     if (th) {
@@ -2847,8 +2872,6 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
   // Store on TreeNode for event handler access
   const l1Node = _expansionMap.getNode(`${PREFIX_AUTHOR}${author}`);
   if (l1Node) l1Node.renderData = renderData;
-  // Also store in fallback Map — tree may not have this author yet (fetched via loadAuthorModels after initial build)
-  _l2RenderData.set(author, renderData);
 
   if (res.pt) res.pt.wire((p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(models.map(m => m.id)), allBaseModels.length)));
   setupL2Events(container);
@@ -3053,8 +3076,6 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   // Store on L2 TreeNode for event handler access
   const l2Node = _modelTree.byModelId.get(parentId);
   if (l2Node) l2Node.renderData = renderData;
-  // Also store in fallback Map — tree may not have this model yet
-  _l3RenderData.set(parentId, renderData);
 
   if (!container._delegatedL3) {
     // Event delegation: same rationale as L2 — survives innerHTML re-renders.
@@ -3062,11 +3083,10 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
     container.addEventListener("click", function(e) {
       const inner = e.target.closest(".detail-inner");
       if (inner && inner !== this) return;
-      // Get renderData: prefer TreeNode, fall back to _l3RenderData Map when tree hasn't been rebuilt
+      // Get renderData from TreeNode — tree is kept in sync via integrateAuthorIntoTree + Pass 2 of buildModelTree
       let s = null;
       const l2Node = _modelTree.byModelId.get(this.dataset.l3Parent);
       if (l2Node) s = l2Node.renderData;
-      if (!s) s = _l3RenderData.get(this.dataset.l3Parent);
       if (!s) return;
       const th = e.target.closest("thead th");
       if (th) {
