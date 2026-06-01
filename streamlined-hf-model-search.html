@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260531.08';
+const APP_VERSION = '260531.09';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -755,6 +755,7 @@ function createTreeNode(level, type, id, modelRef) {
     parent: null,
     children: new Map(),
     modelRef: modelRef || null,
+    placeholder: false,
     display: true,
     expanded: false,
     canonical: true,
@@ -793,6 +794,164 @@ function hasAnyModels() {
     if (node && node.modelRef && node.modelRef.id) return true;
   }
   return false;
+}
+
+function ensureTreeRoot() {
+  if (_modelTree.root) return _modelTree.root;
+  const root = createTreeNode(0, 'root', '');
+  _modelTree.root = root;
+  return root;
+}
+
+function ensureL1AuthorNode(author) {
+  ensureTreeRoot();
+  const key = (author || '').toLowerCase();
+  let node = _modelTree.authorByLower.get(key);
+  if (!node) {
+    node = createTreeNode(1, 'author', author);
+    node.parent = _modelTree.root;
+    _modelTree.root.children.set(author, node);
+    _modelTree.authorByLower.set(key, node);
+  }
+  _modelTree.byPath.set(author, node);
+  return node;
+}
+
+function _mergeModelRef(existing, incoming) {
+  if (!existing) return incoming;
+  const preserveAttempted = !!existing._inferredAttempted;
+  const preserveDeep = existing.deep_status;
+  Object.assign(existing, incoming);
+  if (preserveAttempted) existing._inferredAttempted = true;
+  if (preserveDeep != null) existing.deep_status = preserveDeep;
+  return existing;
+}
+
+function ensureL2BaseNode(baseId, modelRefOrStub) {
+  const author = baseId.split('/')[0];
+  const l1Node = ensureL1AuthorNode(author);
+  let l2Node = getModelNode(baseId);
+  if (l2Node && l2Node.level === 2) {
+    if (modelRefOrStub) {
+      l2Node.modelRef = _mergeModelRef(l2Node.modelRef, modelRefOrStub);
+      if (l2Node.placeholder && l2Node.modelRef && l2Node.modelRef.id === baseId) {
+        l2Node.placeholder = false;
+        l2Node.display = true;
+        l2Node.canonical = true;
+      }
+    }
+    if (l2Node.parent !== l1Node) {
+      if (l2Node.parent) l2Node.parent.children.delete(baseId);
+      l1Node.children.set(baseId, l2Node);
+      l2Node.parent = l1Node;
+    }
+    _modelTree.byPath.set(baseId, l2Node);
+    _modelTree.byModelId.set(baseId, l2Node);
+    return l2Node;
+  }
+
+  l2Node = createTreeNode(2, 'basemodel', baseId, modelRefOrStub || null);
+  if (!modelRefOrStub) {
+    l2Node.placeholder = true;
+    l2Node.display = false;
+    l2Node.canonical = false;
+  }
+  l1Node.children.set(baseId, l2Node);
+  l2Node.parent = l1Node;
+  _modelTree.byPath.set(baseId, l2Node);
+  _modelTree.byModelId.set(baseId, l2Node);
+  return l2Node;
+}
+
+function ensureL3Node(l2Node, quantAuthor) {
+  let l3Node = l2Node.children.get(quantAuthor);
+  if (!l3Node) {
+    l3Node = createTreeNode(3, 'quantauthor', quantAuthor);
+    l2Node.children.set(quantAuthor, l3Node);
+    l3Node.parent = l2Node;
+  }
+  return l3Node;
+}
+
+function recomputeCanonicalForName(modelName) {
+  const candidates = [];
+  for (const node of _modelTree.byModelId.values()) {
+    if (!node || node.level !== 2 || !node.modelRef || node.placeholder) continue;
+    const name = node.id.split('/').slice(1).join('/');
+    if (name === modelName) candidates.push(node);
+  }
+  if (candidates.length <= 1) {
+    for (const node of candidates) node.canonical = true;
+    return;
+  }
+  let best = candidates[0];
+  for (const node of candidates) {
+    const bestDl = best.modelRef && best.modelRef.downloads ? best.modelRef.downloads : 0;
+    const dl = node.modelRef && node.modelRef.downloads ? node.modelRef.downloads : 0;
+    if (dl > bestDl) best = node;
+  }
+  for (const node of candidates) {
+    node.canonical = node === best;
+    if (!node.canonical) node.display = false;
+  }
+}
+
+function attachOrUpdateL4Node(l3Node, modelRef) {
+  let l4Node = l3Node.children.get(modelRef.id);
+  if (l4Node) {
+    l4Node.modelRef = _mergeModelRef(l4Node.modelRef, modelRef);
+    _modelTree.byModelId.set(modelRef.id, l4Node);
+    return l4Node;
+  }
+  l4Node = createTreeNode(4, 'quant', modelRef.id, modelRef);
+  l4Node.parent = l3Node;
+  l3Node.children.set(modelRef.id, l4Node);
+  _modelTree.byModelId.set(modelRef.id, l4Node);
+  return l4Node;
+}
+
+function upsertModelIntoTree(model) {
+  if (!model || !model.id) return;
+  ensureTreeRoot();
+  _modelDb.set(model.id, model);
+
+  const existingNode = getModelNode(model.id);
+  const modelRef = existingNode && existingNode.modelRef ? _mergeModelRef(existingNode.modelRef, model) : model;
+
+  if (isBase(modelRef)) {
+    const l2Node = ensureL2BaseNode(modelRef.id, modelRef);
+    l2Node.placeholder = false;
+    const name = modelRef.id.split('/').slice(1).join('/');
+    recomputeCanonicalForName(name);
+    _modelTree.byModelId.set(modelRef.id, l2Node);
+    return;
+  }
+
+  const trueBase = resolveTrueBase(modelRef.id);
+  let l2Node = getModelNode(trueBase);
+  if (!l2Node || l2Node.level !== 2) {
+    const paramFromName = extractParamFromId(trueBase);
+    const stubRef = paramFromName !== null ?
+      { id: trueBase, paramB: paramFromName, downloads: 0, likes: 0, lastModified: '' } :
+      { id: trueBase, paramB: null, downloads: 0, likes: 0, lastModified: '' };
+    l2Node = ensureL2BaseNode(trueBase, stubRef);
+    l2Node.placeholder = true;
+    l2Node.display = false;
+    l2Node.canonical = false;
+  }
+
+  const quantAuthor = modelRef.id.split('/')[0];
+  const l3Node = ensureL3Node(l2Node, quantAuthor);
+  const l4Node = attachOrUpdateL4Node(l3Node, modelRef);
+
+  if (existingNode && existingNode.level === 4 && existingNode.parent !== l3Node) {
+    if (existingNode.parent) existingNode.parent.children.delete(modelRef.id);
+    l3Node.children.set(modelRef.id, existingNode);
+    existingNode.parent = l3Node;
+    _modelTree.byModelId.set(modelRef.id, existingNode);
+  } else {
+    _modelTree.byModelId.set(modelRef.id, l4Node);
+  }
 }
 
 
@@ -994,7 +1153,7 @@ function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
     m.paramB = getParamCount(m);
     if (!m.pipeline_tag && pipelineTag) m.pipeline_tag = pipelineTag;
     if (filterFn && !filterFn(m)) continue;
-    _modelDb.set(m.id, m);
+    upsertModelIntoTree(m);
     added++;
   }
   return added;
@@ -1183,7 +1342,7 @@ async function injectBaseModels(onBatch) {
   await Promise.all(promises);
 
   if (isStale(gen)) return;
-  for (const m of injected) _modelDb.set(m.id, m);
+  for (const m of injected) upsertModelIntoTree(m);
 
   rebuildTree();  // build tree from _modelDb now that all data is in
   UI.setStatus("");
@@ -2638,11 +2797,9 @@ async function loadAuthorModels(idx, author, container) {
     );
     const models = raw.map(normalizeModel);
 
-    // Dual-write fetched models to _modelDb so the tree has this author's data
+    // Upsert fetched models into tree-backed store for this author
     for (const m of models) {
-      if (!_modelDb.has(m.id)) {
-        _modelDb.set(m.id, m);
-      }
+      if (!hasModel(m.id)) upsertModelIntoTree(m);
     }
     rebuildTree();
 
@@ -2933,10 +3090,10 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       }
 
       newEntry.results = results;
-      // Dual-write fetched children to _modelDb so the tree has them
+      // Upsert fetched children into tree-backed store so hierarchy stays in sync
       for (const c of results) {
-        if (!_modelDb.has(c.id)) {
-          _modelDb.set(c.id, {
+        if (!hasModel(c.id)) {
+          upsertModelIntoTree({
             id: c.id,
             downloads: c.downloads || 0,
             likes: c.likes || 0,
