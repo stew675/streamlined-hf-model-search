@@ -315,9 +315,9 @@
     <button id="get-quick-results-btn" class="action-btn" title="Fetch top models per pipeline tag (by downloads + lastModified) — no cross-author base model injection. Faster but may miss quantizations whose parent base model is from a different author.">Get Quick Results</button>
     <button id="get-deep-results-btn" class="action-btn" title="Same as Quick, plus resolve cross-author base models referenced by quantizations via individual model API calls. Slower but surfaces more quantizations.">Get Deep Results</button>
   </div>
-  <button type="button" id="clear-cache-btn" title="Clears: in-memory param cache, LRU model cache, inflight fetch state, canonical dedup cache, and inference tracking. Collapses expanded sections (re-expand to reload). Preserves all filters and sliders.">Clear Cache</button><span id="clear-cache-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></span>
+  <button type="button" id="clear-cache-btn" title="Clears: in-memory param cache, inflight fetch state, tree indexes, and generation-bound tracking. Collapses expanded sections (re-expand to reload). Preserves all filters and sliders.">Clear Cache</button><span id="clear-cache-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></span>
   <span id="api-counter-wrap" style="margin-left:auto; min-width: 100px; text-align: right;">
-    <span id="api-counter" class="filter-label" tabindex="0" role="button" style="font-variant-numeric: tabular-nums;">API Requests: 0</span>
+    <span id="api-counter" class="filter-label" style="font-variant-numeric: tabular-nums;">API Requests: 0</span>
       <div class="api-counter-tooltip" role="tooltip">Anonymous API requests are rate-limited by Hugging Face (~100 req/min). Counter includes successful and permanently-failed requests only — retries are not counted. When the counter glows amber, rate limiting is actively throttling requests.</div>
   </span>
   <span id="rate-limit-notice" style="display:none; padding:3px 10px; background:#d2992233; border:1px solid #d2992266; border-radius:6px; margin-left:8px; font-size:0.72rem; color:#e3b341; white-space:nowrap;">⚠️ Rate limited — backoff applied</span>
@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260531.11';
+const APP_VERSION = '260601.12';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -980,6 +980,8 @@ function invalidateDomPrefix(prefix) { for (const k of _domCache) if (k[0].start
 // ── State Reset (Clear Cache) ──
 function resetAppState() {
   _fetchGeneration++;
+  fetchedTasks.clear();
+  fetchedUntagged = false;
   _paramCache.clear();
   _inflightChildren.clear();
   _inflightFetches.clear();
@@ -1623,6 +1625,10 @@ async function tryResolveModelParam(m, gen) {
       return false;
     }
     const childResult = await resolveParamFromChildren(m.id);
+    if (isStale(gen)) {
+      if (rowEl) rowEl.classList.remove("inferring");
+      return false;
+    }
     resolved = childResult.value;
     childUsedApi = childResult.usedApi;
     source = 'children';
@@ -2037,7 +2043,9 @@ function wirePopupHover(trigger, popup, makeContent) {
 // Generates hidden-models popup trigger HTML and returns a post-render wiring function.
 // Pass makeContent as null to defer it — call with the callback later in .wire(makeContent).
 function makePopupTrigger(suffix, labelText, makeContent) {
-  const safe = suffix.replace(/\//g, '__');
+  const safe = Array.from(String(suffix)).map(ch => {
+    return /[A-Za-z0-9_-]/.test(ch) ? ch : `~${ch.codePointAt(0).toString(16)}~`;
+  }).join('');
   return {
     html: `<button type="button" id="fp-trigger-${safe}" class="filter-popup-trigger" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">${labelText}</button><div id="fp-popup-${safe}" class="filter-popup"></div>`,
     wire: (mc) => {
@@ -2468,7 +2476,7 @@ function renderErrorWithRetry(container, message, retryFn) {
   if (btn) btn.addEventListener("click", retryFn, { once: true });
 }
 function updateArrows() {
-  document.querySelectorAll("#main-table thead th").forEach(th => {
+  document.querySelectorAll("#main-table > thead > tr > th").forEach(th => {
     const arrow = th.querySelector(".arrow, .sort-arrow, .arrow-left");
     if (!arrow) return;
     const active = th.dataset.key === RC.sortKey;
@@ -2624,8 +2632,10 @@ async function deepenBatch(idx, author, container, unknownModels, gen) {
   }));
 }
 async function refreshAuthorL2Section(idx, author, container, skipRender) {
-  if (_deepeningAuthors.has(author)) return;
-  _deepeningAuthors.add(author);
+  const gen = _fetchGeneration;
+  const deepKey = `${gen}|${author}`;
+  if (_deepeningAuthors.has(deepKey)) return;
+  _deepeningAuthors.add(deepKey);
   try {
     const l1Node = _modelTree.byPath.get(author);
     if (!l1Node) return;
@@ -2640,7 +2650,6 @@ async function refreshAuthorL2Section(idx, author, container, skipRender) {
       renderL2(idx, author, filtered, container, allModels.length, allModels);
     }
     const freshUnknowns = filtered.filter(m => m.paramB === null && (m.deep_status || 0) === 0);
-    const gen = _fetchGeneration;
     if (freshUnknowns.length > 0) {
       await deepenBatch(idx, author, container, freshUnknowns, gen);
     }
@@ -2660,7 +2669,7 @@ async function refreshAuthorL2Section(idx, author, container, skipRender) {
       }
     }
   } finally {
-    _deepeningAuthors.delete(author);
+    _deepeningAuthors.delete(deepKey);
   }
 }
 async function loadAuthorModels(idx, author, container) {
@@ -2863,11 +2872,13 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
 // Cross-author fine-tunes without explicit base_model are only included if they pass the
 // active task filter and aren't already in tree model refs (avoids duplicating base models
 // that happen to be surfaced by the search endpoint).
-// No _fetchGeneration guard needed: container.isConnected catches stale renders after
-// L2 re-render. _inflightChildren dedup shares the inflight promise across concurrent
+// Generation guard is required here because this path mutates shared caches/tree after
+// async fetches. _inflightChildren dedup shares the inflight promise across concurrent
 // expansions; fallback to a fresh fetch when the promise resolves with null results
 // (error case) prevents the UI from getting stuck in loading state.
 async function loadChildren(l2Idx, modelIdx, parentId, container) {
+  const gen = _fetchGeneration;
+  if (isStale(gen)) return;
   const cacheKey = `children-${parentId}`;
 
   // Deduplicate concurrent fetches for the same parent — same approach as _inflightFetches
@@ -2876,6 +2887,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
   const entry = _inflightChildren.get(cacheKey);
   if (entry) {
     await entry.promise;
+    if (isStale(gen)) return;
     if (entry.results && container.isConnected) {
       renderL3(l2Idx, modelIdx, parentId, entry.results, container);
       return;
@@ -2939,12 +2951,14 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
 
       const nameUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
       const nameResults = (await fetchJson(nameUrl)).map(normalizeModel);
+      if (isStale(gen)) return;
       processChildren(nameResults);
       let rawResults = nameResults;
 
       if (nameResults.length === 0) {
         const fullUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(parentId)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
         rawResults = (await fetchJson(fullUrl)).map(normalizeModel);
+        if (isStale(gen)) return;
         processChildren(rawResults);
       }
 
@@ -2959,6 +2973,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
         if (p !== null && (maxChildParam === null || p > maxChildParam)) maxChildParam = p;
       }
       if (maxChildParam !== null) {
+        if (isStale(gen)) return;
         const cached = _paramCache.get(parentId);
         if (cached === undefined || cached === null) {
           _paramCache.set(parentId, maxChildParam);
@@ -2970,6 +2985,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
 
       newEntry.results = results;
       // Upsert fetched children into tree-backed store so hierarchy stays in sync
+      if (isStale(gen)) return;
       for (const c of results) {
         upsertModelIntoTree({
           id: c.id,
@@ -2981,8 +2997,10 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
           cardData: { base_model: parentId }
         });
       }
+      if (isStale(gen)) return;
       if (container.isConnected) renderL3(l2Idx, modelIdx, parentId, results, container);
     } catch (err) {
+      if (isStale(gen)) return;
       if (container.isConnected) renderErrorWithRetry(container, userFriendlyError(err), () => {
         if (container.isConnected) loadChildren(l2Idx, modelIdx, parentId, container);
       });
@@ -3179,6 +3197,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 // ── Refresh & Re-expansion ──
 //   refreshAllExpanded
 function refreshAllExpanded(force, allowAsync = true) {
+  if (!_modelTree.root) return;
   // Phase 1: re-expand L1 author rows (walk tree for expanded L1 nodes)
   for (const [author, l1Node] of _modelTree.root.children) {
     if (!l1Node.expanded) continue;
