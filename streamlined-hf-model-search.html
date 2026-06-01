@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.15';
+const APP_VERSION = '260601.16';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -3176,6 +3176,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 
   const cols = [
     { key: "id", label: "Model ID" },
+    { key: "pipeline_tag", label: "Pipeline", align: 'center', cls: "center", width: 180 },
     { key: "q_method", label: "Quant", align: 'center', headerCls: "updated-header", cls: "center", width: 160 },
     { key: "downloads", label: "Downloads", align: 'right', cls: "right", width: 110 },
     { key: "likes", label: "Likes", align: 'right', cls: "right", width: 80 },
@@ -3191,10 +3192,11 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
   html += sorted.map((q, qIdx) => {
     return `<tr class="l4-row" aria-rowindex="${2 + qIdx}">
       <td class="model-id-cell" aria-colindex="1"><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.id.split("/").slice(1).join("/"))}">${escapeHtml(q.id.split("/").slice(1).join("/"))}</a></td>
-      <td class="center" aria-colindex="2"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
-      <td class="right" aria-colindex="3">${fmt(q.downloads)}</td>
-      <td class="right" aria-colindex="4">${fmt(q.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
-      <td class="right" aria-colindex="5">${fmtDate(q.lastModified)}</td>
+      <td class="center" aria-colindex="2">${escapeHtml(q.pipeline_tag || "(untagged)")}</td>
+      <td class="center" aria-colindex="3"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
+      <td class="right" aria-colindex="4">${fmt(q.downloads)}</td>
+      <td class="right" aria-colindex="5">${fmt(q.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
+      <td class="right" aria-colindex="6">${fmtDate(q.lastModified)}</td>
     </tr>`;
   }).join('');
 
