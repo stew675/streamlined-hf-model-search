@@ -1267,7 +1267,8 @@ function inferParent(modelId, knownIds) {
 
 function getOrphanQuantMethod(modelId) {
   const idLower = modelId.toLowerCase();
-  return idLower.match(RE_Q_MATCH) || [];
+  const matches = idLower.match(RE_Q_MATCH);
+  return matches ? [...new Set(matches)] : [];
 }
 
 // ── Pipeline Tag Resolution ──
@@ -1676,7 +1677,8 @@ function walkFilterL1(node) {
   let count = 0, dl = 0, lk = 0;
   for (const l2Node of node.children.values()) {
     const r = walkFilterL2(l2Node);
-    count += r.count; dl += r.downloads; lk += r.likes;
+    if (l2Node.display && l2Node.canonical) count++;
+    dl += r.downloads; lk += r.likes;
   }
   node.aggCount = count;
   node.aggDownloads = dl;
@@ -1695,13 +1697,17 @@ function walkFilterL2(node) {
     count += r.count; dl += r.downloads; lk += r.likes;
   }
   // Parent propagation: quants reactivate their parent only when the parent's
-  // own exclusion is NOT caused by param range or hide-missing-params.
+  // own exclusion is NOT caused by param range, hide-missing-params, or L2 text filter.
   if (!passes && count > 0) {
-    const pb = ref ? (ref.paramB != null ? ref.paramB : getParamCount(ref)) : null;
-    if (pb !== null ? isInParamRange(pb) : !_hideMissingParamEnabled) {
-      node.display = true;
-      dl += ref ? (ref.downloads || 0) : 0;
-      lk += ref ? (ref.likes || 0) : 0;
+    const tf2 = RC._state.textFilters.l2Model;
+    const textFilterBlocks = tf2 && ref && !ref.id.split("/").slice(1).join("/").toLowerCase().includes(tf2.toLowerCase());
+    if (!textFilterBlocks) {
+      const pb = ref ? (ref.paramB != null ? ref.paramB : getParamCount(ref)) : null;
+      if (pb !== null ? isInParamRange(pb) : !_hideMissingParamEnabled) {
+        node.display = true;
+        dl += ref ? (ref.downloads || 0) : 0;
+        lk += ref ? (ref.likes || 0) : 0;
+      }
     }
   }
   node.aggCount = count;
@@ -1743,7 +1749,7 @@ function getTreeChildren(parentId) {
     for (const l4Node of l3Node.children.values()) {
       const ref = l4Node.modelRef;
       if (!ref) continue;
-      const qMatch = (ref.id || '').toLowerCase().match(RE_Q_MATCH) || [];
+      const qMatch = [...new Set((ref.id || '').toLowerCase().match(RE_Q_MATCH) || [])];
       out.push({
         id: ref.id,
         author: ref.id.split('/')[0],
