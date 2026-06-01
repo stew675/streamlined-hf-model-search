@@ -1472,6 +1472,9 @@ function getOrphanQuantMethod(modelId) {
 
 function getQuantFilterString(model) {
   if (!model) return "derivative";
+  const idLower = String(model.id || '').toLowerCase();
+  if (idLower.includes('fp4')) return 'fp4';
+  if (idLower.includes('fp8')) return 'fp8';
   const byId = getOrphanQuantMethod(model.id || "");
   if (byId.length > 0) return byId.join(', ');
   if (model.q_method) return model.q_method;
@@ -1677,6 +1680,8 @@ function matchesFilter(qMethod) {
 }
 function qMethodToCategory(method) {
   const m = method.toLowerCase();
+  if (m.includes('fp4')) return 'fp4';
+  if (m.includes('fp8')) return 'fp8';
   if (["awq", "finetune", "gguf", "mlx", "fp4", "fp8", "safetensors"].includes(m)) return m;
   return "others";
 }
