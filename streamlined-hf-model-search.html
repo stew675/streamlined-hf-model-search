@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.28';
+const APP_VERSION = '260601.29';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -501,7 +501,7 @@ const activeTaskFilters = new Set();
 const fetchedTasks = new Set();
 let fetchedUntagged = false;
 let fetchedTrending = false;
-let _trendingAdded = 0;
+
 
 // ── Generation Counter & Guards ──
 // Generation counter: monotonic tick on every "Get Results" click.
@@ -1009,7 +1009,6 @@ function resetAppState() {
   _consecutive429s = 0;
   apiCalls = 0;
   _totalBytesReceived = 0;
-  _trendingAdded = 0;
   fetchedTrending = false;
   updateRateLimitUI(false);
   RenderCoordinator._renderScheduled = false;
@@ -1258,7 +1257,7 @@ function applyFilters(force, deep) {
       if (!fetchedTrending) {
         totalRequests++;
         try {
-          _trendingAdded = _mergeRequestResult(await fetchTrendingModels(), gen, null, null);
+          _mergeRequestResult(await fetchTrendingModels(), gen, null, null);
           fetchedTrending = true;
         } catch (e) { console.warn("fetchTrendingModels error:", e); }
         finally { _onFetchComplete(gen, ++_fetchCompleted, totalRequests, savedExpansions); }
@@ -2702,11 +2701,7 @@ function renderMain(authorData, skipSort) {
   }).join('');
 
   tbody.innerHTML = html;
-  let countText = `${sorted.length} authors with base models in selected range`;
-  if (_trendingAdded > 0) {
-    countText += ` (+${_trendingAdded} from trending)`;
-  }
-  document.getElementById("count").textContent = countText + ". Click to expand.";
+  document.getElementById("count").textContent = `${sorted.length} authors with base models in selected range. Click to expand.`;
 }
 async function deepenBatch(idx, author, container, unknownModels, gen) {
   const totalUnk = unknownModels.length;

@@ -1,5 +1,13 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.29 — Remove: Trending count from L1 status line
+
+- Removed the `(+N from trending)` suffix from the L1 count status line.
+  Since the Trending API call is always issued first, this value was always
+  `+1000` and provided no useful information.
+- Removed `_trendingAdded` variable and all related tracking/calculation code.
+  Trending models are still fetched and ingested into the tree as before.
+
 ### v260601.28 — Fix: Memory hygiene, GC pressure, and cleanup correctness
 
 - `resetAppState` (Clear Cache) now aborts all in-flight HTTP requests via
