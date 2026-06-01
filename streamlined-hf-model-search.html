@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.16';
+const APP_VERSION = '260601.17';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -1803,7 +1803,8 @@ function walkFilterL2(node) {
 
   const qMethods = ref ? getOrphanQuantMethod(ref.id) : [];
   const selfQuantMatch = qMethods.length > 0 && qMethods.some(qm => activeFilters.has(qMethodToCategory(qm)));
-  let includeSelf = passes && selfQuantMatch;
+  const hasOrphanQuant = qMethods.length > 0;
+  let includeSelf = passes && (!hasOrphanQuant || selfQuantMatch);
 
   // Parent propagation: quants reactivate their parent only when the parent's
   // own exclusion is NOT caused by param range, hide-missing-params, or L2 text filter.
