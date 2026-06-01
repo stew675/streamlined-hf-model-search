@@ -1,5 +1,9 @@
 # Changelog — Streamlined HF Model Search
 
+### v260531.06 — Full _modelDb Migration (Phase 14)
+
+**Phase 14 — Removed `_allFetched` array**: `_modelDb` is now the sole data store. Removed `_allFetched` array, `_allFetchedById` Map, `_trimAllFetched`, `_syncModelDbFromAllFetched`, `_rebuildAllFetchedMap` functions. Removed `CONFIG.ALL_FETCHED_MAX`. `_initFetchState` builds `_fetchSeen` from `_modelDb.keys()`. `_mergeRequestResult` writes only to `_modelDb`. `injectBaseModels` iterates `_modelDb.values()` instead of `_allFetched`. `loadChildren` dedup and param inheritance use `_modelDb.get/has`. `applyLocalFilters` guard checks `_modelDb.size`. `tryResolveModelParam` falls back to `_modelDb` for parent param lookup. Net: -50 lines.
+
 ### v260531.05 — Tree Expansion + State Cleanup (Phases 9-13)
 
 **Phase 9 — Dead code removal**: Removed `isOrphanQuant`, `isNestedQuant` functions (zero call sites). Removed stale comments referencing the injection system.

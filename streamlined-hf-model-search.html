@@ -356,10 +356,8 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260531.05';
+const APP_VERSION = '260531.06';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
-let _allFetched = [];
-let _allFetchedById = new Map();
 let _authorData = [];
 
 // ── Pipeline Tag Definitions ──
@@ -469,7 +467,6 @@ const CONFIG = {
   INIT_SLIDER_TO: 80,
   INIT_PARAM_SLIDER_FROM: 100,
   INIT_PARAM_SLIDER_TO: 130,
-  ALL_FETCHED_MAX: 16384,
   INFLIGHT_MAX: 5,  // Max concurrent HTTP requests. Browser per-origin limit is ~6; leaves headroom for favicon etc.
   THUMB_SIZE: 18,
   POPUP_SHOW_DELAY: 150,   // ms debounce before popup appears on hover
@@ -748,10 +745,10 @@ const _inflightChildren = new Map();
 
 
 // ── Tree Data Structures (Refactored Architecture) ──
-// Replaces _allFetched with a Map-keyed model database and a 4-level
-// TreeNode hierarchy. Built by two-pass construction (Phase 1 of refactor).
-// The rendering pipeline becomes a simple recursive walk of display/expanded flags.
-const _modelDb = new Map(); // Map<string, normalizedModel> — replaces _allFetched
+// Map-keyed model database and a 4-level TreeNode hierarchy.
+// Built by two-pass construction. The rendering pipeline becomes
+// a simple recursive walk of display/expanded flags.
+const _modelDb = new Map(); // Map<string, normalizedModel>
 const _modelTree = {
   root: null,       // TreeNode (level-0 synthetic root, set by buildTreePass1)
   byPath: new Map(),// string → TreeNode (O(1) path lookup)
@@ -793,7 +790,6 @@ function resetAppState() {
   _popupTimers.clear();
   _paramSource.clear();
   _inferredAttemptedIds.clear();
-  _allFetchedById.clear();
   _consecutive429s = 0;
   apiCalls = 0;
   _totalBytesReceived = 0;
@@ -960,8 +956,7 @@ let _fetchCompleted = 0;      // Number of completed requests
 
 // Initialize shared fetch state at the start of a new "Get Results" cycle.
 function _initFetchState() {
-  if (!_allFetched) _allFetched = [];
-  _fetchSeen = new Set(_allFetched.map(m => m.id));
+  _fetchSeen = new Set(_modelDb.keys());
   _fetchCompleted = 0;
 }
 function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
@@ -973,8 +968,7 @@ function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
     m.paramB = getParamCount(m);
     if (!m.pipeline_tag && pipelineTag) m.pipeline_tag = pipelineTag;
     if (filterFn && !filterFn(m)) continue;
-    _allFetched.push(m);
-    _modelDb.set(m.id, m);  // dual-write to tree database
+    _modelDb.set(m.id, m);
     added++;
   }
   return added;
@@ -986,42 +980,6 @@ function _onFetchComplete(gen, completed, total, savedExpansions) {
   if (isStale(gen)) return;
   UI.setStatus(`Fetching models… (${completed}/${total})`);
   recomputeAndRender(savedExpansions);
-}
-
-// Trim _allFetched to ALL_FETCHED_MAX, keeping the most recently modified models.
-// Also syncs _modelDb to match _allFetched after trim.
-function _trimAllFetched() {
-  if (_allFetched.length <= CONFIG.ALL_FETCHED_MAX) {
-    _rebuildAllFetchedMap();
-    _syncModelDbFromAllFetched();
-    return;
-  }
-  _allFetched.sort((a, b) => {
-    const da = a.lastModified ? new Date(a.lastModified).getTime() : 0;
-    const db = b.lastModified ? new Date(b.lastModified).getTime() : 0;
-    return db !== da ? db - da : (b.id || '').localeCompare(a.id || '');
-  });
-  _allFetched.length = CONFIG.ALL_FETCHED_MAX;
-  _syncModelDbFromAllFetched();
-}
-
-// Keep _modelDb in sync with _allFetched after structural mutations.
-// During the dual-write transition period, _allFetched is the source of truth.
-function _syncModelDbFromAllFetched() {
-  const ids = new Set(_allFetched.map(m => m.id));
-  for (const [id] of _modelDb) {
-    if (!ids.has(id)) _modelDb.delete(id);
-  }
-  for (const m of _allFetched) {
-    if (!_modelDb.has(m.id)) _modelDb.set(m.id, m);
-  }
-}
-
-// Rebuild the O(1) lookup map from _allFetched. Call after any structural mutation.
-function _rebuildAllFetchedMap() {
-  const m = new Map();
-  for (const model of _allFetched) m.set(model.id, model);
-  _allFetchedById = m;
 }
 
 // ── applyFilters (Main "Get Results" Entry Point) ──
@@ -1095,13 +1053,10 @@ function applyFilters(force, deep) {
       await Promise.allSettled(promises);
       if (isStale(gen)) return;
 
-      // Post-fetch processing: trim, inject/mark parents, final render.
-      _trimAllFetched();
-
       if (deep) {
         UI.setStatus(`Resolving base models…`);
         try {
-          await injectBaseModels(_allFetched, (() => {
+          await injectBaseModels((() => {
             let renderCounter = 0;
             return () => {
               renderCounter++;
@@ -1132,18 +1087,20 @@ function applyFilters(force, deep) {
 }
 
 // ── Parent Injection (deep mode — fetches via queue) ──
-async function injectBaseModels(all, onBatch) {
+async function injectBaseModels(onBatch) {
   const gen = _fetchGeneration;
   if (isStale(gen)) return;
-  if (isStale(gen)) return;
-  const seenAuthors = new Set(all.map(m => m.id.split("/")[0]));
+  const seenAuthors = new Set();
+  const seen = new Set();
+  for (const m of _modelDb.values()) {
+    seenAuthors.add(m.id.split("/")[0]);
+    seen.add(m.id);
+  }
   const injected = [];
   const fetchQueue = new Map();
-  const seen = new Set(all.map(m => m.id));
 
-  for (let i = 0; i < all.length; i++) {
+  for (const m of _modelDb.values()) {
     if (isStale(gen)) return;
-    const m = all[i];
     if (!isInDateRange(m.lastModified)) continue;
 
     let baseId = null;
@@ -1195,10 +1152,8 @@ async function injectBaseModels(all, onBatch) {
   await Promise.all(promises);
 
   if (isStale(gen)) return;
-  all.push(...injected);
-  for (const m of injected) _modelDb.set(m.id, m);  // dual-write to tree database
+  for (const m of injected) _modelDb.set(m.id, m);
 
-  _rebuildAllFetchedMap();
   rebuildTree();  // build tree from _modelDb now that all data is in
   UI.setStatus("");
 }
@@ -1210,7 +1165,7 @@ async function injectBaseModels(all, onBatch) {
 // ── Data Normalization ──
 // Transforms raw API payloads into the canonical internal model shape.
 // Intentionally drops sha, siblings, config, library_name, private, and all other API fields
-// (~60% memory savings in _allFetched). Callers: S3 (_mergeRequestResult, injectBaseModels),
+// (~60% memory savings vs raw API). Callers: S3 (_mergeRequestResult, injectBaseModels),
 // S4 (resolveParamFromChildren), S6 (loadAuthorModels, loadChildren).
 function normalizeModel(m) {
   return {
@@ -1450,9 +1405,9 @@ async function tryResolveModelParam(m, gen) {
       const cachedP = _paramCache.get(candId);
       if (cachedP != null) { resolved = cachedP; source = 'parent'; break; }
 
-      // Fallback to _allFetched scan (covers injected/visible base models)
+      // Fallback to _modelDb lookup (covers injected/visible base models)
       if (!resolved) {
-        const parent = _allFetchedById.get(candId);
+        const parent = _modelDb.get(candId);
         if (parent && parent.paramB != null) { resolved = parent.paramB; source = 'parent'; }
       }
     }
@@ -1484,8 +1439,6 @@ async function tryResolveModelParam(m, gen) {
     const ps = source === 'name' ? 'name' : source === 'parent' ? 'parent_inherit' : (source === 'children' && childUsedApi) ? 'child_api' : 'child_name';
     _paramSource.set(m.id, ps);
 
-    const af = _allFetchedById.get(m.id);
-    if (af) af.paramB = resolved;
     const dbEntry = _modelDb.get(m.id);
     if (dbEntry) dbEntry.paramB = resolved;
   }
@@ -2826,7 +2779,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
 // before comparing, so Qwen2.5-7B-GGUF matches a search for "Qwen2.5-7B".
 // Same-author fine-tunes are skipped (already shown at L2).
 // Cross-author fine-tunes without explicit base_model are only included if they pass the
-// active task filter and aren't already in _allFetched (avoids duplicating base models
+// active task filter and aren't already in _modelDb (avoids duplicating base models
 // that happen to be surfaced by the search endpoint).
 // No _fetchGeneration guard needed: container.isConnected catches stale renders after
 // L2 re-render. _inflightChildren dedup shares the inflight promise across concurrent
@@ -2856,7 +2809,6 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       const modelName = parentId.split("/").slice(1).join("/");
       const results = [];
       const seen = new Set();
-      const _allFetchedIds = _allFetched ? new Set(_allFetched.map(m => m.id)) : new Set();
 
       const processChildren = (models) => {
         for (const m of models) {
@@ -2875,7 +2827,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
           if (childHasBase || (strictNameMatch(m.id, modelName) && isQuant)) {
               if (!childHasBase) {
                 if (m.pipeline_tag && !activeTaskFilters.has(m.pipeline_tag)) continue;
-                if (_allFetchedIds.has(m.id)) continue;
+                if (_modelDb.has(m.id)) continue;
               }
               const qSet = new Set();
               (idLower.match(RE_Q_MATCH) || []).forEach(m => qSet.add(m));
@@ -2931,8 +2883,6 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
           _paramSource.set(parentId, 'child_name');
           const md = _modelDb.get(parentId);
           if (md && md.paramB == null) md.paramB = maxChildParam;
-          const af = _allFetchedById.get(parentId);
-          if (af && af.paramB == null) af.paramB = maxChildParam;
         }
       }
 
@@ -3286,7 +3236,7 @@ const debouncedTextFilter = debounce(applyTextFilters, CONFIG.DEBOUNCE_MS);
 
 // Re-render using existing in-memory data — no API calls, no generation bump.
 function applyLocalFilters() {
-  if (!_allFetched || _allFetched.length === 0) return;
+  if (_modelDb.size === 0) return;
   const saved = new Set(RenderCoordinator.expandedSections);
   recomputeAndRender(saved);
 }
