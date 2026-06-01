@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260531.09';
+const APP_VERSION = '260531.10';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -739,12 +739,10 @@ const _inflightChildren = new Map();
 
 
 // ── Tree Data Structures (Refactored Architecture) ──
-// Map-keyed model database and a 4-level TreeNode hierarchy.
-// Built by two-pass construction. The rendering pipeline becomes
-// a simple recursive walk of display/expanded flags.
-const _modelDb = new Map(); // Map<string, normalizedModel>
+// 4-level TreeNode hierarchy with O(1) lookup indexes.
+// The rendering pipeline is a recursive walk of display/expanded flags.
 const _modelTree = {
-  root: null,       // TreeNode (level-0 synthetic root, set by buildTreePass1)
+  root: null,       // TreeNode (level-0 synthetic root)
   byPath: new Map(),// string → TreeNode (O(1) path lookup)
   byModelId: new Map(), // string → TreeNode (L2 or L4 node)
   authorByLower: new Map() // lowercase author string → L1 TreeNode
@@ -779,10 +777,11 @@ function hasModel(modelId) {
   return !!(ref && ref.id);
 }
 
-function forEachModelRef(cb) {
+function forEachModelRef(cb, includePlaceholders = false) {
   const seen = new Set();
   for (const node of _modelTree.byModelId.values()) {
     const ref = node && node.modelRef;
+    if (!includePlaceholders && node && node.placeholder) continue;
     if (!ref || !ref.id || seen.has(ref.id)) continue;
     seen.add(ref.id);
     cb(ref, node);
@@ -831,6 +830,15 @@ function ensureL2BaseNode(baseId, modelRefOrStub) {
   const author = baseId.split('/')[0];
   const l1Node = ensureL1AuthorNode(author);
   let l2Node = getModelNode(baseId);
+  if (!l2Node) {
+    const baseLower = baseId.toLowerCase();
+    for (const [key, node] of _modelTree.byModelId) {
+      if (node.level === 2 && key.toLowerCase() === baseLower) {
+        l2Node = node;
+        break;
+      }
+    }
+  }
   if (l2Node && l2Node.level === 2) {
     if (modelRefOrStub) {
       l2Node.modelRef = _mergeModelRef(l2Node.modelRef, modelRefOrStub);
@@ -913,7 +921,6 @@ function attachOrUpdateL4Node(l3Node, modelRef) {
 function upsertModelIntoTree(model) {
   if (!model || !model.id) return;
   ensureTreeRoot();
-  _modelDb.set(model.id, model);
 
   const existingNode = getModelNode(model.id);
   const modelRef = existingNode && existingNode.modelRef ? _mergeModelRef(existingNode.modelRef, model) : model;
@@ -929,6 +936,15 @@ function upsertModelIntoTree(model) {
 
   const trueBase = resolveTrueBase(modelRef.id);
   let l2Node = getModelNode(trueBase);
+  if (!l2Node) {
+    const trueBaseLower = trueBase.toLowerCase();
+    for (const [key, node] of _modelTree.byModelId) {
+      if (node.level === 2 && key.toLowerCase() === trueBaseLower) {
+        l2Node = node;
+        break;
+      }
+    }
+  }
   if (!l2Node || l2Node.level !== 2) {
     const paramFromName = extractParamFromId(trueBase);
     const stubRef = paramFromName !== null ?
@@ -981,7 +997,6 @@ function resetAppState() {
   fetchedTrending = false;
   updateRateLimitUI(false);
   RenderCoordinator.expandedSections.clear();
-  _modelDb.clear();
   _modelTree.byPath.clear();
   _modelTree.byModelId.clear();
   _modelTree.authorByLower.clear();
@@ -1141,7 +1156,8 @@ let _fetchCompleted = 0;      // Number of completed requests
 
 // Initialize shared fetch state at the start of a new "Get Results" cycle.
 function _initFetchState() {
-  _fetchSeen = new Set(_modelDb.keys());
+  _fetchSeen = new Set();
+  forEachModelRef((m) => _fetchSeen.add(m.id));
   _fetchCompleted = 0;
 }
 function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
@@ -1160,12 +1176,10 @@ function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
 }
 
 // Called by each independent completion handler to update status and trigger render.
-// Rebuilds the tree from _modelDb so each progressive render reflects newly fetched data.
 // RAF coalescing in requestRender() handles burst protection — no modulo gate needed.
 function _onFetchComplete(gen, completed, total, savedExpansions) {
   if (isStale(gen)) return;
   UI.setStatus(`Fetching models… (${completed}/${total})`);
-  rebuildTree();
   recomputeAndRender(savedExpansions);
 }
 
@@ -1256,8 +1270,6 @@ function applyFilters(force, deep) {
         } catch (e) {
           console.warn("Base model injection error:", e);
         }
-      } else {
-        rebuildTree();
       }
 
       if (isStale(gen)) return;
@@ -1344,7 +1356,6 @@ async function injectBaseModels(onBatch) {
   if (isStale(gen)) return;
   for (const m of injected) upsertModelIntoTree(m);
 
-  rebuildTree();  // build tree from _modelDb now that all data is in
   UI.setStatus("");
 }
 
@@ -1666,7 +1677,7 @@ function _schedulePostDeepenRender(author, gen) {
 }
 
 // ── Tree Construction (Refactored Architecture) ──
-//   resolveTrueBase → buildTreePass1 → buildTreePass2
+//   resolveTrueBase
 // Follows cardData.base_model chain iteratively to find the true base ancestor.
 // Stops when chain is exhausted or the next hop is not in tree model refs.
 // Max 10 hops with cycle detection via visited Set.
@@ -1682,135 +1693,6 @@ function resolveTrueBase(modelId) {
     current = baseId;
   }
   return current;
-}
-
-// Pass 1: Scans _modelDb for all base models and creates L1/L2 nodes.
-// Canonical dedup: for each model name with >1 author, only the highest-download
-// copy gets canonical=true; non-canonical copies start hidden (display=false).
-// Initializes _modelTree.root and populates byPath / byModelId lookups.
-function buildTreePass1() {
-  const root = createTreeNode(0, 'root', '');
-  _modelTree.root = root;
-  _modelTree.byPath.clear();
-  _modelTree.byModelId.clear();
-
-  const seenNames = new Map();
-  for (const [modelId, model] of _modelDb) {
-    if (!isBase(model)) continue;
-    const author = modelId.split('/')[0];
-    const name = modelId.split('/').slice(1).join('/');
-    const existing = seenNames.get(name);
-    if (!existing) {
-      seenNames.set(name, {
-        bestDownloads: model.downloads || 0,
-        bestAuthor: author,
-        bestAuthorLower: author.toLowerCase(),
-        authors: new Map()
-      });
-      seenNames.get(name).authors.set(author.toLowerCase(), author);
-    } else {
-      existing.authors.set(author.toLowerCase(), author);
-      if ((model.downloads || 0) > existing.bestDownloads) {
-        existing.bestDownloads = model.downloads || 0;
-        existing.bestAuthor = author;
-        existing.bestAuthorLower = author.toLowerCase();
-      }
-    }
-  }
-
-  const l1Nodes = new Map();
-  for (const [modelId, model] of _modelDb) {
-    if (!isBase(model)) continue;
-    const author = modelId.split('/')[0];
-    const name = modelId.split('/').slice(1).join('/');
-
-    if (!l1Nodes.has(author)) {
-      const n = createTreeNode(1, 'author', author);
-      root.children.set(author, n);
-      n.parent = root;
-      _modelTree.byPath.set(author, n);
-      _modelTree.authorByLower.set(author.toLowerCase(), n);
-      l1Nodes.set(author, n);
-    }
-
-    const l2Node = createTreeNode(2, 'basemodel', modelId, model);
-    l1Nodes.get(author).children.set(modelId, l2Node);
-    l2Node.parent = l1Nodes.get(author);
-    _modelTree.byPath.set(modelId, l2Node);
-    _modelTree.byModelId.set(modelId, l2Node);
-
-    const ni = seenNames.get(name);
-    if (ni && ni.authors.size > 1) {
-      l2Node.canonical = author.toLowerCase() === ni.bestAuthorLower;
-      l2Node.display = l2Node.canonical;
-    }
-  }
-}
-
-// Pass 2: Scans _modelDb for non-base models and attaches them to their true
-// base model ancestor via resolveTrueBase. Naturally flattens quant-of-quant
-// chains. Creates L3 (quant author) and L4 (quant) nodes under the correct L2.
-// If the true base lacks a tree node, creates a placeholder L2.
-function buildTreePass2() {
-  for (const [modelId, model] of _modelDb) {
-    if (isBase(model)) continue;
-    const trueBase = resolveTrueBase(modelId);
-    if (!trueBase) continue;
-
-    let l2Node = _modelTree.byModelId.get(trueBase);
-    if (!l2Node || l2Node.level !== 2) {
-      // Case-insensitive fallback: search byModelId for an existing L2 node
-      const tbLower = trueBase.toLowerCase();
-      for (const [key, node] of _modelTree.byModelId) {
-        if (node.level === 2 && key.toLowerCase() === tbLower) { l2Node = node; break; }
-      }
-    }
-    if (!l2Node || l2Node.level !== 2) {
-      const author = trueBase.split('/')[0];
-      const authorLower = author.toLowerCase();
-      let l1Node = _modelTree.authorByLower.get(authorLower);
-      if (!l1Node) {
-        l1Node = createTreeNode(1, 'author', author);
-        _modelTree.root.children.set(author, l1Node);
-        l1Node.parent = _modelTree.root;
-        _modelTree.byPath.set(author, l1Node);
-        _modelTree.authorByLower.set(authorLower, l1Node);
-      }
-      const paramFromName = extractParamFromId(trueBase);
-      const stubRef = paramFromName !== null ? { id: trueBase, paramB: paramFromName, downloads: 0, likes: 0, lastModified: '' } : null;
-      const placeholder = createTreeNode(2, 'basemodel', trueBase, stubRef);
-      placeholder.canonical = false;
-      placeholder.display = false;
-      l1Node.children.set(trueBase, placeholder);
-      placeholder.parent = l1Node;
-      _modelTree.byPath.set(trueBase, placeholder);
-      _modelTree.byModelId.set(trueBase, placeholder);
-      l2Node = placeholder;
-    }
-
-    const quantAuthor = modelId.split('/')[0];
-    const l3Key = quantAuthor;
-    let l3Node = l2Node.children.get(l3Key);
-    if (!l3Node) {
-      l3Node = createTreeNode(3, 'quantauthor', quantAuthor);
-      l2Node.children.set(l3Key, l3Node);
-      l3Node.parent = l2Node;
-    }
-
-    const l4Node = createTreeNode(4, 'quant', modelId, model);
-    l3Node.children.set(modelId, l4Node);
-    l4Node.parent = l3Node;
-    _modelTree.byModelId.set(modelId, l4Node);
-  }
-}
-
-// Rebuilds the entire tree from _modelDb. Call after _modelDb is fully populated
-// or after significant data changes. For incremental updates (lazy discovery),
-// use integrateDiscoveredChildren instead.
-function rebuildTree() {
-  buildTreePass1();
-  buildTreePass2();
-  _syncExpandedFromSet(); // restore expanded flags from persistence Set
 }
 
 
@@ -2798,10 +2680,7 @@ async function loadAuthorModels(idx, author, container) {
     const models = raw.map(normalizeModel);
 
     // Upsert fetched models into tree-backed store for this author
-    for (const m of models) {
-      if (!hasModel(m.id)) upsertModelIntoTree(m);
-    }
-    rebuildTree();
+    for (const m of models) upsertModelIntoTree(m);
 
     if (isStale(gen)) return;
     const row = document.querySelector(`.l1-row[data-author="${CSS.escape(author)}"]`);
@@ -3092,19 +2971,16 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       newEntry.results = results;
       // Upsert fetched children into tree-backed store so hierarchy stays in sync
       for (const c of results) {
-        if (!hasModel(c.id)) {
-          upsertModelIntoTree({
-            id: c.id,
-            downloads: c.downloads || 0,
-            likes: c.likes || 0,
-            lastModified: c.lastModified || '',
-            pipeline_tag: c.pipeline_tag || '',
-            q_method: c.q_method,
-            cardData: { base_model: parentId }
-          });
-        }
+        upsertModelIntoTree({
+          id: c.id,
+          downloads: c.downloads || 0,
+          likes: c.likes || 0,
+          lastModified: c.lastModified || '',
+          pipeline_tag: c.pipeline_tag || '',
+          q_method: c.q_method,
+          cardData: { base_model: parentId }
+        });
       }
-      rebuildTree();
       if (container.isConnected) renderL3(l2Idx, modelIdx, parentId, results, container);
     } catch (err) {
       if (container.isConnected) renderErrorWithRetry(container, userFriendlyError(err), () => {
