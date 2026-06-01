@@ -1757,6 +1757,8 @@ function passesL4Filters(m) {
   if (!matchesFilter(getQuantFilterString(m))) return false;
   const tag = m.pipeline_tag;
   if (!tag && !activeSpecialFilters.has("include untagged")) return false;
+  if (!matchesTaskFilter(tag)) return false;
+  if (tag && !activeTaskFilters.has(tag)) return false;
   return true;
 }
 
