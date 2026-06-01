@@ -315,9 +315,9 @@
     <button id="get-quick-results-btn" class="action-btn" title="Fetch top models per pipeline tag (by downloads + lastModified) — no cross-author base model injection. Faster but may miss quantizations whose parent base model is from a different author.">Get Quick Results</button>
     <button id="get-deep-results-btn" class="action-btn" title="Same as Quick, plus resolve cross-author base models referenced by quantizations via individual model API calls. Slower but surfaces more quantizations.">Get Deep Results</button>
   </div>
-  <button type="button" id="clear-cache-btn" title="Clears: in-memory param cache, LRU model cache, inflight fetch state, canonical dedup cache, and inference tracking. Collapses expanded sections (re-expand to reload). Preserves all filters and sliders.">Clear Cache</button><span id="clear-cache-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></span>
+  <button type="button" id="clear-cache-btn" title="Clears: in-memory param cache, inflight fetch state, tree indexes, and generation-bound tracking. Collapses expanded sections (re-expand to reload). Preserves all filters and sliders.">Clear Cache</button><span id="clear-cache-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></span>
   <span id="api-counter-wrap" style="margin-left:auto; min-width: 100px; text-align: right;">
-    <span id="api-counter" class="filter-label" tabindex="0" role="button" style="font-variant-numeric: tabular-nums;">API Requests: 0</span>
+    <span id="api-counter" class="filter-label" style="font-variant-numeric: tabular-nums;">API Requests: 0</span>
       <div class="api-counter-tooltip" role="tooltip">Anonymous API requests are rate-limited by Hugging Face (~100 req/min). Counter includes successful and permanently-failed requests only — retries are not counted. When the counter glows amber, rate limiting is actively throttling requests.</div>
   </span>
   <span id="rate-limit-notice" style="display:none; padding:3px 10px; background:#d2992233; border:1px solid #d2992266; border-radius:6px; margin-left:8px; font-size:0.72rem; color:#e3b341; white-space:nowrap;">⚠️ Rate limited — backoff applied</span>
@@ -356,12 +356,9 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260531.02';
+const APP_VERSION = '260601.19';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
-let _allFetched = [];
-let _allFetchedById = new Map();
 let _authorData = [];
-let _canonicalAuthor = {};
 
 // ── Pipeline Tag Definitions ──
 const TO_TAGS = [
@@ -470,8 +467,6 @@ const CONFIG = {
   INIT_SLIDER_TO: 80,
   INIT_PARAM_SLIDER_FROM: 100,
   INIT_PARAM_SLIDER_TO: 130,
-  CACHE_MAX: 500,
-  ALL_FETCHED_MAX: 16384,
   INFLIGHT_MAX: 5,  // Max concurrent HTTP requests. Browser per-origin limit is ~6; leaves headroom for favicon etc.
   THUMB_SIZE: 18,
   POPUP_SHOW_DELAY: 150,   // ms debounce before popup appears on hover
@@ -492,8 +487,6 @@ const _Q_PATTERN = Q_METHODS.join("|");
 const RE_Q_EXISTS = new RegExp(`\\b(?:${_Q_PATTERN})\\b`, 'i');
 const RE_Q_MATCH = new RegExp(`\\b(?:${_Q_PATTERN})\\b`, 'gi');
 const RE_Q_STRIP = new RegExp(`-(?:${_Q_PATTERN})$`, 'i');
-const RE_B_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Bb](?![a-zA-Z])/;
-const RE_M_PARAM = /(?<![a-zA-Z])(\d+\.?\d*)[Mm](?![a-zA-Z])/;
 
 // ── Filter Display Constants ──
 const FILTER_DISPLAY = ["awq", "fp4", "fp8", "finetune", "gguf", "mlx", "safetensors", "others"];
@@ -517,16 +510,10 @@ let _trendingAdded = 0;
 // not just the fetch itself. AbortController would need a parallel mechanism anyway.
 let _fetchGeneration = 0;
 
-// ── Injection & Inference Tracking ──
-// Injected base models bypass the date filter. Cleared on deep re-fetch (injectBaseModels)
-// and Clear Cache, but intentionally NOT cleared on quick re-fetch: models that were
-// previously injected should remain visible since upstream data is static and re-injecting
-// would waste API calls without changing results.
-const _injectedBaseIds = new Set();
+// ── Inference Tracking ──
 let _derivedParamEnabled = false;
 let _hideMissingParamEnabled = false;
 const _paramSource = new Map(); // modelId → 'name'|'parent_inherit'|'child_name'|'child_api'|'deepen'|'metadata'
-const _inferredAttemptedIds = new Set();
 const _deepeningAuthors = new Set(); // Guards against concurrent deepening of same author
 
 // ── API Counter & Rate Limit UI ──
@@ -577,6 +564,7 @@ function bailQueueItem(item, cleanup) {
 
 // ── Queue State (API Request Manager) ──
 const _apiTimestamps = [];
+let _apiTimestampHead = 0;
 const _inflightFetches = new Map();
 
 // ── API Request Manager ──
@@ -587,9 +575,6 @@ const _inflightFetches = new Map();
 const _workQueue = [];
 let _inflightCount = 0;
 let _dequeueScheduled = false;
-
-// ── Canonical Dedup Cache ──
-let _canonicalCache = null;
 
 // ── Popup Timer State ──
 const _popupTimers = new Map(); // el → timeout handle
@@ -610,12 +595,6 @@ const RenderCoordinator = {
       l3Author: "",
       l4Model: ""
     }
-  },
-
-  _levelState: {
-    l2: new Map(),
-    l3: new Map(),
-    l4: new Map()
   },
 
   _renderScheduled: false,
@@ -643,12 +622,32 @@ const RenderCoordinator = {
       const skipSort = this._skipL1Sort;
       this._skipL1Sort = false;
 
-      _authorData = computeAuthorData();
+      // Tree-based filter pipeline: run filter eval + parent propagation + aggregation
+      runFilterPipeline();
+      // Build _authorData from tree for renderMain
+      const treeAuthorData = [];
+      if (_modelTree.root) {
+        for (const [author, l1Node] of _modelTree.root.children) {
+          if (!l1Node.display) continue;
+          treeAuthorData.push({
+            author,
+            id: author,
+            count: l1Node.aggCount,
+            totalDownloads: l1Node.aggDownloads,
+            totalLikes: l1Node.aggLikes
+          });
+        }
+      }
+      _authorData = treeAuthorData;
       this.renderL1(_authorData, skipSort);
       _domCache.clear(); // renderL1 replaces innerHTML — all cached DOM refs are now detached
       this.updateArrows();
-      this.pruneExpiredExpansions(new Set(_authorData.map(a => a.author)));
-      if (saved) this.saveRestoreExpansions(saved);
+      // If caller provided saved expansions, merge them into the Set (for tree-rebuild scenarios).
+      if (saved) {
+        for (const k of saved) RC.expandedSections.add(k);
+      }
+      // Sync tree node.expanded flags from the persistence Set.
+      _syncExpandedFromSet();
       // Sync-only structural expansion. No async (deepening) inside structural pass.
       this.refreshAllExpanded(null, false);
     } catch (e) {
@@ -665,22 +664,16 @@ const RenderCoordinator = {
 
   _asyncDeepenPass() {
     if (this._isRendering) return; // Don't recurse into structural render
-    // The sync structural render (refreshAllExpanded with allowAsync=false) already
-    // rendered L2 at the correct filter state. This async pass only deepens unknown
-    // params (deepenBatch + derived param resolution) without re-rendering L2, so
-    // L3/L4 expansions survive the deepening cycle.
-    for (const key of RC.expandedSections) {
-      if (!key.startsWith(PREFIX_AUTHOR)) continue;
-      const author = key.slice(PREFIX_AUTHOR.length);
+    // Walk tree for expanded L1 author sections and deepen unknown params.
+    for (const [author, l1Node] of _modelTree.root.children) {
+      if (!l1Node.expanded) continue;
       const l1Row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
       if (!l1Row) continue;
       const idx = parseInt(l1Row.dataset.l1Idx);
       const inner = document.getElementById(`i1-${idx}`);
       if (!inner?.isConnected) continue;
       // Only deepen if L2 data is cached (loadAuthorModels already ran)
-      if (cacheAccess(author)) {
-        refreshAuthorL2Section(idx, author, inner, true);
-      }
+      refreshAuthorL2Section(idx, author, inner, true);
     }
   },
 
@@ -697,27 +690,13 @@ const RenderCoordinator = {
     return this._state.detailSort[levelKey];
   },
 
-  getExpandedList() {
-    return [...this._state.expandedSections];
-  },
-
   renderL1: null,
   updateArrows: null,
-  pruneExpiredExpansions: null,
-  saveRestoreExpansions: null,
   refreshAllExpanded: null,
 
   get sortKey() { return this._state.l1Sort.key; },
   get sortAsc() { return this._state.l1Sort.asc; },
-  get detailSort() { return this._state.detailSort; },
   get expandedSections() { return this._state.expandedSections; },
-  get l2StateMap() { return this._levelState.l2; },
-  get l3StateMap() { return this._levelState.l3; },
-  get l4StateMap() { return this._levelState.l4; },
-  get _l1AuthorFilter() { return this._state.textFilters.l1Author; },
-  get _l2ModelFilter() { return this._state.textFilters.l2Model; },
-  get _l3AuthorFilter() { return this._state.textFilters.l3Author; },
-  get _l4ModelFilter() { return this._state.textFilters.l4Model; },
 };
 
 const RC = RenderCoordinator; // short alias used throughout call sites
@@ -756,24 +735,241 @@ const UI = {
   }
 };
 
-// ── LRU Cache ──
-const cache = new Map();
-function cacheSet(key, value) {
-  if (cache.has(key)) cache.delete(key);
-  // Evict oldest entry (Map insertion order; cacheAccess promotes by delete+re-set, so first key = LRU)
-  if (cache.size >= CONFIG.CACHE_MAX) cache.delete(cache.keys().next().value);
-  cache.set(key, value);
-}
-function cacheAccess(key) {
-  if (!cache.has(key)) return undefined;
-  const v = cache.get(key);
-  cache.delete(key);
-  cache.set(key, v);
-  return v;
-}
-
 // ── Inflight Children Dedup ──
 const _inflightChildren = new Map();
+
+
+// ── Tree Data Structures (Refactored Architecture) ──
+// 4-level TreeNode hierarchy with O(1) lookup indexes.
+// The rendering pipeline is a recursive walk of display/expanded flags.
+const _modelTree = {
+  root: null,       // TreeNode (level-0 synthetic root)
+  byPath: new Map(),// string → TreeNode (O(1) path lookup)
+  byModelId: new Map(), // string → TreeNode (L2 or L4 node)
+  authorByLower: new Map() // lowercase author string → L1 TreeNode
+};
+function createTreeNode(level, type, id, modelRef) {
+  return {
+    level, type, id,
+    parent: null,
+    children: new Map(),
+    modelRef: modelRef || null,
+    placeholder: false,
+    display: true,
+    expanded: false,
+    canonical: true,
+    aggCount: 0,
+    aggDownloads: 0,
+    aggLikes: 0
+  };
+}
+
+function getModelNode(modelId) {
+  return _modelTree.byModelId.get(modelId) || null;
+}
+
+function getModelRef(modelId) {
+  const node = getModelNode(modelId);
+  return node ? node.modelRef : null;
+}
+
+function hasModel(modelId) {
+  const ref = getModelRef(modelId);
+  return !!(ref && ref.id);
+}
+
+function forEachModelRef(cb, includePlaceholders = false) {
+  const seen = new Set();
+  for (const node of _modelTree.byModelId.values()) {
+    const ref = node && node.modelRef;
+    if (!includePlaceholders && node && node.placeholder) continue;
+    if (!ref || !ref.id || seen.has(ref.id)) continue;
+    seen.add(ref.id);
+    cb(ref, node);
+  }
+}
+
+function hasAnyModels() {
+  for (const node of _modelTree.byModelId.values()) {
+    if (node && node.modelRef && node.modelRef.id) return true;
+  }
+  return false;
+}
+
+function ensureTreeRoot() {
+  if (_modelTree.root) return _modelTree.root;
+  const root = createTreeNode(0, 'root', '');
+  _modelTree.root = root;
+  return root;
+}
+
+function ensureL1AuthorNode(author) {
+  ensureTreeRoot();
+  const key = (author || '').toLowerCase();
+  let node = _modelTree.authorByLower.get(key);
+  if (!node) {
+    node = createTreeNode(1, 'author', author);
+    node.parent = _modelTree.root;
+    _modelTree.root.children.set(author, node);
+    _modelTree.authorByLower.set(key, node);
+  }
+  _modelTree.byPath.set(author, node);
+  return node;
+}
+
+function _mergeModelRef(existing, incoming) {
+  if (!existing) return incoming;
+  const preserveAttempted = !!existing._inferredAttempted;
+  const preserveDeep = existing.deep_status;
+  Object.assign(existing, incoming);
+  if (preserveAttempted) existing._inferredAttempted = true;
+  if (preserveDeep != null) existing.deep_status = preserveDeep;
+  return existing;
+}
+
+function ensureL2BaseNode(baseId, modelRefOrStub) {
+  const author = baseId.split('/')[0];
+  const l1Node = ensureL1AuthorNode(author);
+  let l2Node = getModelNode(baseId);
+  if (!l2Node) {
+    const baseLower = baseId.toLowerCase();
+    for (const [key, node] of _modelTree.byModelId) {
+      if (node.level === 2 && key.toLowerCase() === baseLower) {
+        l2Node = node;
+        break;
+      }
+    }
+  }
+  if (l2Node && l2Node.level === 2) {
+    if (modelRefOrStub) {
+      l2Node.modelRef = _mergeModelRef(l2Node.modelRef, modelRefOrStub);
+      if (l2Node.placeholder && l2Node.modelRef && l2Node.modelRef.id === baseId) {
+        l2Node.placeholder = false;
+        l2Node.display = true;
+        l2Node.canonical = true;
+      }
+    }
+    if (l2Node.parent !== l1Node) {
+      if (l2Node.parent) l2Node.parent.children.delete(baseId);
+      l1Node.children.set(baseId, l2Node);
+      l2Node.parent = l1Node;
+    }
+    _modelTree.byPath.set(baseId, l2Node);
+    _modelTree.byModelId.set(baseId, l2Node);
+    return l2Node;
+  }
+
+  l2Node = createTreeNode(2, 'basemodel', baseId, modelRefOrStub || null);
+  if (!modelRefOrStub) {
+    l2Node.placeholder = true;
+    l2Node.display = false;
+    l2Node.canonical = false;
+  }
+  l1Node.children.set(baseId, l2Node);
+  l2Node.parent = l1Node;
+  _modelTree.byPath.set(baseId, l2Node);
+  _modelTree.byModelId.set(baseId, l2Node);
+  return l2Node;
+}
+
+function ensureL3Node(l2Node, quantAuthor) {
+  let l3Node = l2Node.children.get(quantAuthor);
+  if (!l3Node) {
+    l3Node = createTreeNode(3, 'quantauthor', quantAuthor);
+    l2Node.children.set(quantAuthor, l3Node);
+    l3Node.parent = l2Node;
+  }
+  return l3Node;
+}
+
+function recomputeCanonicalForName(modelName) {
+  const candidates = [];
+  for (const node of _modelTree.byModelId.values()) {
+    if (!node || node.level !== 2 || !node.modelRef || node.placeholder) continue;
+    const name = node.id.split('/').slice(1).join('/');
+    if (name === modelName) candidates.push(node);
+  }
+  if (candidates.length <= 1) {
+    for (const node of candidates) node.canonical = true;
+    return;
+  }
+  let best = candidates[0];
+  for (const node of candidates) {
+    const bestDl = best.modelRef && best.modelRef.downloads ? best.modelRef.downloads : 0;
+    const dl = node.modelRef && node.modelRef.downloads ? node.modelRef.downloads : 0;
+    if (dl > bestDl) best = node;
+  }
+  for (const node of candidates) {
+    node.canonical = node === best;
+    if (!node.canonical) node.display = false;
+  }
+}
+
+function attachOrUpdateL4Node(l3Node, modelRef) {
+  let l4Node = l3Node.children.get(modelRef.id);
+  if (l4Node) {
+    l4Node.modelRef = _mergeModelRef(l4Node.modelRef, modelRef);
+    _modelTree.byModelId.set(modelRef.id, l4Node);
+    return l4Node;
+  }
+  l4Node = createTreeNode(4, 'quant', modelRef.id, modelRef);
+  l4Node.parent = l3Node;
+  l3Node.children.set(modelRef.id, l4Node);
+  _modelTree.byModelId.set(modelRef.id, l4Node);
+  return l4Node;
+}
+
+function upsertModelIntoTree(model) {
+  if (!model || !model.id) return;
+  ensureTreeRoot();
+
+  const existingNode = getModelNode(model.id);
+  const modelRef = existingNode && existingNode.modelRef ? _mergeModelRef(existingNode.modelRef, model) : model;
+
+  if (isBase(modelRef)) {
+    const l2Node = ensureL2BaseNode(modelRef.id, modelRef);
+    l2Node.placeholder = false;
+    const name = modelRef.id.split('/').slice(1).join('/');
+    recomputeCanonicalForName(name);
+    _modelTree.byModelId.set(modelRef.id, l2Node);
+    return;
+  }
+
+  const trueBase = resolveTrueBase(modelRef);
+  let l2Node = getModelNode(trueBase);
+  if (!l2Node) {
+    const trueBaseLower = trueBase.toLowerCase();
+    for (const [key, node] of _modelTree.byModelId) {
+      if (node.level === 2 && key.toLowerCase() === trueBaseLower) {
+        l2Node = node;
+        break;
+      }
+    }
+  }
+  if (!l2Node || l2Node.level !== 2) {
+    const paramFromName = extractParamFromId(trueBase);
+    const stubRef = paramFromName !== null ?
+      { id: trueBase, paramB: paramFromName, downloads: 0, likes: 0, lastModified: '' } :
+      { id: trueBase, paramB: null, downloads: 0, likes: 0, lastModified: '' };
+    l2Node = ensureL2BaseNode(trueBase, stubRef);
+    l2Node.placeholder = true;
+    l2Node.display = false;
+    l2Node.canonical = false;
+  }
+
+  const quantAuthor = modelRef.id.split('/')[0];
+  const l3Node = ensureL3Node(l2Node, quantAuthor);
+  const l4Node = attachOrUpdateL4Node(l3Node, modelRef);
+
+  if (existingNode && existingNode.level === 4 && existingNode.parent !== l3Node) {
+    if (existingNode.parent) existingNode.parent.children.delete(modelRef.id);
+    l3Node.children.set(modelRef.id, existingNode);
+    existingNode.parent = l3Node;
+    _modelTree.byModelId.set(modelRef.id, existingNode);
+  } else {
+    _modelTree.byModelId.set(modelRef.id, l4Node);
+  }
+}
 
 
 // ── DOM Reference Cache ──
@@ -782,13 +978,12 @@ function cacheDomRef(key, ref) { if (ref && ref.row.isConnected) _domCache.set(k
 function invalidateDomKey(key) { _domCache.delete(key); }
 function invalidateDomPrefix(prefix) { for (const k of _domCache) if (k[0].startsWith(prefix)) _domCache.delete(k[0]); }
 
-// ── Filter Boundary Tracking ──
-const _lastFilteredCounts = new Map(); // author → count
-
 // ── State Reset (Clear Cache) ──
 function resetAppState() {
   _fetchGeneration++;
-  cache.clear();
+  fetchedTasks.clear();
+  fetchedUntagged = false;
+  _apiTimestampHead = 0;
   _paramCache.clear();
   _inflightChildren.clear();
   _inflightFetches.clear();
@@ -799,21 +994,18 @@ function resetAppState() {
   for (const [el, timer] of _popupTimers) { clearTimeout(timer); }
   _popupTimers.clear();
   _paramSource.clear();
-  _inferredAttemptedIds.clear();
-  _injectedBaseIds.clear();
-  _allFetchedById.clear();
-  _canonicalCache = null;
+  _deepeningAuthors.clear();
   _consecutive429s = 0;
   apiCalls = 0;
   _totalBytesReceived = 0;
   _trendingAdded = 0;
   fetchedTrending = false;
-  _lastFilteredCounts.clear();
   updateRateLimitUI(false);
-  RenderCoordinator._levelState.l2.clear();
-  RenderCoordinator._levelState.l3.clear();
-  RenderCoordinator._levelState.l4.clear();
   RenderCoordinator.expandedSections.clear();
+  _modelTree.byPath.clear();
+  _modelTree.byModelId.clear();
+  _modelTree.authorByLower.clear();
+  _modelTree.root = null;
 }
 
 // ── Slider RAF Throttling ──
@@ -856,11 +1048,16 @@ function _dequeueNext() {
 
   const now = Date.now();
   const cutoff = now - CONFIG.RATE_WINDOW;
-  while (_apiTimestamps.length > 0 && _apiTimestamps[0] < cutoff) {
-    _apiTimestamps.shift();
+  while (_apiTimestampHead < _apiTimestamps.length && _apiTimestamps[_apiTimestampHead] < cutoff) {
+    _apiTimestampHead++;
   }
-  if (_apiTimestamps.length >= CONFIG.RATE_LIMIT) {
-    const wait = _apiTimestamps[0] + CONFIG.RATE_WINDOW - now + 10;
+  if (_apiTimestampHead > 100) {
+    _apiTimestamps.splice(0, _apiTimestampHead);
+    _apiTimestampHead = 0;
+  }
+  const inWindowCount = _apiTimestamps.length - _apiTimestampHead;
+  if (inWindowCount >= CONFIG.RATE_LIMIT) {
+    const wait = _apiTimestamps[_apiTimestampHead] + CONFIG.RATE_WINDOW - now + 10;
     setTimeout(_dequeueNext, Math.max(wait, 1));
     return;
   }
@@ -969,20 +1166,22 @@ let _fetchCompleted = 0;      // Number of completed requests
 
 // Initialize shared fetch state at the start of a new "Get Results" cycle.
 function _initFetchState() {
-  if (!_allFetched) _allFetched = [];
-  _fetchSeen = new Set(_allFetched.map(m => m.id));
+  _fetchSeen = new Set();
+  forEachModelRef((m) => _fetchSeen.add(m.id));
   _fetchCompleted = 0;
 }
 function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
   if (isStale(gen)) return 0;
   let added = 0;
-  for (const m of rawModels.map(normalizeModel)) {
+  for (const raw of rawModels) {
+    const m = normalizeModel(raw);
+    if (!m) continue;
     if (_fetchSeen.has(m.id)) continue;
     _fetchSeen.add(m.id);
     m.paramB = getParamCount(m);
     if (!m.pipeline_tag && pipelineTag) m.pipeline_tag = pipelineTag;
     if (filterFn && !filterFn(m)) continue;
-    _allFetched.push(m);
+    upsertModelIntoTree(m);
     added++;
   }
   return added;
@@ -994,35 +1193,6 @@ function _onFetchComplete(gen, completed, total, savedExpansions) {
   if (isStale(gen)) return;
   UI.setStatus(`Fetching models… (${completed}/${total})`);
   recomputeAndRender(savedExpansions);
-}
-
-// Trim _allFetched to ALL_FETCHED_MAX, preserving injected base models.
-function _trimAllFetched() {
-  if (_allFetched.length <= CONFIG.ALL_FETCHED_MAX) {
-    _rebuildAllFetchedMap();
-    return;
-  }
-  const pinned = [];
-  const droppable = [];
-  for (const m of _allFetched) {
-    if (_injectedBaseIds.has(m.id)) pinned.push(m);
-    else droppable.push(m);
-  }
-  droppable.sort((a, b) => {
-    const da = a.lastModified ? new Date(a.lastModified).getTime() : 0;
-    const db = b.lastModified ? new Date(b.lastModified).getTime() : 0;
-    return db !== da ? db - da : (b.id || '').localeCompare(a.id || '');
-  });
-  const room = CONFIG.ALL_FETCHED_MAX - pinned.length;
-  droppable.length = Math.max(0, Math.min(droppable.length, room));
-  _allFetched = droppable.concat(pinned);
-}
-
-// Rebuild the O(1) lookup map from _allFetched. Call after any structural mutation.
-function _rebuildAllFetchedMap() {
-  const m = new Map();
-  for (const model of _allFetched) m.set(model.id, model);
-  _allFetchedById = m;
 }
 
 // ── applyFilters (Main "Get Results" Entry Point) ──
@@ -1048,7 +1218,6 @@ function applyFilters(force, deep) {
 
   // Fast path: no new data needed, just re-render with current filters.
   if (newTasks.length === 0 && !needUntagged && fetchedTrending && !deep) {
-    markLocalParents(_allFetched, gen);
     reenable();
     recomputeAndRender(savedExpansions);
     return;
@@ -1097,13 +1266,10 @@ function applyFilters(force, deep) {
       await Promise.allSettled(promises);
       if (isStale(gen)) return;
 
-      // Post-fetch processing: trim, inject/mark parents, final render.
-      _trimAllFetched();
-
       if (deep) {
         UI.setStatus(`Resolving base models…`);
         try {
-          await injectBaseModels(_allFetched, (() => {
+          await injectBaseModels((() => {
             let renderCounter = 0;
             return () => {
               renderCounter++;
@@ -1116,15 +1282,6 @@ function applyFilters(force, deep) {
         } catch (e) {
           console.warn("Base model injection error:", e);
         }
-      } else {
-        // Quick mode: mark parents already in _allFetched so quants outside the date
-        // range still keep their parent visible (the data is already in hand — no API
-        // calls needed, just a local scan).
-        // _injectedBaseIds is intentionally NOT cleared here — models injected during
-        // a prior deep fetch should persist across quick re-fetches since upstream data
-        // is static and re-injecting would waste API calls. Clear Cache or a fresh deep
-        // fetch resets the set (injectBaseModels calls .clear()).
-        markLocalParents(_allFetched, gen);
       }
 
       if (isStale(gen)) return;
@@ -1140,55 +1297,24 @@ function applyFilters(force, deep) {
   })();
 }
 
-// ── Parent Injection (quick mode — no API calls) ──
-function markLocalParents(all, gen) {
-  if (isStale(gen)) return;
-  // Map serves as both existence set for inferParent and O(1) parent reference lookup.
-  const byId = new Map();
-  for (const m of all) byId.set(m.id, m);
-  for (let i = 0; i < all.length; i++) {
-    if (isStale(gen)) return;
-    const m = all[i];
-    if (!isInDateRange(m.lastModified)) continue;
-
-    let baseId = null;
-    const cd = m.cardData;
-    const bm = cd && cd.base_model;
-
-    if (bm) {
-      baseId = getBaseModelId(cd);
-      if (!baseId) continue;
-    } else {
-      const idLower = m.id.toLowerCase();
-      if (!RE_Q_EXISTS.test(idLower)) continue;
-      baseId = inferParent(m.id, byId);
-      if (!baseId) continue;
-    }
-
-    const parent = byId.get(baseId);
-    if (parent) {
-      parent._injected = true;
-      _injectedBaseIds.add(baseId);
-    }
-  }
-}
-
 // ── Parent Injection (deep mode — fetches via queue) ──
-async function injectBaseModels(all, onBatch) {
+async function injectBaseModels(onBatch) {
   const gen = _fetchGeneration;
   if (isStale(gen)) return;
-  _injectedBaseIds.clear();  // Reset on deep fetch — fresh injection pass will repopulate.
-  markLocalParents(all, gen);
-  if (isStale(gen)) return;
-  const seenAuthors = new Set(all.map(m => m.id.split("/")[0]));
+  const seenAuthors = new Set();
+  const seen = new Set();
+  forEachModelRef((m) => {
+    seenAuthors.add(m.id.split("/")[0]);
+    seen.add(m.id);
+  });
   const injected = [];
   const fetchQueue = new Map();
-  const seen = new Set(all.map(m => m.id));
 
-  for (let i = 0; i < all.length; i++) {
-    if (isStale(gen)) return;
-    const m = all[i];
-    if (!isInDateRange(m.lastModified)) continue;
+  let stale = false;
+  forEachModelRef((m) => {
+    if (stale) return;
+    if (isStale(gen)) { stale = true; return; }
+    if (!isInDateRange(m.lastModified)) return;
 
     let baseId = null;
     const cd = m.cardData;
@@ -1196,12 +1322,12 @@ async function injectBaseModels(all, onBatch) {
 
     if (bm) {
       baseId = getBaseModelId(cd);
-      if (!baseId) continue;
+      if (!baseId) return;
     } else {
       const idLower = m.id.toLowerCase();
-      if (!RE_Q_EXISTS.test(idLower)) continue;
+      if (!RE_Q_EXISTS.test(idLower)) return;
       baseId = inferParent(m.id, seen);
-      if (!baseId) continue;
+      if (!baseId) return;
     }
 
     if (!seen.has(baseId) && bm && !isBase(m)) {
@@ -1212,7 +1338,8 @@ async function injectBaseModels(all, onBatch) {
         }
       }
     }
-  }
+  });
+  if (stale) return;
 
   const baseIds = [...fetchQueue.keys()];
   let completed = 0;
@@ -1222,11 +1349,10 @@ async function injectBaseModels(all, onBatch) {
       (raw) => {
         if (isStale(gen)) return null;
         const full = normalizeModel(raw);
+        if (!full) return null;
         full.paramB = getParamCount(full);
-        full._injected = true;
         injected.push(full);
         seen.add(full.id);
-        _injectedBaseIds.add(full.id);
       },
       (err) => {
         console.warn("Failed to fetch base model", err);
@@ -1241,15 +1367,8 @@ async function injectBaseModels(all, onBatch) {
   await Promise.all(promises);
 
   if (isStale(gen)) return;
-  all.push(...injected);
+  for (const m of injected) upsertModelIntoTree(m);
 
-  // Final reconciliation: guarantee every model flagged as _injected is whitelisted
-  // in _injectedBaseIds. Generation guards or Pass 1/Pass 2 races can cause flagged
-  // parents to slip through earlier set additions. This ensures
-  // hierarchy integrity so quantizations attach to their true parent even when that
-  // parent falls outside the active date range (see modelPassesAllFilters).
-  all.forEach(m => { if (m._injected && gen === _fetchGeneration) _injectedBaseIds.add(m.id); });
-  _rebuildAllFetchedMap();
   UI.setStatus("");
 }
 
@@ -1260,25 +1379,73 @@ async function injectBaseModels(all, onBatch) {
 // ── Data Normalization ──
 // Transforms raw API payloads into the canonical internal model shape.
 // Intentionally drops sha, siblings, config, library_name, private, and all other API fields
-// (~60% memory savings in _allFetched). Callers: S3 (_mergeRequestResult, injectBaseModels),
-// S4 (resolveParamFromChildren), S6 (loadAuthorModels, loadChildren).
+// (~60% memory savings vs raw API). Callers: _mergeRequestResult, injectBaseModels,
+// resolveParamFromChildren, loadAuthorModels, loadChildren.
 function normalizeModel(m) {
-  return {
-    id: m.id,
-    downloads: m.downloads || 0,
-    likes: m.likes || 0,
-    lastModified: m.lastModified || "",
-    createdAt: m.createdAt || "",
-    pipeline_tag: m.pipeline_tag || "",
-    tags: m.tags || [],
-    safetensors: m.safetensors || null,
-    gguf: m.gguf || null,
-    cardData: m.cardData ? { base_model: m.cardData.base_model } : null
-  };
+  try {
+    if (!m || typeof m !== "object" || typeof m.id !== "string" || m.id.length === 0) {
+      const badId = m && m.id != null ? String(m.id) : "(missing)";
+      console.warn("Skipping malformed model payload", badId);
+      return null;
+    }
+    return {
+      id: m.id,
+      downloads: m.downloads || 0,
+      likes: m.likes || 0,
+      lastModified: m.lastModified || "",
+      createdAt: m.createdAt || "",
+      pipeline_tag: m.pipeline_tag || "",
+      tags: m.tags || [],
+      safetensors: m.safetensors || null,
+      gguf: m.gguf || null,
+      cardData: m.cardData ? { base_model: m.cardData.base_model } : null
+    };
+  } catch (err) {
+    const badId = m && m.id != null ? String(m.id) : "(missing)";
+    console.warn("Failed to normalize model payload", badId, err);
+    return null;
+  }
+}
+
+// ── Tree Expansion Helpers ──
+// Resolve an expansion key (a|author, m|modelId, g|modelId|author) to a tree node.
+function _resolveExpandKey(key) {
+  if (key.startsWith(PREFIX_AUTHOR)) {
+    const author = key.slice(PREFIX_AUTHOR.length);
+    return _modelTree.byPath.get(author) || null;
+  }
+  if (key.startsWith(PREFIX_MODEL)) {
+    const modelId = key.slice(PREFIX_MODEL.length);
+    return _modelTree.byModelId.get(modelId) || null;
+  }
+  if (key.startsWith(PREFIX_GROUP)) {
+    const rest = key.slice(PREFIX_GROUP.length);
+    const pipeIdx = rest.lastIndexOf('|');
+    if (pipeIdx === -1) return null;
+    const modelId = rest.slice(0, pipeIdx);
+    const author = rest.slice(pipeIdx + 1);
+    const l2 = _modelTree.byModelId.get(modelId);
+    if (!l2) return null;
+    return l2.children.get(author) || null;
+  }
+  return null;
+}
+function _clearDescendantExpanded(node) {
+  for (const child of node.children.values()) {
+    child.expanded = false;
+    _clearDescendantExpanded(child);
+  }
+}
+// Sync tree node.expanded flags from the expandedSections persistence Set.
+function _syncExpandedFromSet() {
+  for (const key of RC.expandedSections) {
+    const node = _resolveExpandKey(key);
+    if (node) node.expanded = true;
+  }
 }
 
 // ── Model Classification ──
-//   getBaseModelId / isBase / inferParent / isOrphanQuant / isNestedQuant
+//   getBaseModelId / isBase / inferParent
 function getBaseModelId(cd) {
   if (!cd || !cd.base_model) return null;
   const bm = cd.base_model;
@@ -1319,71 +1486,23 @@ function inferParent(modelId, knownIds) {
   return null;
 }
 
-// Quant model without explicit base_model metadata, but whose parent is in knownIds.
-// Shown at L2 with an orphan badge. knownIds comes from _allFetched (full set, not date-filtered)
-// so a parent outside the date range still suppresses the quant from appearing standalone at L1.
-function isOrphanQuant(model, knownIds) {
-  const cd = model.cardData;
-  if (cd && cd.base_model) return false;
-  const idLower = model.id.toLowerCase();
-  if (!RE_Q_EXISTS.test(idLower)) return false;
-  return inferParent(model.id, knownIds) !== null;
-}
-
 function getOrphanQuantMethod(modelId) {
   const idLower = modelId.toLowerCase();
-  return idLower.match(RE_Q_MATCH) || [];
+  const matches = idLower.match(RE_Q_MATCH);
+  return matches ? [...new Set(matches)] : [];
 }
 
-function isNestedQuant(m, knownIds, allFetchedMap) {
-  const cd = m.cardData;
-  if (!cd) return false;
-  const baseId = getBaseModelId(cd);
-  if (!baseId) return false;
-  const idLower = m.id.toLowerCase();
-  if (!RE_Q_EXISTS.test(idLower)) return false;
-  if (!knownIds.has(baseId)) return false;
-  // Only suppress if the parent is itself a non-base (quant/derivative).
-  // Same-author quants whose parent is a true base model should appear at L2.
-  const parent = allFetchedMap.get(baseId);
-  return parent ? !isBase(parent) : false;
-}
-
-// ── Canonical Author Dedup ──
-function buildCanonicalAuthors() {
-  if (_canonicalCache && _canonicalCache.ref === _allFetched) {
-    _canonicalAuthor = _canonicalCache.result;
-    return;
-  }
-  _canonicalAuthor = {};
-  // Single-pass: for each name, track the best (highest-download) author and whether
-  // multiple authors exist. Only names with >1 distinct author go into canonical map.
-  const byName = {};
-  _allFetched.forEach(m => {
-    const name = m.id.split("/").slice(1).join("/");
-    const parts = m.id.split("/");
-    const authorLower = parts[0].toLowerCase();
-    const entry = { author: authorLower, raw: parts[0], downloads: m.downloads || 0 };
-    if (!byName[name]) {
-      byName[name] = { best: entry, authors: new Set([authorLower]) };
-    } else {
-      const g = byName[name];
-      g.authors.add(authorLower);
-      if (entry.downloads > g.best.downloads) g.best = entry;
-    }
-  });
-  for (const name in byName) {
-    if (byName[name].authors.size > 1) {
-      _canonicalAuthor[name] = byName[name].best.raw;
-    }
-  }
-  _canonicalCache = { result: _canonicalAuthor, ref: _allFetched };
-}
-
-function isCanonicalCopy(m) {
-  const name = m.id.split("/").slice(1).join("/");
-  return _canonicalAuthor && _canonicalAuthor[name] !== undefined &&
-    _canonicalAuthor[name].toLowerCase() !== m.id.split("/")[0].toLowerCase();
+function getQuantFilterString(model) {
+  if (!model) return "derivative";
+  const idLower = String(model.id || '').toLowerCase();
+  if (idLower.includes('fp4')) return 'fp4';
+  if (idLower.includes('fp8')) return 'fp8';
+  const byId = getOrphanQuantMethod(model.id || "");
+  if (byId.length > 0) return byId.join(', ');
+  if (model.q_method) return model.q_method;
+  const tags = Array.isArray(model.tags) ? model.tags : [];
+  if (tags.some(t => String(t).toLowerCase() === 'safetensors')) return 'safetensors';
+  return 'derivative';
 }
 
 // ── Pipeline Tag Resolution ──
@@ -1405,15 +1524,31 @@ function matchesTaskFilter(pipelineTag) {
 
 // ── Parameter Extraction ──
 //   extractParamFromId → getParamCount → resolveParamFromChildren → tryResolveModelParam
+// Browser compatibility: extractParamFromId uses regex lookbehind assertions,
+// requiring ES2018+ engines (Safari 16.4+, Firefox 78+, Chrome 64+).
 function extractParamFromId(id) {
-  const bMatch = id.match(RE_B_PARAM);
-  if (bMatch) {
-    const v = parseFloat(bMatch[1]);
+  // Pattern 1: Strict — no letter or digit before the number.
+  // Catches -7B, -22B, -125m etc. but NOT 8x7B (x blocks) nor partial 2B in 22B.
+  const strictB = id.match(/(?<![a-zA-Z\d])(\d+(?:\.\d+)?)[Bb](?![a-zA-Z])/);
+  if (strictB) {
+    const v = parseFloat(strictB[1]);
     if (v >= 0.001 && v <= 2000) return v;
   }
-  const mMatch = id.match(RE_M_PARAM);
-  if (mMatch) {
-    const v = parseFloat(mMatch[1]) / 1000;
+  const strictM = id.match(/(?<![a-zA-Z\d])(\d+(?:\.\d+)?)[Mm](?![a-zA-Z])/);
+  if (strictM) {
+    const v = parseFloat(strictM[1]) / 1000;
+    if (v >= 0.001 && v <= 2000) return v;
+  }
+  // Pattern 2: MoE — 8x7B, 8x22B (letter before the multiplier is allowed)
+  const moeB = id.match(/\d+[xX](\d+(?:\.\d+)?)[bB](?![a-zA-Z])/);
+  if (moeB) {
+    const v = parseFloat(moeB[1]);
+    if (v >= 0.001 && v <= 2000) return v;
+  }
+  // Pattern 3: Active-param — A14B (letter A before number)
+  const actB = id.match(/(?<![a-zA-Z])[aA](\d+(?:\.\d+)?)[bB](?![a-zA-Z])/);
+  if (actB) {
+    const v = parseFloat(actB[1]);
     if (v >= 0.001 && v <= 2000) return v;
   }
   return null;
@@ -1450,7 +1585,8 @@ async function resolveParamFromChildren(modelId) {
     const cd = raw.cardData || {};
     const childHasBase = hasBaseModel(cd, modelId);
     if (!childHasBase && !strictNameMatch(raw.id, modelName)) continue;
-    children.push(normalizeModel(raw));
+    const normalized = normalizeModel(raw);
+    if (normalized) children.push(normalized);
   }
   // Sort children by ascending modification date so the oldest (typically
   // original GGUF quants) are prioritized over newer pruned variants (REAP)
@@ -1484,6 +1620,12 @@ async function resolveParamFromChildren(modelId) {
   }
   return { value: runningMax, usedApi };
 }
+/**
+ * Try resolving a model's parameter count via name, parent inheritance, then child search.
+ * @param {Object} m Normalized base-model ref being resolved.
+ * @param {number} gen Fetch generation captured by caller for stale guards.
+ * @returns {Promise<boolean>} True when a parameter value is resolved and committed.
+ */
 async function tryResolveModelParam(m, gen) {
   const rowEl = document.querySelector(`tr.l2-row[data-model="${CSS.escape(m.id)}"]`);
   if (rowEl) rowEl.classList.add("inferring");
@@ -1511,9 +1653,9 @@ async function tryResolveModelParam(m, gen) {
       const cachedP = _paramCache.get(candId);
       if (cachedP != null) { resolved = cachedP; source = 'parent'; break; }
 
-      // Fallback to _allFetched scan (covers injected/visible base models)
+      // Fallback to tree lookup (covers injected/visible base models)
       if (!resolved) {
-        const parent = _allFetchedById.get(candId);
+        const parent = getModelRef(candId);
         if (parent && parent.paramB != null) { resolved = parent.paramB; source = 'parent'; }
       }
     }
@@ -1521,20 +1663,23 @@ async function tryResolveModelParam(m, gen) {
 
   // ③ EXPENSIVE: Child search API calls — ONLY if still unresolved & not attempted
   let childUsedApi = false;
-  if (resolved === null && !_inferredAttemptedIds.has(m.id)) {
+  if (resolved === null && !m._inferredAttempted) {
     if (isStale(gen)) {
       if (rowEl) rowEl.classList.remove("inferring");
       return false;
     }
     const childResult = await resolveParamFromChildren(m.id);
+    if (isStale(gen)) {
+      if (rowEl) rowEl.classList.remove("inferring");
+      return false;
+    }
     resolved = childResult.value;
     childUsedApi = childResult.usedApi;
     source = 'children';
   }
 
   // Mark as attempted to prevent future expensive retries on re-expansion/filter changes
-  if (_inferredAttemptedIds.size > 5000) _inferredAttemptedIds.clear();
-  _inferredAttemptedIds.add(m.id);
+  m._inferredAttempted = true;
 
   if (rowEl) rowEl.classList.remove("inferring");
 
@@ -1545,8 +1690,8 @@ async function tryResolveModelParam(m, gen) {
     const ps = source === 'name' ? 'name' : source === 'parent' ? 'parent_inherit' : (source === 'children' && childUsedApi) ? 'child_api' : 'child_name';
     _paramSource.set(m.id, ps);
 
-    const af = _allFetchedById.get(m.id);
-    if (af) af.paramB = resolved;
+    const dbEntry = getModelRef(m.id);
+    if (dbEntry) dbEntry.paramB = resolved;
   }
 
   // Progressive UI update only — no structural render
@@ -1555,7 +1700,7 @@ async function tryResolveModelParam(m, gen) {
 }
 
 // ── Filter Pipeline ──
-//   matchesFilter → qMethodToCategory → resolveTasks → matchesTaskFilter → modelPassesAllFilters → computeAuthorData
+//   matchesFilter → qMethodToCategory → resolveTasks → matchesTaskFilter
 function matchesFilter(qMethod) {
   if (!qMethod) return true;
   const methods = qMethod.toLowerCase().split(",").map(s => s.trim());
@@ -1566,13 +1711,67 @@ function matchesFilter(qMethod) {
 }
 function qMethodToCategory(method) {
   const m = method.toLowerCase();
+  if (m.includes('fp4')) return 'fp4';
+  if (m.includes('fp8')) return 'fp8';
   if (["awq", "finetune", "gguf", "mlx", "fp4", "fp8", "safetensors"].includes(m)) return m;
   return "others";
 }
-function modelPassesAllFilters(m) {
+// ── Post-Deepen Tree Re-evaluation ──
+function _schedulePostDeepenRender(author, gen) {
+  if (isStale(gen)) return;
+  const l1Node = _modelTree.byPath.get(author);
+  if (!l1Node) return;
+  const prevCount = l1Node.aggCount;
+  walkFilterL1(l1Node);
+  if (l1Node.aggCount !== prevCount) {
+    RC.requestRender(null, true);
+  }
+}
+
+// ── Tree Construction (Refactored Architecture) ──
+//   resolveTrueBase
+// Follows cardData.base_model chain iteratively to find the true base ancestor.
+// Stops when chain is exhausted or the next hop is not in tree model refs.
+// Max 10 hops with cycle detection via visited Set.
+/**
+ * Resolve the deepest known base-model ancestor for a model ID.
+ * @param {string|Object} modelOrId Model ID string or normalized model object.
+ * @returns {string} Resolved base model ID (or input ID when unresolved).
+ */
+function resolveTrueBase(modelOrId) {
+  const startId = typeof modelOrId === 'string' ? modelOrId : (modelOrId && modelOrId.id) || '';
+  if (!startId) return startId;
+  let current = startId;
+  const startBase = typeof modelOrId === 'string' ? null : getBaseModelId(modelOrId.cardData);
+  const visited = new Set();
+  for (let i = 0; i < 10; i++) {
+    visited.add(current);
+    let baseId = null;
+    if (current === startId && startBase) {
+      baseId = startBase;
+    } else {
+      const m = getModelRef(current);
+      if (!m || !m.cardData) return current;
+      baseId = getBaseModelId(m.cardData);
+    }
+    if (!baseId || visited.has(baseId)) return current;
+    current = baseId;
+  }
+  return current;
+}
+
+
+// ── Tree Filter Pipeline (Refactored Architecture) ──
+//   passesTreeNodeFilters → passesL4Filters → runFilterPipeline
+// Single recursive walk over _modelTree that evaluates filters, propagates
+// parent activation (quants reactivate their base model), and aggregates stats.
+
+// Filters an L2 (base model) node. Parent propagation in the tree walk
+// handles reactivating parents whose quants pass filters.
+function passesTreeNodeFilters(m) {
   const tf2 = RC._state.textFilters.l2Model;
   if (tf2 && !m.id.split("/").slice(1).join("/").toLowerCase().includes(tf2.toLowerCase())) return false;
-  if (!_injectedBaseIds.has(m.id) && !isInDateRange(m.lastModified)) return false;
+  if (!isInDateRange(m.lastModified)) return false;
   const tag = m.pipeline_tag;
   if (!tag && !activeSpecialFilters.has("include untagged")) return false;
   const pb = m.paramB != null ? m.paramB : getParamCount(m);
@@ -1580,9 +1779,6 @@ function modelPassesAllFilters(m) {
   if (_hideMissingParamEnabled && pb === null) return false;
   if (!matchesTaskFilter(tag)) return false;
   if (tag && !activeTaskFilters.has(tag)) return false;
-  // Check quant chip filters: models with quant method tags in their ID
-  // (e.g., same-author fine-tunes like Qwen/Qwen2.5-7B-AWQ) are suppressed
-  // from L2 when their quant chip is toggled off.
   const qMethods = getOrphanQuantMethod(m.id);
   if (qMethods.length > 0) {
     const matchesAny = qMethods.some(qm => activeFilters.has(qMethodToCategory(qm)));
@@ -1590,46 +1786,144 @@ function modelPassesAllFilters(m) {
   }
   return true;
 }
-function computeAuthorData() {
-  buildCanonicalAuthors();
-  const all = _allFetched;
-  const knownIds = new Set(all.map(x => x.id));
-  const byId = new Map(all.map(x => [x.id, x]));
-  const map = {};
-  all.forEach(m => {
-    if (!modelPassesAllFilters(m)) return;
-    if (!isBase(m)) return;
-    if (isOrphanQuant(m, knownIds)) return;
-    if (isNestedQuant(m, knownIds, byId)) return;
-    if (isCanonicalCopy(m)) return;
-    const author = m.id.split("/")[0];
-    if (!map[author]) map[author] = { author, count: 0, totalDownloads: 0, totalLikes: 0 };
-    map[author].count++;
-    map[author].totalDownloads += m.downloads || 0;
-    map[author].totalLikes += m.likes || 0;
-  });
-  return Object.values(map);
+
+// Filters an L4 (quant) node. Simpler than L2: no param/slider/task filters.
+function passesL4Filters(m) {
+  if (!isInDateRange(m.lastModified)) return false;
+  if (!matchesFilter(getQuantFilterString(m))) return false;
+  const tag = m.pipeline_tag;
+  if (!tag && !activeSpecialFilters.has("include untagged")) return false;
+  if (!matchesTaskFilter(tag)) return false;
+  if (tag && !activeTaskFilters.has(tag)) return false;
+  return true;
 }
 
-// ── Filter Boundary Tracking ──
-function _filterBoundaryChanged(author) {
-  const baseModels = cacheAccess(author);
-  if (!baseModels) return true;
-  const nqb = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
-  const current = nqb.filter(m => modelPassesAllFilters(m)).length;
-  const prev = _lastFilteredCounts.get(author) ?? current;
-  _lastFilteredCounts.set(author, current);
-  return current !== prev;
+// Shared quant visibility predicate for all L3/L4 render paths.
+function passesQuantRenderFilters(m) {
+  return passesL4Filters(m);
 }
 
-// Schedule a structural render after deepening completes, but only if visibility
-// of models changed (i.e., param resolution moved models into/out of param filter range).
-function _schedulePostDeepenRender(author, gen) {
-  if (isStale(gen)) return;
-  if (_filterBoundaryChanged(author)) {
-    RC.requestRender(null, true);
+// Single recursive tree walk: evaluates filters, propagates parent activation,
+// and accumulates stats. Sets node.display and node.agg{Count,Downloads,Likes}.
+function runFilterPipeline() {
+  if (!_modelTree.root) return;
+  for (const l1Node of _modelTree.root.children.values()) {
+    walkFilterL1(l1Node);
   }
 }
+function walkFilterL1(node) {
+  let count = 0, dl = 0, lk = 0;
+  for (const l2Node of node.children.values()) {
+    const r = walkFilterL2(l2Node);
+    if (l2Node.display && l2Node.canonical) count++;
+    dl += r.downloads; lk += r.likes;
+  }
+  node.aggCount = count;
+  node.aggDownloads = dl;
+  node.aggLikes = lk;
+  node.display = count > 0;
+}
+/**
+ * Evaluate one L2 node, aggregate descendants, and apply parent reactivation rules.
+ * @param {Object} node L2 TreeNode.
+ * @returns {{count:number, downloads:number, likes:number}} Aggregated subtree stats.
+ */
+function walkFilterL2(node) {
+  const ref = node.modelRef;
+  let passes = ref ? passesTreeNodeFilters(ref) : false;
+  node.display = false;
+  let childCount = 0;
+  let childDl = 0;
+  let childLk = 0;
+  for (const l3Node of node.children.values()) {
+    const r = walkFilterL3(l3Node);
+    childCount += r.count;
+    childDl += r.downloads;
+    childLk += r.likes;
+  }
+
+  const qMethods = ref ? getOrphanQuantMethod(ref.id) : [];
+  const selfQuantMatch = qMethods.length > 0 && qMethods.some(qm => activeFilters.has(qMethodToCategory(qm)));
+  const hasOrphanQuant = qMethods.length > 0;
+  let includeSelf = passes && (!hasOrphanQuant || selfQuantMatch);
+
+  // Parent propagation: quants reactivate their parent only when the parent's
+  // own exclusion is NOT caused by param range, hide-missing-params, or L2 text filter.
+  // This includes quant-chip-only exclusions at L2: a parent with matching children
+  // should remain visible even when the parent ID itself has no quant match.
+  if (!includeSelf && childCount > 0) {
+    const tf2 = RC._state.textFilters.l2Model;
+    const textFilterBlocks = tf2 && ref && !ref.id.split("/").slice(1).join("/").toLowerCase().includes(tf2.toLowerCase());
+    const tag = ref ? ref.pipeline_tag : '';
+    const untaggedBlocks = !tag && !activeSpecialFilters.has("include untagged");
+    if (!textFilterBlocks && !untaggedBlocks) {
+      const pb = ref ? (ref.paramB != null ? ref.paramB : getParamCount(ref)) : null;
+      if (pb !== null ? isInParamRange(pb) : !_hideMissingParamEnabled) {
+        includeSelf = true;
+      }
+    }
+  }
+
+  node.display = includeSelf;
+  const selfDl = includeSelf && ref ? (ref.downloads || 0) : 0;
+  const selfLk = includeSelf && ref ? (ref.likes || 0) : 0;
+  const count = childCount + (includeSelf ? 1 : 0);
+  const dl = childDl + selfDl;
+  const lk = childLk + selfLk;
+  node.aggCount = count;
+  node.aggDownloads = dl;
+  node.aggLikes = lk;
+  return { count, downloads: dl, likes: lk };
+}
+function walkFilterL3(node) {
+  let count = 0, dl = 0, lk = 0;
+  for (const l4Node of node.children.values()) {
+    const r = walkFilterL4(l4Node);
+    count += r.count; dl += r.downloads; lk += r.likes;
+  }
+  node.display = count > 0;
+  node.aggCount = count;
+  node.aggDownloads = dl;
+  node.aggLikes = lk;
+  return { count, downloads: dl, likes: lk };
+}
+function walkFilterL4(node) {
+  const ref = node.modelRef;
+  const passes = ref ? passesL4Filters(ref) : false;
+  node.display = passes;
+  return {
+    count: passes ? 1 : 0,
+    downloads: passes && ref ? (ref.downloads || 0) : 0,
+    likes: passes && ref ? (ref.likes || 0) : 0
+  };
+}
+
+// Returns a flat array of child model objects for a given parent (L2) model ID
+// by traversing the tree (L3 → L4 nodes). Each entry matches the format that
+// renderL3 / renderL4 expect (id, author, q_method, downloads, likes, etc.).
+function getTreeChildren(parentId) {
+  const l2Node = _modelTree.byModelId.get(parentId);
+  if (!l2Node || l2Node.level !== 2) return [];
+  const out = [];
+  for (const l3Node of l2Node.children.values()) {
+    for (const l4Node of l3Node.children.values()) {
+      const ref = l4Node.modelRef;
+      if (!ref) continue;
+      const qMatch = [...new Set((ref.id || '').toLowerCase().match(RE_Q_MATCH) || [])];
+      out.push({
+        id: ref.id,
+        author: ref.id.split('/')[0],
+        downloads: ref.downloads || 0,
+        likes: ref.likes || 0,
+        lastModified: ref.lastModified || '',
+        pipeline_tag: ref.pipeline_tag || '',
+        q_method: ref.q_method || qMatch.map(q => q.toUpperCase()).join(', ') || getQuantFilterString(ref)
+      });
+    }
+  }
+  return out;
+}
+
 
 // ── Sort Utilities ──
 //   sortCoerce → _cmp → sortRows
@@ -1641,15 +1935,17 @@ function sortCoerce(v, k) {
 }
 function _cmp(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
 function sortRows(rows, key, asc, subKey) {
-  const cmp = (x, y) => {
+  return rows.slice().sort((x, y) => {
     let va = sortCoerce(x[key], key), vb = sortCoerce(y[key], key);
     let r = typeof va === 'number' && typeof vb === 'number' ? _cmp(va, vb) : _cmp(va, vb);
-    if (r === 0 && subKey && x[key] === y[key]) {
-      r = _cmp(sortCoerce(x[subKey], subKey), sortCoerce(y[subKey], subKey));
+    if (r !== 0) return asc ? r : -r;
+    if (subKey && x[key] === y[key]) {
+      va = sortCoerce(x[subKey], subKey); vb = sortCoerce(y[subKey], subKey);
+      r = typeof va === 'number' && typeof vb === 'number' ? _cmp(va, vb) : _cmp(va, vb);
+      if (r !== 0) return r;
     }
-    return r || x.id.localeCompare(y.id);
-  };
-  return rows.slice().sort(asc ? cmp : (a, b) => -cmp(a, b));
+    return x.id.localeCompare(y.id);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1794,6 +2090,7 @@ function schedulePopupShow(popupEl, delay) {
     if (!popupEl.isConnected) return;
     if (popupEl._popupTrigger) positionPopupCenter(popupEl._popupTrigger, popupEl);
     popupEl.classList.add("visible");
+    if (popupEl._popupTrigger) popupEl._popupTrigger.setAttribute("aria-expanded", "true");
     const saved = _popupScrollPositions.get(popupEl);
     popupEl.scrollTop = typeof saved === "number" ? saved : 0;
   }, delay || CONFIG.POPUP_SHOW_DELAY));
@@ -1803,6 +2100,7 @@ function schedulePopupHide(popupEl, delay) {
   _popupTimers.set(popupEl, setTimeout(() => {
     _popupScrollPositions.set(popupEl, popupEl.scrollTop);
     popupEl.classList.remove("visible");
+    if (popupEl._popupTrigger) popupEl._popupTrigger.setAttribute("aria-expanded", "false");
   }, delay || CONFIG.POPUP_HIDE_DELAY));
 }
 // Hide all visible popups on scroll/resize to prevent stale positioning.
@@ -1811,6 +2109,7 @@ function hideAllPopups() {
     _popupScrollPositions.set(p, p.scrollTop);
     delete p._cachedWidth;
     p.classList.remove("visible");
+    if (p._popupTrigger) p._popupTrigger.setAttribute("aria-expanded", "false");
   });
   for (const [, timer] of _popupTimers) clearTimeout(timer);
   _popupTimers.clear();
@@ -1835,9 +2134,11 @@ function wirePopupHover(trigger, popup, makeContent) {
 // Generates hidden-models popup trigger HTML and returns a post-render wiring function.
 // Pass makeContent as null to defer it — call with the callback later in .wire(makeContent).
 function makePopupTrigger(suffix, labelText, makeContent) {
-  const safe = suffix.replace(/\//g, '__');
+  const safe = Array.from(String(suffix)).map(ch => {
+    return /[A-Za-z0-9_-]/.test(ch) ? ch : `~${ch.codePointAt(0).toString(16)}~`;
+  }).join('');
   return {
-    html: `<button type="button" id="fp-trigger-${safe}" class="filter-popup-trigger" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">${labelText}</button><div id="fp-popup-${safe}" class="filter-popup"></div>`,
+    html: `<button type="button" id="fp-trigger-${safe}" class="filter-popup-trigger" aria-haspopup="listbox" aria-controls="fp-popup-${safe}" aria-describedby="fp-popup-${safe}" aria-expanded="false" style="color:#6e7681;font-size:0.75rem">${labelText}</button><div id="fp-popup-${safe}" class="filter-popup" role="listbox" aria-label="Hidden models preview"></div>`,
     wire: (mc) => {
       const trigger = document.getElementById(`fp-trigger-${safe}`);
       const popup = document.getElementById(`fp-popup-${safe}`);
@@ -1935,20 +2236,20 @@ function handleSortClick(th, level, stateKey, defaultKey, refreshAfter, renderFn
 // ── Slider System: Math & Labels ──
 //   sliderValueToDate / sliderValueToLabel / isInDateRange
 function sliderValueToDate(val) {
-  if (val === 0) return new Date("2010-01-01");
+  if (val === 0) return new Date("2010-01-01T00:00:00Z");
   if (val === CONFIG.DATE_SLIDER_MAX) return new Date();
-  const d = new Date();
-  d.setDate(d.getDate() - (CONFIG.DATE_SLIDER_MAX - val) * CONFIG.DAYS_PER_STEP);
-  return d;
+  const now = new Date();
+  const utcStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const daysBack = (CONFIG.DATE_SLIDER_MAX - val) * CONFIG.DAYS_PER_STEP;
+  return new Date(utcStart - daysBack * 86400000);
 }
 function sliderValueToLabel(val) {
   if (val === 0) return "Anytime";
   if (val === CONFIG.DATE_SLIDER_MAX) return "Now";
-  const d = new Date();
-  d.setDate(d.getDate() - (CONFIG.DATE_SLIDER_MAX - val) * CONFIG.DAYS_PER_STEP);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+  const d = sliderValueToDate(val);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}/${m}/${day}`;
 }
 function isInDateRange(dateStr) {
@@ -2229,7 +2530,7 @@ function applyBarLogic(option, options, activeSet) {
 // ── Param Badge System ──
 function paramBadgeHtml(m) {
   if (m.paramB == null) {
-    if (_derivedParamEnabled && _inferredAttemptedIds.has(m.id)) {
+    if (_derivedParamEnabled && m._inferredAttempted) {
       return '<span class="no-param" title="Infer Missing Params attempted but could not resolve">—</span>';
     }
     return '<span class="no-param-maybe" title="No parameter count — enable Infer Missing Params to attempt resolution">—</span>';
@@ -2266,7 +2567,7 @@ function renderErrorWithRetry(container, message, retryFn) {
   if (btn) btn.addEventListener("click", retryFn, { once: true });
 }
 function updateArrows() {
-  document.querySelectorAll("#main-table thead th").forEach(th => {
+  document.querySelectorAll("#main-table > thead > tr > th").forEach(th => {
     const arrow = th.querySelector(".arrow, .sort-arrow, .arrow-left");
     if (!arrow) return;
     const active = th.dataset.key === RC.sortKey;
@@ -2286,13 +2587,19 @@ function updateArrows() {
 
 // ── DOM Cache & Section Toggle Utilities ──
 //   cacheDomRef / invalidateDomKey / invalidateDomPrefix / _getSectionCached
-//   toggleSection / pruneExpiredExpansions / saveRestoreExpansions / recomputeAndRender
+//   toggleSection / recomputeAndRender
 
 // Unified section toggle: handles expand/collapse DOM and state for all levels.
 // Returns true if section was expanded, false if collapsed.
 // descendantPrefixes is optional — used at L1/L2 to cascade-delete child keys on collapse.
 function toggleSection(detailRow, tog, key, descendantPrefixes) {
   const expanding = detailRow.style.display === "none";
+  // Sync tree node.expanded flag
+  const node = _resolveExpandKey(key);
+  if (node) {
+    node.expanded = expanding;
+    if (!expanding) _clearDescendantExpanded(node);
+  }
   if (expanding) {
     detailRow.style.display = "";
     tog.classList.add("open");
@@ -2323,29 +2630,6 @@ function _getSectionCached(key) {
   return null;
 }
 
-function pruneExpiredExpansions(renderedAuthors) {
-  for (const key of [...RenderCoordinator.expandedSections]) {
-    if (!key.startsWith(PREFIX_AUTHOR)) continue;
-    const author = key.slice(PREFIX_AUTHOR.length);
-    if (!renderedAuthors.has(author)) {
-      invalidateDomKey(key);
-      invalidateDomPrefix(PREFIX_MODEL + author + "/");
-      invalidateDomPrefix(PREFIX_GROUP + author + "/");
-      RenderCoordinator.expandedSections.delete(key);
-      for (const child of [...RenderCoordinator.expandedSections]) {
-        if (child.startsWith(PREFIX_MODEL + author + "/") || child.startsWith(PREFIX_GROUP + author + "/")) {
-          RenderCoordinator.expandedSections.delete(child);
-        }
-      }
-    }
-  }
-}
-
-function saveRestoreExpansions(saved) {
-  for (const key of saved) {
-    if (!RenderCoordinator.expandedSections.has(key)) RenderCoordinator.expandedSections.add(key);
-  }
-}
 function recomputeAndRender(saved) {
   RenderCoordinator.requestRender(saved, false);
 }
@@ -2402,7 +2686,7 @@ function renderMain(authorData, skipSort) {
   }
   document.getElementById("count").textContent = countText + ". Click to expand.";
 }
-async function deepenBatch(idx, author, container, unknownModels, filterApplied, nonQuantBase, gen) {
+async function deepenBatch(idx, author, container, unknownModels, gen) {
   const totalUnk = unknownModels.length;
   let completed = 0;
   unknownModels.forEach(m => m.deep_status = 1);
@@ -2418,6 +2702,8 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
         if (p !== null) {
           m.paramB = p;
           _paramCache.set(m.id, p);
+          const dbEntry = getModelRef(m.id);
+          if (dbEntry) dbEntry.paramB = p;
           UI.queueUpdate(() => UI.updateCellBadge(m.id, paramBadgeHtml(m)));
         }
         success = true;
@@ -2431,38 +2717,43 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
       if (completed === totalUnk) {
         UI.setStatus("");
       }
-      // Call unconditionally — _filterBoundaryChange + RAF coalescing prevent wasted renders
+      // RAF coalescing prevents wasted renders
       _schedulePostDeepenRender(author, gen);
     });
   }));
 }
 async function refreshAuthorL2Section(idx, author, container, skipRender) {
-  if (_deepeningAuthors.has(author)) return; // already deepening
-  _deepeningAuthors.add(author);
+  const gen = _fetchGeneration;
+  const deepKey = `${gen}|${author}`;
+  if (_deepeningAuthors.has(deepKey)) return;
+  _deepeningAuthors.add(deepKey);
   try {
-    const baseModels = cacheAccess(author);
-    if (!baseModels) return;
-    const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
-    const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
-    if (!skipRender) {
-      renderL2(idx, author, filtered, container, nonQuantBase.length, nonQuantBase);
+    const l1Node = _modelTree.byPath.get(author);
+    if (!l1Node) return;
+    const allModels = [];
+    const filtered = [];
+    for (const l2Node of l1Node.children.values()) {
+      if (!l2Node.modelRef || !l2Node.canonical) continue;
+      allModels.push(l2Node.modelRef);
+      if (l2Node.display) filtered.push(l2Node.modelRef);
     }
-    _lastFilteredCounts.set(author, filtered.length);
+    if (!skipRender) {
+      renderL2(idx, author, filtered, container, allModels.length, allModels);
+    }
     const freshUnknowns = filtered.filter(m => m.paramB === null && (m.deep_status || 0) === 0);
-    const gen = _fetchGeneration;
     if (freshUnknowns.length > 0) {
-      await deepenBatch(idx, author, container, freshUnknowns,
-        () => nonQuantBase.filter(m => modelPassesAllFilters(m)),
-        nonQuantBase, gen);
+      await deepenBatch(idx, author, container, freshUnknowns, gen);
     }
     if (_derivedParamEnabled) {
       const stillUnknown = filtered.filter(m =>
-        m.paramB === null && !_inferredAttemptedIds.has(m.id));
+        m.paramB === null && !m._inferredAttempted);
       if (stillUnknown.length > 0) {
         for (const m of stillUnknown) {
           if (isStale(gen)) return;
           if (m.paramB != null) continue;
-          console.assert(m.deep_status === 2, `${m.id}: Infer Missing Params ran before deepening completed`);
+          if (m.deep_status !== 2) {
+            console.warn(`${m.id}: Infer Missing Params ran before deepening completed`);
+          }
           const resolved = await tryResolveModelParam(m, gen);
         }
         if (isStale(gen)) return;
@@ -2471,51 +2762,39 @@ async function refreshAuthorL2Section(idx, author, container, skipRender) {
       }
     }
   } finally {
-    _deepeningAuthors.delete(author);
+    _deepeningAuthors.delete(deepKey);
   }
 }
 async function loadAuthorModels(idx, author, container) {
   const gen = _fetchGeneration;
   try {
-    const raw = cacheAccess(author + "_models") || await fetchJson(
+    // If tree already has canonical children for this author, data is loaded
+    const l1Node = _modelTree.byPath.get(author);
+    const hasModels = l1Node && [...l1Node.children.values()].some(c => c.modelRef && c.canonical);
+    if (hasModels) {
+      if (isStale(gen) || !container.isConnected) return;
+      refreshAuthorL2Section(idx, author, container);
+      return;
+    }
+    const raw = await fetchJson(
       `https://huggingface.co/api/models?author=${author}&sort=downloads&direction=-1&limit=${CONFIG.AUTHOR_LIMIT}&full=true&cardData=true`
     );
-    const models = raw.map(normalizeModel);
-    cacheSet(author + "_models", models);
+    const models = raw.map(normalizeModel).filter(Boolean);
 
-    markLocalParents(models, gen);
-
-    const authorKnownIds = new Set(models.map(x => x.id));
-    const byAuthorId = new Map(models.map(x => [x.id, x]));
-    const baseModels = models.filter(m => isBase(m)).map(m => ({
-      id: m.id,
-      downloads: m.downloads || 0,
-      likes: m.likes || 0,
-      created_at: m.createdAt || "",
-      updated_at: m.lastModified || "",
-      lastModified: m.lastModified || "",
-      tags: m.tags || [],
-      paramB: getParamCount(m),
-      pipeline_tag: m.pipeline_tag || "",
-      _orphanQuant: isOrphanQuant(m, authorKnownIds),
-      _nestedQuant: isNestedQuant(m, authorKnownIds, byAuthorId),
-      deep_status: 0
-    }));
-
-    cacheSet(author, baseModels);
-
-    const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
-    const filterApplied = () => nonQuantBase.filter(m => modelPassesAllFilters(m));
-
-    const dated = filterApplied();
+    // Upsert fetched models into tree-backed store for this author
+    for (const m of models) upsertModelIntoTree(m);
 
     if (isStale(gen)) return;
     const row = document.querySelector(`.l1-row[data-author="${CSS.escape(author)}"]`);
     if (row) {
+      const l1Node = _modelTree.byPath.get(author);
+      const count = l1Node ? l1Node.aggCount : 0;
+      const dl = l1Node ? l1Node.aggDownloads : 0;
+      const lk = l1Node ? l1Node.aggLikes : 0;
       const cells = row.querySelectorAll("td");
-      cells[1].textContent = dated.length;
-      cells[2].textContent = fmt(dated.reduce((s, m) => s + m.downloads, 0));
-      cells[3].textContent = fmt(dated.reduce((s, m) => s + m.likes, 0));
+      cells[1].textContent = count;
+      cells[2].textContent = fmt(dl);
+      cells[3].textContent = fmt(lk);
     }
 
     if (isStale(gen) || !container.isConnected) return;
@@ -2541,10 +2820,8 @@ function thHtml(c, state, level, colindex) {
 }
 
 function renderL2Empty(idx, author, container, popupSource) {
-  const cached = cacheAccess(author);
-  const hasData = (popupSource && popupSource.length > 0) || (cached && cached.length > 0);
-  const allBaseModels = popupSource || cached || [];
-  RC._levelState.l2.set(author, { idx, author, models: [], allBaseModels });
+  const hasData = popupSource && popupSource.length > 0;
+  const allBaseModels = popupSource || [];
   if (allBaseModels.length > 0) {
     const pt = makePopupTrigger(`l2-empty-${author}`, "No base models match current filters",
       (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), allBaseModels.length)));
@@ -2578,7 +2855,7 @@ function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
     const orphanBadge = qMethods.length ? qMethods.map(q => `<span class="badge orphan" title="Parent base model filtered out">${escapeHtml(q.toUpperCase())}</span>`).join(' ') + ' ' : '';
     return `<tr class="l2-row ${zebra}" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}" aria-rowindex="${rowIdx}">
       <td class="model-id-cell" aria-colindex="1"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(m.id)}">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
-      <td class="center" aria-colindex="2">${escapeHtml(m.pipeline_tag)}</td>
+      <td class="center" aria-colindex="2">${escapeHtml(m.pipeline_tag || "(untagged)")}</td>
       <td class="center" aria-colindex="3" style="font-size:0.78rem">${paramBadgeHtml(m)}</td>
       <td class="right" aria-colindex="4">${fmt(m.downloads)}</td>
       <td class="right" aria-colindex="5">${fmt(m.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
@@ -2597,18 +2874,38 @@ function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
   return { html, hidden, pt };
 }
 
+function _getAuthorL1Idx(author) {
+  const row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
+  return row ? parseInt(row.dataset.l1Idx) : -1;
+}
+function _getAuthorL2Data(author) {
+  const l1Node = _modelTree.byPath.get(author);
+  if (!l1Node) return { models: [], totalBeforeFilter: 0, allBaseModels: [] };
+  const allBaseModels = [];
+  const filteredModels = [];
+  for (const l2Node of l1Node.children.values()) {
+    if (!l2Node.modelRef || !l2Node.canonical) continue;
+    allBaseModels.push(l2Node.modelRef);
+    if (l2Node.display) filteredModels.push(l2Node.modelRef);
+  }
+  return { models: filteredModels, totalBeforeFilter: allBaseModels.length, allBaseModels };
+}
+
 function setupL2Events(container) {
   if (container._delegatedL2) return;
   container._delegatedL2 = true;
   const l2Click = function(e) {
     const inner = e.target.closest(".detail-inner");
     if (inner && inner !== this) return;
-    const s = RC._levelState.l2.get(this.dataset.l2Author);
-    if (!s) return;
+    const author = this.dataset.l2Author;
+    if (!author) return;
     const th = e.target.closest("thead th");
     if (th) {
-      handleSortClick(th, "2", `l2-${s.author}`, "downloads", true, () => {
-        renderL2(s.idx, s.author, s.models, this, s.totalBeforeFilter, s.allBaseModels);
+      const idx = _getAuthorL1Idx(author);
+      if (idx < 0) return;
+      const d = _getAuthorL2Data(author);
+      handleSortClick(th, "2", `l2-${author}`, "downloads", true, () => {
+        renderL2(idx, author, d.models, this, d.totalBeforeFilter, d.allBaseModels);
       });
       return;
     }
@@ -2623,10 +2920,9 @@ function setupL2Events(container) {
       const modelKey = `${PREFIX_MODEL}${modelId}`;
       if (toggleSection(detailRow, tog, modelKey, `${PREFIX_GROUP}${modelId}|`)) {
         cacheDomRef(modelKey, { row: tr, detailRow, inner, toggle: tog });
-        const key = `children-${modelId}`;
-        const cached = cacheAccess(key);
-        if (cached) {
-          renderL3(l2Idx, modelIdx, modelId, cached, inner);
+        const treeChildren = getTreeChildren(modelId);
+        if (treeChildren.length > 0) {
+          renderL3(l2Idx, modelIdx, modelId, treeChildren, inner);
         } else {
           inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
           loadChildren(l2Idx, modelIdx, modelId, inner);
@@ -2656,8 +2952,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
   const res = buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state);
   container.innerHTML = res.html;
   container.dataset.l2Author = author;
-  const allBaseModels = popupSource || cacheAccess(author) || [];
-  RC._levelState.l2.set(author, { idx, author, models, totalBeforeFilter, allBaseModels });
+  const allBaseModels = popupSource || [];
 
   if (res.pt) res.pt.wire((p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(models.map(m => m.id)), allBaseModels.length)));
   setupL2Events(container);
@@ -2668,13 +2963,15 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
 // before comparing, so Qwen2.5-7B-GGUF matches a search for "Qwen2.5-7B".
 // Same-author fine-tunes are skipped (already shown at L2).
 // Cross-author fine-tunes without explicit base_model are only included if they pass the
-// active task filter and aren't already in _allFetched (avoids duplicating base models
+// active task filter and aren't already in tree model refs (avoids duplicating base models
 // that happen to be surfaced by the search endpoint).
-// No _fetchGeneration guard needed: container.isConnected catches stale renders after
-// L2 re-render. _inflightChildren dedup shares the inflight promise across concurrent
+// Generation guard is required here because this path mutates shared caches/tree after
+// async fetches. _inflightChildren dedup shares the inflight promise across concurrent
 // expansions; fallback to a fresh fetch when the promise resolves with null results
 // (error case) prevents the UI from getting stuck in loading state.
 async function loadChildren(l2Idx, modelIdx, parentId, container) {
+  const gen = _fetchGeneration;
+  if (isStale(gen)) return;
   const cacheKey = `children-${parentId}`;
 
   // Deduplicate concurrent fetches for the same parent — same approach as _inflightFetches
@@ -2683,8 +2980,10 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
   const entry = _inflightChildren.get(cacheKey);
   if (entry) {
     await entry.promise;
-    if (entry.results && container.isConnected) {
-      renderL3(l2Idx, modelIdx, parentId, entry.results, container);
+    if (isStale(gen)) return;
+    if (entry.ready && container.isConnected) {
+      const treeChildren = getTreeChildren(parentId);
+      renderL3(l2Idx, modelIdx, parentId, treeChildren, container);
       return;
     }
     // Inflight entry resolved with no results (fetch failed) or old container was
@@ -2692,13 +2991,12 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
     // rendered, rather than leaving it stuck in "Fetching..." state.
   }
 
-  const newEntry = { promise: null, results: null };
+  const newEntry = { promise: null, ready: false };
   newEntry.promise = (async () => {
     try {
       const modelName = parentId.split("/").slice(1).join("/");
       const results = [];
       const seen = new Set();
-      const _allFetchedIds = _allFetched ? new Set(_allFetched.map(m => m.id)) : new Set();
 
       const processChildren = (models) => {
         for (const m of models) {
@@ -2717,7 +3015,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
           if (childHasBase || (strictNameMatch(m.id, modelName) && isQuant)) {
               if (!childHasBase) {
                 if (m.pipeline_tag && !activeTaskFilters.has(m.pipeline_tag)) continue;
-                if (_allFetchedIds.has(m.id)) continue;
+                if (hasModel(m.id)) continue;
               }
               const qSet = new Set();
               (idLower.match(RE_Q_MATCH) || []).forEach(m => qSet.add(m));
@@ -2746,13 +3044,15 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       };
 
       const nameUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
-      const nameResults = (await fetchJson(nameUrl)).map(normalizeModel);
+      const nameResults = (await fetchJson(nameUrl)).map(normalizeModel).filter(Boolean);
+      if (isStale(gen)) return;
       processChildren(nameResults);
       let rawResults = nameResults;
 
       if (nameResults.length === 0) {
         const fullUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(parentId)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
-        rawResults = (await fetchJson(fullUrl)).map(normalizeModel);
+        rawResults = (await fetchJson(fullUrl)).map(normalizeModel).filter(Boolean);
+        if (isStale(gen)) return;
         processChildren(rawResults);
       }
 
@@ -2767,27 +3067,37 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
         if (p !== null && (maxChildParam === null || p > maxChildParam)) maxChildParam = p;
       }
       if (maxChildParam !== null) {
+        if (isStale(gen)) return;
         const cached = _paramCache.get(parentId);
         if (cached === undefined || cached === null) {
           _paramCache.set(parentId, maxChildParam);
           _paramSource.set(parentId, 'child_name');
-          const pauthor = parentId.split("/")[0];
-          const st = RC._levelState.l2.get(pauthor);
-          if (st) {
-            const pm = st.models.find(m => m.id === parentId);
-            if (pm && pm.paramB == null) pm.paramB = maxChildParam;
-            const pam = st.allBaseModels.find(m => m.id === parentId);
-            if (pam && pam.paramB == null) pam.paramB = maxChildParam;
-          }
-          const af = _allFetchedById.get(parentId);
-          if (af && af.paramB == null) af.paramB = maxChildParam;
+          const md = getModelRef(parentId);
+          if (md && md.paramB == null) md.paramB = maxChildParam;
         }
       }
 
-      newEntry.results = results;
-      cacheSet(cacheKey, results);
-      if (container.isConnected) renderL3(l2Idx, modelIdx, parentId, results, container);
+      // Upsert fetched children into tree-backed store so hierarchy stays in sync
+      if (isStale(gen)) return;
+      for (const c of results) {
+        upsertModelIntoTree({
+          id: c.id,
+          downloads: c.downloads || 0,
+          likes: c.likes || 0,
+          lastModified: c.lastModified || '',
+          pipeline_tag: c.pipeline_tag || '',
+          q_method: c.q_method,
+          cardData: { base_model: parentId }
+        });
+      }
+      newEntry.ready = true;
+      if (isStale(gen)) return;
+      if (container.isConnected) {
+        const treeChildren = getTreeChildren(parentId);
+        renderL3(l2Idx, modelIdx, parentId, treeChildren, container);
+      }
     } catch (err) {
+      if (isStale(gen)) return;
       if (container.isConnected) renderErrorWithRetry(container, userFriendlyError(err), () => {
         if (container.isConnected) loadChildren(l2Idx, modelIdx, parentId, container);
       });
@@ -2802,7 +3112,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
 // ── Level 3: Quant Author Groups ──
 //   renderL3
 function renderL3(l2Idx, modelIdx, parentId, children, container) {
-  const filtered = children.filter(c => matchesFilter(c.q_method) && isInDateRange(c.lastModified));
+  const filtered = children.filter(c => passesQuantRenderFilters(c));
   const groups = {};
   filtered.forEach(c => {
     if (!groups[c.author]) groups[c.author] = [];
@@ -2853,7 +3163,6 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
   html += `<div class="detail-count">${filtered.length} child model(s) from ${groupEntries.length} author(s)${filtered.length !== children.length ? ` (filtered from ${children.length})` : ''}</div>`;
   container.innerHTML = html;
   container.dataset.l3Parent = parentId;
-  RC._levelState.l3.set(parentId, { l2Idx, modelIdx, parentId, children });
 
   if (!container._delegatedL3) {
     // Event delegation: same rationale as L2 — survives innerHTML re-renders.
@@ -2861,12 +3170,16 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
     container.addEventListener("click", function(e) {
       const inner = e.target.closest(".detail-inner");
       if (inner && inner !== this) return;
-      const s = RC._levelState.l3.get(this.dataset.l3Parent);
-      if (!s) return;
+      const parentId = this.dataset.l3Parent;
+      if (!parentId) return;
       const th = e.target.closest("thead th");
       if (th) {
-        handleSortClick(th, "3", `l3-${s.parentId}`, "totalDownloads", true, () => {
-          renderL3(s.l2Idx, s.modelIdx, s.parentId, s.children, this);
+        const firstRow = this.querySelector("tr.l3-row");
+        const l2Idx = firstRow ? parseInt(firstRow.dataset.l3L2) : 0;
+        const modelIdx = firstRow ? parseInt(firstRow.dataset.l3ModelIdx) : 0;
+        const children = getTreeChildren(parentId);
+        handleSortClick(th, "3", `l3-${parentId}`, "totalDownloads", true, () => {
+          renderL3(l2Idx, modelIdx, parentId, children, this);
         });
         return;
       }
@@ -2883,8 +3196,8 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
         const groupKey = `${PREFIX_GROUP}${parentId}|${author}`;
         if (toggleSection(detailRow, tog, groupKey)) {
           cacheDomRef(groupKey, { row: tr, detailRow, inner, toggle: tog });
-          const allChildren = cacheAccess(`children-${parentId}`) || s.children || [];
-          const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
+          const allChildren = getTreeChildren(parentId);
+          const quants = allChildren.filter(c => c.author === author && passesQuantRenderFilters(c));
           renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, inner);
           tog?.focus();
         }
@@ -2910,6 +3223,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 
   const cols = [
     { key: "id", label: "Model ID" },
+    { key: "pipeline_tag", label: "Pipeline", align: 'center', cls: "center", width: 180 },
     { key: "q_method", label: "Quant", align: 'center', headerCls: "updated-header", cls: "center", width: 160 },
     { key: "downloads", label: "Downloads", align: 'right', cls: "right", width: 110 },
     { key: "likes", label: "Likes", align: 'right', cls: "right", width: 80 },
@@ -2925,10 +3239,11 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
   html += sorted.map((q, qIdx) => {
     return `<tr class="l4-row" aria-rowindex="${2 + qIdx}">
       <td class="model-id-cell" aria-colindex="1"><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.id.split("/").slice(1).join("/"))}">${escapeHtml(q.id.split("/").slice(1).join("/"))}</a></td>
-      <td class="center" aria-colindex="2"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
-      <td class="right" aria-colindex="3">${fmt(q.downloads)}</td>
-      <td class="right" aria-colindex="4">${fmt(q.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
-      <td class="right" aria-colindex="5">${fmtDate(q.lastModified)}</td>
+      <td class="center" aria-colindex="2">${escapeHtml(q.pipeline_tag || "(untagged)")}</td>
+      <td class="center" aria-colindex="3"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
+      <td class="right" aria-colindex="4">${fmt(q.downloads)}</td>
+      <td class="right" aria-colindex="5">${fmt(q.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
+      <td class="right" aria-colindex="6">${fmtDate(q.lastModified)}</td>
     </tr>`;
   }).join('');
 
@@ -2943,19 +3258,30 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
   container.innerHTML = html;
   const l4Key = `${parentId}|${author}`;
   container.dataset.l4Key = l4Key;
-  RC._levelState.l4.set(l4Key, { l2Idx, modelIdx, gIdx, parentId, author, quants });
 
   if (pt) pt.wire((p) => renderFilteredPopup(p, getFilteredOutModels(quants, new Set(displayed.map(q => q.id)), CONFIG.POPUP_MAX_SAMPLES_L4)));
 
   if (!container._delegatedL4) {
     container._delegatedL4 = true;
     container.addEventListener("click", function(e) {
+      const inner = e.target.closest(".detail-inner");
+      if (inner && inner !== this) return;
       const th = e.target.closest("thead th");
       if (!th || th.dataset.level !== "4") return;
-      const s = RC._levelState.l4.get(this.dataset.l4Key);
-      if (!s) return;
-      handleSortClick(th, "4", `l4-${s.parentId}-${s.author}`, "downloads", false, () => {
-        renderL4(s.l2Idx, s.modelIdx, s.gIdx, s.parentId, s.author, s.quants, this);
+      const l4Key = this.dataset.l4Key;
+      if (!l4Key) return;
+      const pipeIdx = l4Key.indexOf('|');
+      const parentId = l4Key.slice(0, pipeIdx);
+      const author = l4Key.slice(pipeIdx + 1);
+      // Derive l2Idx/modelIdx/gIdx from the parent L3 row (sibling of the detail row)
+      const parentRow = this.parentNode?.parentNode?.previousElementSibling;
+      const l2Idx = parentRow ? parseInt(parentRow.dataset.l3L2) : 0;
+      const modelIdx = parentRow ? parseInt(parentRow.dataset.l3ModelIdx) : 0;
+      const gIdx = parentRow ? parseInt(parentRow.dataset.l3Idx) : 0;
+      const allChildren = getTreeChildren(parentId);
+      const quants = allChildren.filter(c => c.author === author && passesQuantRenderFilters(c));
+      handleSortClick(th, "4", `l4-${parentId}-${author}`, "downloads", false, () => {
+        renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, this);
       });
     });
     container.addEventListener("keydown", function(e) {
@@ -2970,10 +3296,11 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
 // ── Refresh & Re-expansion ──
 //   refreshAllExpanded
 function refreshAllExpanded(force, allowAsync = true) {
-  // Phase 1: re-expand L1 author rows
-  for (const key of RC.expandedSections) {
-    if (!key.startsWith(PREFIX_AUTHOR)) continue;
-    const author = key.slice(PREFIX_AUTHOR.length);
+  if (!_modelTree.root) return;
+  // Phase 1: re-expand L1 author rows (walk tree for expanded L1 nodes)
+  for (const [author, l1Node] of _modelTree.root.children) {
+    if (!l1Node.expanded) continue;
+    const key = `${PREFIX_AUTHOR}${author}`;
     let ref = _getSectionCached(key), row, detailRow, inner, tog;
     if (ref) {
       ({ row, detailRow, inner, tog } = ref);
@@ -2997,82 +3324,94 @@ function refreshAllExpanded(force, allowAsync = true) {
     if (allowAsync) {
       refreshAuthorL2Section(idx, author, inner);
     } else {
-      // Sync-only: show cached L2 without deepening
-      const baseModels = cacheAccess(author);
-      if (baseModels) {
-        const nonQuantBase = baseModels.filter(m => !m._orphanQuant && !m._nestedQuant);
-        const filtered = nonQuantBase.filter(m => modelPassesAllFilters(m));
-        renderL2(idx, author, filtered, inner, nonQuantBase.length, nonQuantBase);
+      // Sync-only: show cached L2 without deepening (from tree)
+      if (l1Node.children.size > 0) {
+        const allModels = [];
+        const filtered = [];
+        for (const l2Node of l1Node.children.values()) {
+          if (!l2Node.modelRef || !l2Node.canonical) continue;
+          allModels.push(l2Node.modelRef);
+          if (l2Node.display) {
+            filtered.push(l2Node.modelRef);
+          }
+        }
+        renderL2(idx, author, filtered, inner, allModels.length, allModels);
       }
     }
   }
 
-  // Phase 2: re-expand L2 model rows
-  for (const key of RC.expandedSections) {
-    if (!key.startsWith(PREFIX_MODEL)) continue;
-    const modelId = key.slice(PREFIX_MODEL.length);
-    let ref = _getSectionCached(key), row, detailRow, inner, tog;
-    if (ref) {
-      ({ row, detailRow, inner, tog } = ref);
-    } else {
-      row = document.querySelector(`tr.l2-row[data-model="${CSS.escape(modelId)}"]`);
-      if (!row) continue;
+  // Phase 2: re-expand L2 model rows (walk tree for expanded L2 nodes)
+  for (const [author, l1Node] of _modelTree.root.children) {
+    if (!l1Node.expanded) continue;
+    for (const [modelId, l2Node] of l1Node.children) {
+      if (!l2Node.expanded) continue;
+      const key = `${PREFIX_MODEL}${modelId}`;
+      let ref = _getSectionCached(key), row, detailRow, inner, tog;
+      if (ref) {
+        ({ row, detailRow, inner, tog } = ref);
+      } else {
+        row = document.querySelector(`tr.l2-row[data-model="${CSS.escape(modelId)}"]`);
+        if (!row) continue;
+        const l2Idx = parseInt(row.dataset.l2Idx);
+        const modelIdx = parseInt(row.dataset.modelIdx);
+        detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
+        inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
+        tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
+        cacheDomRef(key, { row, detailRow, inner, toggle: tog });
+      }
+
+      if (!row || !row.closest(".detail-inner")) continue;
+
       const l2Idx = parseInt(row.dataset.l2Idx);
       const modelIdx = parseInt(row.dataset.modelIdx);
-      detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
-      inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
-      tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
-      cacheDomRef(key, { row, detailRow, inner, toggle: tog });
-    }
-
-    // Skip rows that no longer belong to an active L1 expansion after filter changes.
-    if (!row || !row.closest(".detail-inner")) continue;
-
-    const l2Idx = parseInt(row.dataset.l2Idx);
-    const modelIdx = parseInt(row.dataset.modelIdx);
-    if (!detailRow || detailRow.style.display !== "none") continue;
-    detailRow.style.display = "";
-    if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
-    const children = cacheAccess(`children-${modelId}`);
-    if (children) {
-      renderL3(l2Idx, modelIdx, modelId, children, inner);
-    } else {
-      inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
-      loadChildren(l2Idx, modelIdx, modelId, inner);
+      if (!detailRow || detailRow.style.display !== "none") continue;
+      detailRow.style.display = "";
+      if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
+      const children = getTreeChildren(modelId);
+      if (children.length > 0) {
+        renderL3(l2Idx, modelIdx, modelId, children, inner);
+      } else {
+        inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
+        loadChildren(l2Idx, modelIdx, modelId, inner);
+      }
     }
   }
 
-  // Phase 3: re-expand L3 quant author group rows
-  for (const key of RC.expandedSections) {
-    if (!key.startsWith(PREFIX_GROUP)) continue;
-    const parts = key.split("|");
-    const modelId = parts[1];
-    const groupAuthor = parts.slice(2).join("|");
-    let ref = _getSectionCached(key), row, detailRow, inner, tog;
-    if (ref) {
-      ({ row, detailRow, inner, tog } = ref);
-    } else {
-      row = document.querySelector(`tr.l3-row[data-l3-parent="${CSS.escape(modelId)}"][data-l3-author="${CSS.escape(groupAuthor)}"]`);
-      if (!row || !row.closest(".detail-inner")) continue;
-      const l2Idx = parseInt(row.dataset.l3L2);
-      const modelIdx = parseInt(row.dataset.l3ModelIdx);
-      const gIdx = parseInt(row.dataset.l3Idx);
-      detailRow = document.getElementById(`d3-${l2Idx}-${modelIdx}-${gIdx}`);
-      inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
-      tog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
-      cacheDomRef(key, { row, detailRow, inner, toggle: tog });
-    }
+  // Phase 3: re-expand L3 quant author group rows (walk tree for expanded L3 nodes)
+  for (const [, l1Node] of _modelTree.root.children) {
+    if (!l1Node.expanded) continue;
+    for (const [modelId, l2Node] of l1Node.children) {
+      if (!l2Node.expanded) continue;
+      for (const [groupAuthor, l3Node] of l2Node.children) {
+        if (!l3Node.expanded) continue;
+        const key = `${PREFIX_GROUP}${modelId}|${groupAuthor}`;
+        let ref = _getSectionCached(key), row, detailRow, inner, tog;
+        if (ref) {
+          ({ row, detailRow, inner, tog } = ref);
+        } else {
+          row = document.querySelector(`tr.l3-row[data-l3-parent="${CSS.escape(modelId)}"][data-l3-author="${CSS.escape(groupAuthor)}"]`);
+          if (!row || !row.closest(".detail-inner")) continue;
+          const l2Idx = parseInt(row.dataset.l3L2);
+          const modelIdx = parseInt(row.dataset.l3ModelIdx);
+          const gIdx = parseInt(row.dataset.l3Idx);
+          detailRow = document.getElementById(`d3-${l2Idx}-${modelIdx}-${gIdx}`);
+          inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
+          tog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
+          cacheDomRef(key, { row, detailRow, inner, toggle: tog });
+        }
 
-    if (!row || !row.closest(".detail-inner")) continue;
-    const l2Idx = parseInt(row.dataset.l3L2);
-    const modelIdx = parseInt(row.dataset.l3ModelIdx);
-    const gIdx = parseInt(row.dataset.l3Idx);
-    if (!detailRow || detailRow.style.display !== "none") continue;
-    detailRow.style.display = "";
-    if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
-    const allChildren = cacheAccess(`children-${modelId}`) || [];
-    const quants = allChildren.filter(c => c.author === groupAuthor && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
-    renderL4(l2Idx, modelIdx, gIdx, modelId, groupAuthor, quants, inner);
+        if (!row || !row.closest(".detail-inner")) continue;
+        const l2Idx = parseInt(row.dataset.l3L2);
+        const modelIdx = parseInt(row.dataset.l3ModelIdx);
+        const gIdx = parseInt(row.dataset.l3Idx);
+        if (!detailRow || detailRow.style.display !== "none") continue;
+        detailRow.style.display = "";
+        if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
+        const allChildren = getTreeChildren(modelId);
+        const quants = allChildren.filter(c => c.author === groupAuthor && passesQuantRenderFilters(c));
+        renderL4(l2Idx, modelIdx, gIdx, modelId, groupAuthor, quants, inner);
+      }
+    }
   }
 }
 
@@ -3094,7 +3433,7 @@ const debouncedTextFilter = debounce(applyTextFilters, CONFIG.DEBOUNCE_MS);
 
 // Re-render using existing in-memory data — no API calls, no generation bump.
 function applyLocalFilters() {
-  if (!_allFetched || _allFetched.length === 0) return;
+  if (!hasAnyModels()) return;
   const saved = new Set(RenderCoordinator.expandedSections);
   recomputeAndRender(saved);
 }
@@ -3105,8 +3444,6 @@ RenderCoordinator.renderL1 = renderMain;
 RenderCoordinator.updateArrows = function() {
   updateArrows();
 };
-RenderCoordinator.pruneExpiredExpansions = pruneExpiredExpansions;
-RenderCoordinator.saveRestoreExpansions = saveRestoreExpansions;
 RenderCoordinator.refreshAllExpanded = refreshAllExpanded;
 
 // ═══════════════════════════════════════════════════════════════
@@ -3134,12 +3471,9 @@ document.querySelector("#main-table").addEventListener("click", e => {
     const authorKey = `${PREFIX_AUTHOR}${author}`;
     if (toggleSection(detailRow, tog, authorKey, [`${PREFIX_MODEL}${author}/`, `${PREFIX_GROUP}${author}/`])) {
       cacheDomRef(authorKey, { row: tr, detailRow, inner, toggle: tog });
-      if (cacheAccess(author)) {
-        refreshAuthorL2Section(idx, author, inner);
-      } else {
-        inner.innerHTML = '<div class="detail-loading" role="status">Fetching base models…</div>';
-        loadAuthorModels(idx, author, inner);
-      }
+      // loadAuthorModels handles both cached and uncached cases via tree check
+      inner.innerHTML = '<div class="detail-loading" role="status">Fetching base models…</div>';
+      loadAuthorModels(idx, author, inner);
       tog?.focus();
     }
   }

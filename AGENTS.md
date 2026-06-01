@@ -47,18 +47,24 @@ Open in browser, validate:
 17. "Hide Missing Params" chip hides param-less models from L1/L2
 18. API counter flashes amber on 3+ consecutive 429s
 19. Clear Cache clears everything, preserves filter/slider state
-20. `_allFetched` does not exceed 16,384 entries
+20. `_fetchSeen` is reinitialized each generation and deduplicates model IDs during ingestion
 21. Progressive rendering: status line shows `Fetching models… (N/M)` as each request completes; L1 updates incrementally during fetch
 22. Param badge updates progressively as deepening resolves each model (no full table re-render per resolution)
-23. Structural re-renders are throttled: not every `_onFetchComplete` call triggers one (every 3rd or final)
-24. `_isRendering` guard prevents re-entrant structural renders (rapid filter changes coalesce)
+23. Burst fetch completions remain stable via render coalescing and `_isRendering` guard (no re-entrant structural renders)
+24. Tree-only path remains intact (no `_modelDb`, `buildTreePass1`, `buildTreePass2`, or `rebuildTree` references)
+
+## Standalone Validation Tests
+
+The tree construction, filter pipeline, and sync rendering logic can be tested standalone by extracting the code section between `const _modelTree = {` and `Sort Utilities` from `streamlined-hf-model-search.html`, converting `const`/`let` to `var`, and running under Node.js. Fixed at `/tmp/phase5-test.js`. Run with `node /tmp/phase5-test.js`.
+
+**Critical mocks**: `activeTaskFilters` must be populated with test pipeline tags (e.g. `'text-generation'`) before calling `passesTreeNodeFilters`, or the `tag && !activeTaskFilters.has(tag)` check rejects all models. Runtime overrides (assignments like `matchesTaskFilter = function(t){return true;}`) must come *after* the extracted code block to shadow hoisted function declarations.
 
 ## Common Pitfalls
 
 - **Data attribute names**: `data-l3-model-idx` ≠ `data-l3-model`. Always verify matching.
 - **ID collisions**: L3/L4 IDs include all parent indices (`d3-{l2}-{model}-{g}`).
 - **Filter refresh**: `refreshAllExpanded` queries DOM via `expandedSections` Set — must cascade-delete descendant IDs on parent collapse to avoid re-rendering orphaned sections.
-- **Cache keys**: `children-{parentId}` uses the full model ID (e.g., `Qwen/Qwen2.5-7B`). LRU capped at 500 entries.
+- **In-flight children dedup keys**: `children-{parentId}` uses the full model ID (e.g., `Qwen/Qwen2.5-7B`).
 - **Author name stripping**: L2 displays `m.id.split("/").slice(1).join("/")` to avoid repeating the author.
 - **L1 sort selector**: Uses `#main-table > thead > tr > th` to avoid L2/L3 nested `<th>` triggering. Do NOT delegate to `#main-table thead`.
 - **Param deepening**: Only fires for the single expanded author, in batches of 4, and only for models passing current date/param filters.
@@ -69,3 +75,4 @@ Open in browser, validate:
 - **`_deepeningAuthors` guard**: Prevents concurrent `refreshAuthorL2Section` invocations for the same author. Set is added-to at entry, removed in `finally` block.
 - **Generation guards**: Use `isStale(gen)` instead of inline `gen !== _fetchGeneration`. All call sites use this helper — don't introduce bare comparisons.
 - **Popup wiring**: Always use `makePopupTrigger(suffix, label, makeContent)` for hidden-models popup triggers. It centralizes ID sanitization (`/` → `__`) and returns `.wire()` for post-innerHTML setup. Never construct `<button id="fp-trigger-...">` inline.
+- **Tree-only source of truth**: Do not reintroduce `_modelDb`/rebuild-based architecture. All reads/writes should use tree helpers and incremental upsert paths.

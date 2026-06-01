@@ -129,7 +129,7 @@ Results appear incrementally as API requests complete. Each independent request 
 - **Infer Missing Params chip** - When enabled then models with unknown params search their children to deduce the parent's parameter count via API. Uses name-based Base Model ID regex first, then searches children (2 API calls per model), then fetches individual child cards (up to 10; stops early after 3 agreeing results)
 - **Hide Missing Params chip** - When enabled, models without a known parameter count are hidden from L1 and L2 entirely
 - **API call counter** - displays total requests made in the session; hover for rate-limit info; flashes amber during active rate limiting (3+ consecutive 429s)
-- **Clear Cache button** - empties all in-memory caches (param cache, LRU model cache, inflight state, inference tracking) while preserving filters, sliders. Collapses expanded sections - re-expand to reload from API
+- **Clear Cache button** - resets in-memory state (param cache, inflight fetch state, tree indexes, generation-bound tracking) while preserving filters and sliders. Collapses expanded sections - re-expand to reload from API
 - **Quant badges** - color-coded by method (FP4, FP8, AWQ, GGUF, MLX, etc.); all detected methods shown; orphan quants get a yellow badge
 
 ## Caveats

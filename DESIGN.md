@@ -14,13 +14,13 @@ Single-file, zero-dependency HTML/JS/CSS application that explores HuggingFace b
 
 ## Data Flow
 
-1. **Init** (Get Results click): Resolve pipeline tags from From/To bars → fire each request independently through queue-based API manager (`_workQueue`, gated by `INFLIGHT_MAX` ≤5 concurrent + rate window ≤4 req/s) → progressive render after each completion via `_onFetchComplete` → also fetch trending (1000) and untagged models → inject cross-author base models from `cardData.base_model` (also through queue, one at a time with per-completion progress updates) → store in `_allFetched` (trimmed to 16,384 by `lastModified` descending).
-2. **Canonical dedup**: `buildCanonicalAuthors()` — when a model name appears under multiple authors, keep only the highest-download variant.
-3. **Orphan/nested suppression**: Quants whose parent exists in `_allFetched` but has no explicit `cardData.base_model` are suppressed from L1 (`isOrphanQuant`, name-based inference). Nested quants pointing to another quant rather than a true base are suppressed (`isNestedQuant`).
-4. **Render**: `computeAuthorData()` applies date/param sliders, From/To/Special/Quant filters, canonical dedup, and orphan/nested suppression → groups by author → renders L1.
+1. **Init** (Get Results click): Resolve pipeline tags from From/To bars → fire each request independently through queue-based API manager (`_workQueue`, gated by `INFLIGHT_MAX` ≤5 concurrent + rate window ≤4 req/s) → each completion normalizes models and upserts directly into `_modelTree` via `upsertModelIntoTree` → progressive render via `_onFetchComplete`.
+2. **Canonical dedup**: `recomputeCanonicalForName()` runs during upsert for L2 base models. For duplicate model names across authors, only the highest-download author copy remains canonical.
+3. **Hierarchy resolution**: `resolveTrueBase()` follows `cardData.base_model` links already present in tree refs. Derivatives attach to L3/L4 under their true L2 ancestor; missing parents create non-canonical hidden placeholders.
+4. **Render**: `runFilterPipeline()` applies date/param/chip/text filters and parent propagation directly on tree nodes (`display`, `agg*`) → `RenderCoordinator` builds L1 rows from visible L1 nodes.
 5. **L1 expand** → `loadAuthorModels()`: fetch 1000 author models → filter base models (including same-author fine-tunes) → render L2 → deepen unknown `paramB` in batches of 4 via individual model API.
 6. **L2 expand** → `loadChildren()`: search HF API for children by parent ID + name → match on `cardData.base_model` or quant tags. Same-author fine-tunes at L2 only; cross-author at L3 labeled "finetune". Deduplicated via `_inflightChildren`.
-7. **L3/L4**: Group children by quant author, apply quant/text filters, render sortable table. `_l2ModelFilter` is applied globally in `modelPassesAllFilters()` before author grouping (affects L1 counts); `_l3AuthorFilter`/`_l4ModelFilter` apply only at their respective render levels.
+7. **L3/L4**: Group children by quant author, apply quant/text filters, render sortable table. L2 text filter participates in tree-level filtering (`passesTreeNodeFilters` inside `runFilterPipeline`) and affects L1 counts; L3/L4 text filters apply at their respective render levels.
 
 ---
 
@@ -34,10 +34,9 @@ Single-file, zero-dependency HTML/JS/CSS application that explores HuggingFace b
 - `_dequeueScheduled` — Boolean flag preventing duplicate `_scheduleDequeue` calls; reset when queue drains.
 - `_fetchSeen`, `_fetchCompleted` — Shared progressive render state initialized by `_initFetchState()` at start of each "Get Results" cycle. Each request's completion handler increments `_fetchCompleted` and triggers re-render via `_onFetchComplete`.
 - `_paramCache` — `Map<modelId, paramB>` persists across renders; cleared only by Clear Cache. Bound by unique models encountered (~1.4MB at 16k entries).
-- `_paramSource Map<string, string>` — Tracks how each model's param was resolved (e.g., `"name"`, `"parent"`, `"child-search"`). Replaces prior scattered Sets for consolidated clearing and future serialization.
-- `cache` — In-memory LRU (500 entries) keyed by `"{author}"`, `"{author}_models"`, `"children-{parentId}"`. Uses `cacheSet`/`cacheAccess`. When `children-{parentId}` is evicted, L3 falls back to `s.children` from `l3StateMap` (survives eviction).
+- `_paramSource Map<string, string>` — Tracks how each model's param was resolved (e.g., `"name"`, `"parent_inherit"`, `"child_name"`, `"child_api"`, `"deepen"`).
 - `_apiTimestamps` — Sliding window enforcing ≤4 req/s (1 call per 250ms, no burst). Managed inside `_dequeueNext`, not in `fetchJson`.
-- `_injectedBaseIds` — Injections bypass the date slider so recently-updated quants remain reachable via their parent. Intentionally NOT cleared on quick re-fetch: upstream data is static and re-injecting would waste API calls without changing results. Cleared only by Clear Cache or a fresh deep fetch.
+- `_modelTree` — Single source of truth for fetched models and hierarchy. Holds the root node plus lookup maps (`byPath`, `byModelId`, `authorByLower`).
 - `sliderFrom/sliderTo` — 0..80 (0=Anytime, 1-79=14-day increments, 80=Now).
 - `paramSliderFrom/paramSliderTo` — 0..220 (piecewise linear 7-segment mapping).
 - `_popupTimers` — `Map<popupEl, timeoutId>` for debounced popup show/hide (150ms show, 200ms hide).
@@ -61,7 +60,7 @@ Two-tier rendering separates progressive feedback from structural DOM rebuilds:
 
 ### Generation Counter vs AbortController
 
-Chosen over AbortController because it guards post-fetch side effects (render, cache write) not just the fetch itself. AbortController would need a parallel mechanism for `_allFetched` mutations and LRU cache writes. The queue manager checks generation both when dequeuing and post-fetch, rejecting stale items early. All call sites use `isStale(gen)` helper — never bare comparisons.
+Chosen over AbortController because it guards post-fetch side effects (tree mutations, cache writes, render) not just the fetch itself. The queue manager checks generation both when dequeuing and post-fetch, rejecting stale items early. All call sites use `isStale(gen)` helper — never bare comparisons.
 
 ### Queue-Based API Request Manager
 
@@ -69,7 +68,7 @@ Callers push work items via `fetchJson()`; `_dequeueNext` gates on both in-fligh
 
 ### Param Resolution Pipeline
 
-Deterministic 3-step pipeline in `tryResolveModelParam`: name regex → parent inheritance (iterative suffix strip) → child search API (`resolveParamFromChildren`). Free paths are always exhausted first; the expensive child-search path is an absolute last resort. Models resolved via parent inheritance or child search get a purple inferred badge. `_inferredAttemptedIds` prevents re-attempts on re-expansion.
+Deterministic 3-step pipeline in `tryResolveModelParam`: name regex → parent inheritance (iterative suffix strip) → child search API (`resolveParamFromChildren`). Free paths are always exhausted first; the expensive child-search path is an absolute last resort. Models resolved via parent inheritance or child search get a purple inferred badge. Re-attempt suppression is stored on each model object (`model._inferredAttempted`).
 
 `resolveParamFromChildren` uses early exit: stops after 3 non-null results agreeing on the current max (up to `DERIVED_BATCH_SIZE`=10). Once confidence is established, further fetches are wasteful. Tries `extractParamFromId` on each child's ID before making the individual API fetch — most quant names contain B/M patterns, so the individual fetch is rarely needed.
 
@@ -83,23 +82,23 @@ Deterministic 3-step pipeline in `tryResolveModelParam`: name regex → parent i
 
 ### Two-Phase Search in loadChildren
 
-First try model name alone (covers quant suffixes), fall back to full parent ID. `strictNameMatch` strips known quant suffixes from candidate IDs before comparing, so Qwen2.5-7B-GGUF matches a search for "Qwen2.5-7B". Same-author fine-tunes are skipped (already shown at L2). Cross-author fine-tunes without explicit base_model are only included if they pass the active task filter and aren't already in `_allFetched`.
+First try model name alone (covers quant suffixes), fall back to full parent ID. `strictNameMatch` strips known quant suffixes from candidate IDs before comparing, so Qwen2.5-7B-GGUF matches a search for "Qwen2.5-7B". Same-author fine-tunes are skipped (already shown at L2). Cross-author fine-tunes without explicit base_model are only included if they pass the active task filter and aren't already in tree model refs.
 
 ### Two-Pass Base Model Injection
 
-Pass 1: scan all date-range models, identify parent IDs not yet in `_allFetched`. Marks existing parents as `_injected` so they bypass the date filter. Pass 2: fetch unknown parents independently through API manager queue; progressive re-render via `onBatch()` callback after each completion.
+Scan in-memory tree models, identify parent IDs not yet present, then fetch those parents independently through the API manager queue. Progressive re-render via `onBatch()` callback after each completion.
 
-### _allFetched Memory Management
+### Tree-Backed Memory Management
 
-Trimmed to `ALL_FETCHED_MAX` (16,384) by `lastModified` descending. Injected base models are pinned during trim so recently-updated quants remain reachable via their parent. `_paramCache` persists across renders and is bounded by unique models encountered (~1.4MB at 16k entries).
+Models are stored once as `modelRef` objects in `_modelTree` nodes and indexes (`byModelId`/`byPath`). `_paramCache` persists across renders and is bounded by unique models encountered.
 
 ### normalizeModel — Field Stripping
 
-Intentionally drops: sha, siblings, config, library_name, private, and all other API fields. `pipeline_tag` is preserved as-is from the source object (with a safety backfill in `_mergeRequestResult` for edge cases where the API omits it). The HF API returns ~40 fields per model; keeping only 10 saves ~60% memory in `_allFetched`. Add fields back only when a concrete feature requires them.
+Intentionally drops: sha, siblings, config, library_name, private, and all other API fields. `pipeline_tag` is preserved as-is from the source object (with a safety backfill in `_mergeRequestResult` for edge cases where the API omits it). The HF API returns ~40 fields per model; keeping only the normalized subset materially reduces memory footprint. Add fields back only when a concrete feature requires them.
 
 ### Full=true&cardData=true on Every Fetch
 
-The HF search API never returns safetensors/gguf metadata or cardData without `full=true`. This is the only way to get `base_model` info for hierarchy resolution. The payload is ~5-10KB/model, stored in `_allFetched` (capped at 16k). Memory-vs-API-calls tradeoff: fetching light payloads initially and lazy-loading details would multiply API calls by ~5-10x.
+The HF search API never returns safetensors/gguf metadata or cardData without `full=true`. This is the only way to get `base_model` info for hierarchy resolution. Memory-vs-API-calls tradeoff: fetching light payloads initially and lazy-loading details would multiply API calls by ~5-10x.
 
 ### Popup System
 
@@ -162,7 +161,7 @@ Two-tier update pipeline:
 - **Instant (In-memory) path**: Text inputs and sliders apply instantly via debounced callbacks (`debouncedTextFilter`, `debouncedSliderUpdate`). These re-render from in-memory state only — no API calls, no generation bump. Changes are visible immediately but reflect only already-fetched data.
 - **Deferred (API-triggering) path**: From/To bar changes and special chip toggles call `markDirty()` which bumps the generation counter and triggers fresh API fetches on next "Get Results".
 
-`_l2ModelFilter` is applied globally in `modelPassesAllFilters()` before author grouping (affects L1 counts). `_l3AuthorFilter`/`_l4ModelFilter` apply only at their respective render levels.
+L2 text filter is applied globally in `passesTreeNodeFilters()` before L1 aggregation (affects L1 counts). `_l3AuthorFilter`/`_l4ModelFilter` apply only at their respective render levels.
 
 ---
 
