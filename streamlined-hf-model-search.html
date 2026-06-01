@@ -1219,6 +1219,88 @@ if (newTasks.length === 0 && !needUntagged && fetchedTrending && !deep) {
 // in _modelTree. Currently standalone — not yet wired into render pipeline.
 // See REFACTOR.md for full design rationale.
 
+// ── Shared Tree Insertion Helpers ──
+// Used by both buildModelTree (full rebuild) and incremental integrators like integrateAuthorIntoTree.
+
+// Ensure an L1 author node exists under the root, creating it if necessary. Returns the node.
+function ensureL1Node(author) {
+  let l1 = _modelTree.byPath.get('/' + author);
+  if (!l1) {
+    l1 = makeTreeNode(1, 'author', author, _modelTree.root);
+    _modelTree.root.children.set(author, l1);
+    _modelTree.byPath.set(l1.path, l1);
+  }
+  return l1;
+}
+
+// Insert a base model under its L1 author node. Creates the L2 node if it doesn't exist,
+// updates modelRef to keep the highest-download copy, and tracks orphan status.
+function insertBaseModel(l1Node, m, knownIds) {
+  let l2 = l1Node.children.get(m.id);
+  if (!l2) {
+    l2 = makeTreeNode(2, 'basemodel', m.id, l1Node);
+    l2.isOrphanQuant = isOrphanQuant(m, knownIds);
+    l1Node.children.set(m.id, l2);
+    _modelTree.byPath.set(l2.path, l2);
+    _modelTree.byModelId.set(m.id, l2);
+  } else if (isOrphanQuant(m, knownIds) && !l2.isOrphanQuant) {
+    l2.isOrphanQuant = true;
+  }
+  if (!l2.modelRef || m.downloads > l2.modelRef.downloads) {
+    l2.modelRef = m;
+  }
+}
+
+// Insert a derivative model under its resolved base's L2 node. Creates placeholder L1/L2 nodes
+// for the base if needed, then creates/updates the L3 quant-author and L4 quant nodes.
+function insertDerivative(m, byId) {
+  const baseId = getBaseModelId(m.cardData);
+  if (!baseId) return;
+
+  let trueBase = resolveTrueBase(baseId, byId);
+  if (!trueBase) return;
+
+  let l2Node = _modelTree.byModelId.get(trueBase);
+  if (!l2Node) {
+    const baseAuthor = trueBase.split("/")[0];
+    const l1 = ensureL1Node(baseAuthor);
+    insertBaseModel(l1, byId.get(trueBase), new Set([trueBase]));
+    l2Node = _modelTree.byModelId.get(trueBase);
+  }
+
+  // L3 quant-author node
+  const quantAuthor = m.id.split("/")[0];
+  let l3Node = l2Node.children.get(quantAuthor);
+  if (!l3Node) {
+    l3Node = makeTreeNode(3, 'quantauthor', quantAuthor, l2Node);
+    l2Node.children.set(quantAuthor, l3Node);
+    _modelTree.byPath.set(l3Node.path, l3Node);
+  }
+
+  // L4 quant node
+  let l4Node = l3Node.children.get(m.id);
+  if (!l4Node) {
+    l4Node = makeTreeNode(4, 'quant', m.id, l3Node);
+    l3Node.children.set(m.id, l4Node);
+    _modelTree.byPath.set(l4Node.path, l4Node);
+    _modelTree.byModelId.set(m.id, l4Node);
+  }
+
+  if (!l4Node.modelRef || m.downloads > l4Node.modelRef.downloads) {
+    l4Node.modelRef = m;
+  }
+
+  // Compute q_method for this quant model and store on L4 node
+  if (!l4Node.qMethod) {
+    const idLower = m.id.toLowerCase();
+    const tagsStr = (m.tags || []).join(" ").toLowerCase();
+    const qSet = new Set();
+    (idLower.match(RE_Q_MATCH) || []).forEach(q => qSet.add(q));
+    (tagsStr.match(RE_Q_MATCH) || []).forEach(q => qSet.add(q));
+    l4Node.qMethod = qSet.size ? [...qSet].join(", ") : "derivative";
+  }
+}
+
 function buildModelTree() {
   // Read from unified model database (primary source) or fall back to _allFetched
   const all = _modelDb.size ? [..._modelDb.values()] : _allFetched;
@@ -1245,29 +1327,8 @@ function buildModelTree() {
     if (isNestedQuant(m, knownIds, byId)) continue;
 
     const author = m.id.split("/")[0];
-    let l1Node = _modelTree.byPath.get('/' + author);
-    if (!l1Node) {
-      l1Node = makeTreeNode(1, 'author', author, _modelTree.root);
-      _modelTree.root.children.set(author, l1Node);
-      _modelTree.byPath.set(l1Node.path, l1Node);
-    }
-
-    let l2Node = l1Node.children.get(m.id);
-    if (!l2Node) {
-      l2Node = makeTreeNode(2, 'basemodel', m.id, l1Node);
-      l2Node.isOrphanQuant = isOrphan;
-      l1Node.children.set(m.id, l2Node);
-      _modelTree.byPath.set(l2Node.path, l2Node);
-      _modelTree.byModelId.set(m.id, l2Node);
-    } else if (isOrphan && !l2Node.isOrphanQuant) {
-      l2Node.isOrphanQuant = true;
-    }
-
-    if (!l2Node.modelRef) {
-      l2Node.modelRef = m;
-    } else if (m.downloads > l2Node.modelRef.downloads) {
-      l2Node.modelRef = m;
-    }
+    const l1Node = ensureL1Node(author);
+    insertBaseModel(l1Node, m, knownIds);
 
     // Canonical tracking (only for non-orphan base models)
     if (!isOrphan) {
@@ -1297,74 +1358,7 @@ function buildModelTree() {
   // ── Pass 2: Derivative models → L3 quant-author / L4 quant nodes ──
   for (const m of all) {
     if (!m.cardData || !m.cardData.base_model) continue;
-    const baseId = getBaseModelId(m.cardData);
-    if (!baseId) continue;
-
-    // Resolve true base by following chain
-    let trueBase = resolveTrueBase(baseId, byId);
-    if (!trueBase) continue;
-
-    let l2Node = _modelTree.byModelId.get(trueBase);
-    if (!l2Node) {
-      // Base model not in tree (filtered out or canonical copy). Create a placeholder L2 node.
-      const baseAuthor = trueBase.split("/")[0];
-      let l1Node = _modelTree.byPath.get('/' + baseAuthor);
-      if (!l1Node) {
-        l1Node = makeTreeNode(1, 'author', baseAuthor, _modelTree.root);
-        _modelTree.root.children.set(baseAuthor, l1Node);
-        _modelTree.byPath.set(l1Node.path, l1Node);
-      }
-
-      // Check if L2 node exists but is non-canonical (hidden) — reuse it
-      let existingL2 = l1Node.children.get(trueBase);
-      if (!existingL2) {
-        existingL2 = makeTreeNode(2, 'basemodel', trueBase, l1Node);
-        l1Node.children.set(trueBase, existingL2);
-        _modelTree.byPath.set(existingL2.path, existingL2);
-        _modelTree.byModelId.set(trueBase, existingL2);
-      }
-      // If base model data exists in byId, attach it
-      const baseData = byId.get(trueBase);
-      if (baseData) {
-        existingL2.modelRef = baseData;
-        existingL2.canonical = true;
-      }
-      l2Node = existingL2;
-    }
-
-    // Create L3 quant-author node under the true base's L2 node
-    const quantAuthor = m.id.split("/")[0];
-    let l3Node = l2Node.children.get(quantAuthor);
-    if (!l3Node) {
-      l3Node = makeTreeNode(3, 'quantauthor', quantAuthor, l2Node);
-      l2Node.children.set(quantAuthor, l3Node);
-      _modelTree.byPath.set(l3Node.path, l3Node);
-    }
-
-    // Create L4 quant node under the quant-author
-    let l4Node = l3Node.children.get(m.id);
-    if (!l4Node) {
-      l4Node = makeTreeNode(4, 'quant', m.id, l3Node);
-      l3Node.children.set(m.id, l4Node);
-      _modelTree.byPath.set(l4Node.path, l4Node);
-      _modelTree.byModelId.set(m.id, l4Node);
-    }
-
-    if (!l4Node.modelRef) {
-      l4Node.modelRef = m;
-    } else if (m.downloads > l4Node.modelRef.downloads) {
-      l4Node.modelRef = m;
-    }
-
-    // Compute q_method for this quant model and store on L4 node
-    if (!l4Node.qMethod) {
-      const idLower = m.id.toLowerCase();
-      const tagsStr = (m.tags || []).join(" ").toLowerCase();
-      const qSet = new Set();
-      (idLower.match(RE_Q_MATCH) || []).forEach(q => qSet.add(q));
-      (tagsStr.match(RE_Q_MATCH) || []).forEach(q => qSet.add(q));
-      l4Node.qMethod = qSet.size ? [...qSet].join(", ") : "derivative";
-    }
+    insertDerivative(m, byId);
   }
 }
 
@@ -1383,40 +1377,31 @@ function resolveTrueBase(baseId, byIdMap) {
   return baseId;
 }
 
-// Integrate discovered children into the unified model database.
+// Integrate discovered children into the unified model database and tree.
 function integrateDiscoveredChildren(parentModelId, rawModels) {
-  if (!rawModels.length) return;
+  if (!rawModels.length || !_modelTree.root) return;
 
   for (const m of rawModels) {
     const nm = normalizeModel(m);
     _modelDb.set(nm.id, nm);
   }
 
-  _treeDirty = true;
+  // Insert derivative models into the tree directly — no full rebuild needed.
+  const byId = new Map(_modelDb.size ? [..._modelDb.values()] : _allFetched.map(x => [x.id, x]));
+  for (const m of rawModels) {
+    if (!m.cardData || !getBaseModelId(m.cardData)) continue;
+    insertDerivative(normalizeModel(m), byId);
+  }
 }
 
 // Integrate a newly-discovered author's base models into the existing tree.
-// Mirrors Pass 1 of buildModelTree but only for this one author — preserves all other nodes' renderData.
 function integrateAuthorIntoTree(author, baseModels) {
   if (!baseModels.length || !_modelTree.root) return;
 
-  let l1Node = _modelTree.byPath.get('/' + author);
-  if (!l1Node) {
-    l1Node = makeTreeNode(1, 'author', author, _modelTree.root);
-    _modelTree.root.children.set(author, l1Node);
-    _modelTree.byPath.set(l1Node.path, l1Node);
-  }
-
+  const l1Node = ensureL1Node(author);
   const knownIds = new Set(baseModels.map(m => m.id));
   for (const m of baseModels) {
-    let l2Node = l1Node.children.get(m.id);
-    if (!l2Node) {
-      l2Node = makeTreeNode(2, 'basemodel', m.id, l1Node);
-      l2Node.isOrphanQuant = isOrphanQuant(m, knownIds);
-      l1Node.children.set(m.id, l2Node);
-      _modelTree.byPath.set(l2Node.path, l2Node);
-      _modelTree.byModelId.set(m.id, l2Node);
-    }
+    insertBaseModel(l1Node, m, knownIds);
   }
 
   // Run filter pipeline on just this author's subtree
