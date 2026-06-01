@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.14';
+const APP_VERSION = '260601.15';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -1810,7 +1810,9 @@ function walkFilterL2(node) {
   if (!includeSelf && childCount > 0) {
     const tf2 = RC._state.textFilters.l2Model;
     const textFilterBlocks = tf2 && ref && !ref.id.split("/").slice(1).join("/").toLowerCase().includes(tf2.toLowerCase());
-    if (!textFilterBlocks) {
+    const tag = ref ? ref.pipeline_tag : '';
+    const untaggedBlocks = !tag && !activeSpecialFilters.has("include untagged");
+    if (!textFilterBlocks && !untaggedBlocks) {
       const pb = ref ? (ref.paramB != null ? ref.paramB : getParamCount(ref)) : null;
       if (pb !== null ? isInParamRange(pb) : !_hideMissingParamEnabled) {
         includeSelf = true;
@@ -2804,7 +2806,7 @@ function buildL2TableHtml(idx, author, sorted, totalBeforeFilter, state) {
     const orphanBadge = qMethods.length ? qMethods.map(q => `<span class="badge orphan" title="Parent base model filtered out">${escapeHtml(q.toUpperCase())}</span>`).join(' ') + ' ' : '';
     return `<tr class="l2-row ${zebra}" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}" aria-rowindex="${rowIdx}">
       <td class="model-id-cell" aria-colindex="1"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(m.id)}">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
-      <td class="center" aria-colindex="2">${escapeHtml(m.pipeline_tag)}</td>
+      <td class="center" aria-colindex="2">${escapeHtml(m.pipeline_tag || "(untagged)")}</td>
       <td class="center" aria-colindex="3" style="font-size:0.78rem">${paramBadgeHtml(m)}</td>
       <td class="right" aria-colindex="4">${fmt(m.downloads)}</td>
       <td class="right" aria-colindex="5">${fmt(m.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
