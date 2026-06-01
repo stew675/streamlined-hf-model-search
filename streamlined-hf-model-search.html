@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.25';
+const APP_VERSION = '260601.26';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -746,7 +746,9 @@ const _modelTree = {
   root: null,       // TreeNode (level-0 synthetic root)
   byPath: new Map(),// string → TreeNode (O(1) path lookup)
   byModelId: new Map(), // string → TreeNode (L2 or L4 node)
-  authorByLower: new Map() // lowercase author string → L1 TreeNode
+  authorByLower: new Map(), // lowercase author string → L1 TreeNode
+  byModelIdLower: new Map(), // lowercase model ID → L2 TreeNode (case-insensitive lookup)
+  byModelName: new Map() // display name → L2 TreeNode[] (canonical dedup candidates)
 };
 function createTreeNode(level, type, id, modelRef) {
   return {
@@ -839,13 +841,7 @@ function ensureL2BaseNode(baseId, modelRefOrStub) {
   const l1Node = ensureL1AuthorNode(author);
   let l2Node = getModelNode(baseId);
   if (!l2Node) {
-    const baseLower = baseId.toLowerCase();
-    for (const [key, node] of _modelTree.byModelId) {
-      if (node.level === 2 && key.toLowerCase() === baseLower) {
-        l2Node = node;
-        break;
-      }
-    }
+    l2Node = _modelTree.byModelIdLower.get(baseId.toLowerCase()) || null;
   }
   if (l2Node && l2Node.level === 2) {
     if (modelRefOrStub) {
@@ -863,6 +859,7 @@ function ensureL2BaseNode(baseId, modelRefOrStub) {
     }
     _modelTree.byPath.set(baseId, l2Node);
     _modelTree.byModelId.set(baseId, l2Node);
+    _modelTree.byModelIdLower.set(baseId.toLowerCase(), l2Node);
     return l2Node;
   }
 
@@ -876,6 +873,10 @@ function ensureL2BaseNode(baseId, modelRefOrStub) {
   l2Node.parent = l1Node;
   _modelTree.byPath.set(baseId, l2Node);
   _modelTree.byModelId.set(baseId, l2Node);
+  _modelTree.byModelIdLower.set(baseId.toLowerCase(), l2Node);
+  const name = baseId.split('/').slice(1).join('/');
+  const arr = _modelTree.byModelName.get(name);
+  if (arr) arr.push(l2Node); else _modelTree.byModelName.set(name, [l2Node]);
   return l2Node;
 }
 
@@ -890,12 +891,9 @@ function ensureL3Node(l2Node, quantAuthor) {
 }
 
 function recomputeCanonicalForName(modelName) {
-  const candidates = [];
-  for (const node of _modelTree.byModelId.values()) {
-    if (!node || node.level !== 2 || !node.modelRef || node.placeholder) continue;
-    const name = node.id.split('/').slice(1).join('/');
-    if (name === modelName) candidates.push(node);
-  }
+  const candidates = (_modelTree.byModelName.get(modelName) || []).filter(
+    node => node && node.level === 2 && node.modelRef && !node.placeholder
+  );
   if (candidates.length <= 1) {
     for (const node of candidates) node.canonical = true;
     return;
@@ -944,8 +942,7 @@ function upsertModelIntoTree(model) {
     }
     const l2Node = ensureL2BaseNode(modelRef.id, modelRef);
     l2Node.placeholder = false;
-    const name = modelRef.id.split('/').slice(1).join('/');
-    recomputeCanonicalForName(name);
+    recomputeCanonicalForName(modelRef.displayName || modelRef.id.split('/').slice(1).join('/'));
     _modelTree.byModelId.set(modelRef.id, l2Node);
     return;
   }
@@ -953,13 +950,7 @@ function upsertModelIntoTree(model) {
   const trueBase = resolveTrueBase(modelRef);
   let l2Node = getModelNode(trueBase);
   if (!l2Node) {
-    const trueBaseLower = trueBase.toLowerCase();
-    for (const [key, node] of _modelTree.byModelId) {
-      if (node.level === 2 && key.toLowerCase() === trueBaseLower) {
-        l2Node = node;
-        break;
-      }
-    }
+    l2Node = _modelTree.byModelIdLower.get(trueBase.toLowerCase()) || null;
   }
   if (!l2Node || l2Node.level !== 2) {
     const paramFromName = extractParamFromId(trueBase);
@@ -1020,6 +1011,8 @@ function resetAppState() {
   _modelTree.byPath.clear();
   _modelTree.byModelId.clear();
   _modelTree.authorByLower.clear();
+  _modelTree.byModelIdLower.clear();
+  _modelTree.byModelName.clear();
   _modelTree.root = null;
 }
 
@@ -1403,8 +1396,11 @@ function normalizeModel(m) {
       console.warn("Skipping malformed model payload", badId);
       return null;
     }
+    const displayName = m.id.split('/').slice(1).join('/');
     return {
       id: m.id,
+      displayName,
+      displayNameLower: displayName.toLowerCase(),
       downloads: m.downloads || 0,
       likes: m.likes || 0,
       lastModified: m.lastModified || "",
@@ -1643,7 +1639,7 @@ async function resolveParamFromChildren(modelId) {
 async function tryResolveModelParam(m, gen) {
   const rowEl = document.querySelector(`tr.l2-row[data-model="${CSS.escape(m.id)}"]`);
   if (rowEl) rowEl.classList.add("inferring");
-  UI.setStatus(`Resolving params for ${m.id.split("/").slice(1).join("/")}…`);
+  UI.setStatus(`Resolving params for ${m.displayName || m.id.split('/').slice(1).join('/')}…`);
 
   let resolved = null;
   let source = 'none';
@@ -1796,7 +1792,7 @@ function resolveTrueBase(modelOrId) {
 // handles reactivating parents whose quants pass filters.
 function passesTreeNodeFilters(m) {
   const tf2 = RC._state.textFilters.l2Model;
-  if (tf2 && !m.id.split("/").slice(1).join("/").toLowerCase().includes(tf2.toLowerCase())) return false;
+  if (tf2 && !(m.displayNameLower || m.id.split("/").slice(1).join("/").toLowerCase()).includes(tf2.toLowerCase())) return false;
   if (!isInDateRange(m.lastModified)) return false;
   const tag = m.pipeline_tag;
   if (!tag && !activeSpecialFilters.has("include untagged")) return false;
@@ -1805,7 +1801,7 @@ function passesTreeNodeFilters(m) {
   if (_hideMissingParamEnabled && pb === null) return false;
   if (!matchesTaskFilter(tag)) return false;
   if (tag && !activeTaskFilters.has(tag)) return false;
-  const qMethods = getOrphanQuantMethod(m.id);
+  const qMethods = m._orphanQuantMethods || getOrphanQuantMethod(m.id);
   if (qMethods.length > 0) {
     const matchesAny = qMethods.some(qm => activeFilters.has(qMethodToCategory(qm)));
     if (!matchesAny) return false;
@@ -1861,6 +1857,7 @@ function walkFilterL2(node) {
 
   const qMethods = ref ? getOrphanQuantMethod(ref.id) : [];
   node._orphanQuantMethods = qMethods;
+  if (ref) ref._orphanQuantMethods = qMethods;
   const selfQuantMatch = qMethods.length > 0 && qMethods.some(qm => activeFilters.has(qMethodToCategory(qm)));
   const hasOrphanQuant = qMethods.length > 0;
   let includeSelf = passes && (!hasOrphanQuant || selfQuantMatch);
@@ -1871,7 +1868,7 @@ function walkFilterL2(node) {
   // should remain visible even when the parent ID itself has no quant match.
   if (!includeSelf && childCount > 0) {
     const tf2 = RC._state.textFilters.l2Model;
-    const textFilterBlocks = tf2 && ref && !ref.id.split("/").slice(1).join("/").toLowerCase().includes(tf2.toLowerCase());
+    const textFilterBlocks = tf2 && ref && !(ref.displayNameLower || ref.id.split('/').slice(1).join('/').toLowerCase()).includes(tf2.toLowerCase());
     const tag = ref ? ref.pipeline_tag : '';
     const untaggedBlocks = !tag && !activeSpecialFilters.has("include untagged");
     if (!textFilterBlocks && !untaggedBlocks) {
@@ -1985,6 +1982,7 @@ function getFilteredOutModels(source, displayedIds, maxSamples) {
     const qMatch = m.id.toLowerCase().match(RE_Q_MATCH) || [];
     samples.push({
       id: m.id,
+      displayName: m.displayName || m.id.split('/').slice(1).join('/'),
       paramB: pb,
       qMethod: qMatch.map(q => q.toUpperCase()).join(', '),
       pipelineTag: m.pipeline_tag || "—",
@@ -2032,7 +2030,7 @@ function renderFilteredPopup(container, result) {
     <th scope="col" data-sk="updated" tabindex="0" style="white-space:nowrap">Updated${arrow('updated')}</th>
   </tr></thead><tbody>`;
   html += sorted.map(s => {
-    const name = s.id.split("/").slice(1).join("/");
+    const name = s.displayName || s.id.split('/').slice(1).join('/');
     return `<tr>
       <td class="model-id-cell"><a href="https://huggingface.co/${escapeHtml(s.id)}" target="_blank" rel="noopener noreferrer">${escapeHtml(name)}</a></td>
       <td style="text-align:center; font-size:0.75rem">${s.paramB != null ? paramValueToLabel(s.paramB) : "—"}</td>
@@ -2859,7 +2857,7 @@ function buildL2TableHtml(idx, author, sorted, state) {
     const zebra = mIdx % 2 === 0 ? "row-even" : "row-odd";
     const orphanBadge = qMethods.length ? qMethods.map(q => `<span class="badge orphan" title="Parent base model filtered out">${escapeHtml(q.toUpperCase())}</span>`).join(' ') + ' ' : '';
     return `<tr class="l2-row ${zebra}" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}" aria-rowindex="${rowIdx}">
-      <td class="model-id-cell" aria-colindex="1"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(m.id)}">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.id.split("/").slice(1).join("/"))}">${escapeHtml(m.id.split("/").slice(1).join("/"))}</a></td>
+      <td class="model-id-cell" aria-colindex="1"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(m.id)}">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.displayName || m.id.split('/').slice(1).join('/'))}">${escapeHtml(m.displayName || m.id.split('/').slice(1).join('/'))}</a></td>
       <td class="center" aria-colindex="2">${escapeHtml(m.pipeline_tag || "(untagged)")}</td>
       <td class="center" aria-colindex="3" style="font-size:0.78rem">${paramBadgeHtml(m)}</td>
       <td class="right" aria-colindex="4">${fmt(m.downloads)}</td>
@@ -3247,6 +3245,8 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
     .filter(n => n.display)
     .map(n => ({
       id: n.modelRef.id,
+      displayName: n.modelRef.displayName || n.modelRef.id.split('/').slice(1).join('/'),
+      displayNameLower: n.modelRef.displayNameLower || (n.modelRef.displayName || n.modelRef.id.split('/').slice(1).join('/')).toLowerCase(),
       author,
       downloads: n.modelRef.downloads || 0,
       likes: n.modelRef.likes || 0,
@@ -3258,7 +3258,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
   const st = RC.getDetailSort(`l4-${parentId}-${author}`) || { key: "downloads", asc: false };
   const tf4 = RC._state.textFilters.l4Model;
   const displayed = tf4 ? allQuants.filter(q =>
-    q.id.split("/").slice(1).join("/").toLowerCase().includes(tf4.toLowerCase())
+    q.displayNameLower.includes(tf4.toLowerCase())
   ) : allQuants;
   const sorted = sortRows(displayed, st.key, st.asc, st.key === "id" ? undefined : "id");
 
@@ -3279,7 +3279,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
   // Optimized: Use map + join for table rows instead of forEach + +=
   html += sorted.map((q, qIdx) => {
     return `<tr class="l4-row" aria-rowindex="${2 + qIdx}">
-      <td class="model-id-cell" aria-colindex="1"><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.id.split("/").slice(1).join("/"))}">${escapeHtml(q.id.split("/").slice(1).join("/"))}</a></td>
+      <td class="model-id-cell" aria-colindex="1"><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.displayName || q.id.split('/').slice(1).join('/'))}">${escapeHtml(q.displayName || q.id.split('/').slice(1).join('/'))}</a></td>
       <td class="center" aria-colindex="2">${escapeHtml(q.pipeline_tag || "(untagged)")}</td>
       <td class="center" aria-colindex="3"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
       <td class="right" aria-colindex="4">${fmt(q.downloads)}</td>

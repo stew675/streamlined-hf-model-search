@@ -1,5 +1,22 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.26 — Perf: Eliminate O(n²) ingestion and repeated string splitting
+
+- Added `_modelTree.byModelName` reverse index (`displayName → L2Node[]`) to
+  `recomputeCanonicalForName`, replacing the full scan of all L2 nodes on every
+  base model upsert. This was the primary O(n²) bottleneck during ingestion.
+- Added `_modelTree.byModelIdLower` reverse index (`lowercase model ID → L2Node`)
+  to `ensureL2BaseNode`, replacing the linear case-insensitive fallback scan over
+  the entire `byModelId` map.
+- `normalizeModel` now precomputes `displayName` and `displayNameLower` on every
+  model ref. All render and filter hot paths that previously did
+  `m.id.split("/").slice(1).join("/")` per iteration now read the cached fields.
+  This eliminates thousands of redundant string split/join/toLowerCase operations
+  on every filter change and re-render.
+- `walkFilterL2` now writes `_orphanQuantMethods` to both the L2 tree node and the
+  underlying model ref. `passesTreeNodeFilters` reads the cached array instead of
+  re-running `getOrphanQuantMethod()` (regex + Set spread) per L2 node.
+
 ### v260601.25 — Perf: Cache expensive filter computations on tree nodes
 
 - `walkFilterL2` now stores `_orphanQuantMethods` on L2 nodes. `buildL2TableHtml`

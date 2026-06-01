@@ -116,9 +116,15 @@ L2/L4 hidden count and popup hidden count must match exactly. `popupSource` pass
 `totalBeforeFilter` for L2 is now derived from `l1Node.totalChildren` (computed during `walkFilterL1` as the count of canonical L2 models), not passed as a render parameter. The filter pipeline stores all visibility decisions statically on tree nodes (`display`, `totalChildren`, `aggMaxLastModified`, and decomposed `_filter*` booleans), so renderers read state instead of re-evaluating predicates.
 
 **Performance-cached fields:** The filter pipeline also pre-computes expensive string operations and stores them on nodes to avoid redundant work during render:
-- L2 nodes carry `_orphanQuantMethods` (set by `walkFilterL2`), read by `buildL2TableHtml` for orphan badge rendering.
+- L2 nodes carry `_orphanQuantMethods` (set by `walkFilterL2`), read by `buildL2TableHtml` for orphan badge rendering and by `passesTreeNodeFilters` to avoid re-running regex matching.
 - L4 nodes carry `_quantFilterString` (set by `walkFilterL4`), read by `renderL3` and `renderL4` instead of re-running `getQuantFilterString()` (which does regex matching + tag iteration) per child.
 - L3 `aggCount` / `aggDownloads` are used by `renderL3` when no L3 text filter is active, avoiding a second reduce pass over displayed children.
+
+**Reverse indices for O(n) ingestion:** `_modelTree` maintains two additional indices beyond `byModelId`:
+- `byModelName` (Map: `displayName → L2Node[]`) — used by `recomputeCanonicalForName` to find canonical dedup candidates in O(k) where k = models with that name, replacing the previous O(n) full scan over all L2 nodes.
+- `byModelIdLower` (Map: `lowercase model ID → L2Node`) — used by `ensureL2BaseNode` for case-insensitive L2 lookup without scanning the entire `byModelId` map.
+
+**displayName precomputation:** `normalizeModel` computes `displayName` (`id.split('/').slice(1).join('/')`) and `displayNameLower` at ingestion time. All render and filter hot paths read these cached fields instead of repeatedly splitting and lowercasing model IDs.
 
 `renderL3` and `renderL4` walk the tree directly via `_modelTree.byModelId.get(parentId)` → L2 → L3 → L4 iteration. No intermediate `getTreeChildren()` array allocation. L3 computes `maxLastModified` at render time from the `displayedL4` array (matching how `count` and `totalDownloads` are derived) rather than reading the stale `l3Node.aggMaxLastModified` set by `walkFilterL3`. If no displayed children have a date, it falls back to the L2 parent model's `lastModified`.
 
