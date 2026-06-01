@@ -514,7 +514,6 @@ let _fetchGeneration = 0;
 let _derivedParamEnabled = false;
 let _hideMissingParamEnabled = false;
 const _paramSource = new Map(); // modelId → 'name'|'parent_inherit'|'child_name'|'child_api'|'deepen'|'metadata'
-const _inferredAttemptedIds = new Set();
 const _deepeningAuthors = new Set(); // Guards against concurrent deepening of same author
 
 // ── API Counter & Rate Limit UI ──
@@ -785,7 +784,6 @@ function resetAppState() {
   for (const [el, timer] of _popupTimers) { clearTimeout(timer); }
   _popupTimers.clear();
   _paramSource.clear();
-  _inferredAttemptedIds.clear();
   _consecutive429s = 0;
   apiCalls = 0;
   _totalBytesReceived = 0;
@@ -1415,7 +1413,7 @@ async function tryResolveModelParam(m, gen) {
 
   // ③ EXPENSIVE: Child search API calls — ONLY if still unresolved & not attempted
   let childUsedApi = false;
-  if (resolved === null && !_inferredAttemptedIds.has(m.id)) {
+  if (resolved === null && !m._inferredAttempted) {
     if (isStale(gen)) {
       if (rowEl) rowEl.classList.remove("inferring");
       return false;
@@ -1427,8 +1425,7 @@ async function tryResolveModelParam(m, gen) {
   }
 
   // Mark as attempted to prevent future expensive retries on re-expansion/filter changes
-  if (_inferredAttemptedIds.size > 5000) _inferredAttemptedIds.clear();
-  _inferredAttemptedIds.add(m.id);
+  m._inferredAttempted = true;
 
   if (rowEl) rowEl.classList.remove("inferring");
 
@@ -2359,7 +2356,7 @@ function applyBarLogic(option, options, activeSet) {
 // ── Param Badge System ──
 function paramBadgeHtml(m) {
   if (m.paramB == null) {
-    if (_derivedParamEnabled && _inferredAttemptedIds.has(m.id)) {
+    if (_derivedParamEnabled && m._inferredAttempted) {
       return '<span class="no-param" title="Infer Missing Params attempted but could not resolve">—</span>';
     }
     return '<span class="no-param-maybe" title="No parameter count — enable Infer Missing Params to attempt resolution">—</span>';
@@ -2574,7 +2571,7 @@ async function refreshAuthorL2Section(idx, author, container, skipRender) {
     }
     if (_derivedParamEnabled) {
       const stillUnknown = filtered.filter(m =>
-        m.paramB === null && !_inferredAttemptedIds.has(m.id));
+        m.paramB === null && !m._inferredAttempted);
       if (stillUnknown.length > 0) {
         for (const m of stillUnknown) {
           if (isStale(gen)) return;
