@@ -1,5 +1,13 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.15 — Review Follow-Ups: Date Stability, A11y, Normalization Safety
+
+- Date slider conversion now uses UTC day-start arithmetic to avoid local DST/day-boundary drift while preserving relative-to-now behavior for the upper bound
+- Hidden-models popup triggers now include stronger ARIA wiring (`aria-controls`, `aria-describedby`, `aria-expanded`), and popup containers now expose `role="listbox"` with an explicit label
+- Popup show/hide paths now keep trigger `aria-expanded` synchronized, including global hide-on-scroll/resize
+- Replaced the `console.assert` deepening ordering check with a runtime `console.warn` so ordering issues still surface in production builds
+- Hardened `normalizeModel` with malformed-payload guards and error handling, and updated normalization call sites to skip invalid entries safely
+
 ### v260601.14 — Review Follow-Ups: Compatibility + Queue + Docs
 
 - Added an explicit browser compatibility note near param extraction: regex

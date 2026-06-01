@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.18';
+const APP_VERSION = '260601.19';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -1173,7 +1173,9 @@ function _initFetchState() {
 function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
   if (isStale(gen)) return 0;
   let added = 0;
-  for (const m of rawModels.map(normalizeModel)) {
+  for (const raw of rawModels) {
+    const m = normalizeModel(raw);
+    if (!m) continue;
     if (_fetchSeen.has(m.id)) continue;
     _fetchSeen.add(m.id);
     m.paramB = getParamCount(m);
@@ -1347,6 +1349,7 @@ async function injectBaseModels(onBatch) {
       (raw) => {
         if (isStale(gen)) return null;
         const full = normalizeModel(raw);
+        if (!full) return null;
         full.paramB = getParamCount(full);
         injected.push(full);
         seen.add(full.id);
@@ -1379,18 +1382,29 @@ async function injectBaseModels(onBatch) {
 // (~60% memory savings vs raw API). Callers: _mergeRequestResult, injectBaseModels,
 // resolveParamFromChildren, loadAuthorModels, loadChildren.
 function normalizeModel(m) {
-  return {
-    id: m.id,
-    downloads: m.downloads || 0,
-    likes: m.likes || 0,
-    lastModified: m.lastModified || "",
-    createdAt: m.createdAt || "",
-    pipeline_tag: m.pipeline_tag || "",
-    tags: m.tags || [],
-    safetensors: m.safetensors || null,
-    gguf: m.gguf || null,
-    cardData: m.cardData ? { base_model: m.cardData.base_model } : null
-  };
+  try {
+    if (!m || typeof m !== "object" || typeof m.id !== "string" || m.id.length === 0) {
+      const badId = m && m.id != null ? String(m.id) : "(missing)";
+      console.warn("Skipping malformed model payload", badId);
+      return null;
+    }
+    return {
+      id: m.id,
+      downloads: m.downloads || 0,
+      likes: m.likes || 0,
+      lastModified: m.lastModified || "",
+      createdAt: m.createdAt || "",
+      pipeline_tag: m.pipeline_tag || "",
+      tags: m.tags || [],
+      safetensors: m.safetensors || null,
+      gguf: m.gguf || null,
+      cardData: m.cardData ? { base_model: m.cardData.base_model } : null
+    };
+  } catch (err) {
+    const badId = m && m.id != null ? String(m.id) : "(missing)";
+    console.warn("Failed to normalize model payload", badId, err);
+    return null;
+  }
 }
 
 // ── Tree Expansion Helpers ──
@@ -1571,7 +1585,8 @@ async function resolveParamFromChildren(modelId) {
     const cd = raw.cardData || {};
     const childHasBase = hasBaseModel(cd, modelId);
     if (!childHasBase && !strictNameMatch(raw.id, modelName)) continue;
-    children.push(normalizeModel(raw));
+    const normalized = normalizeModel(raw);
+    if (normalized) children.push(normalized);
   }
   // Sort children by ascending modification date so the oldest (typically
   // original GGUF quants) are prioritized over newer pruned variants (REAP)
@@ -2075,6 +2090,7 @@ function schedulePopupShow(popupEl, delay) {
     if (!popupEl.isConnected) return;
     if (popupEl._popupTrigger) positionPopupCenter(popupEl._popupTrigger, popupEl);
     popupEl.classList.add("visible");
+    if (popupEl._popupTrigger) popupEl._popupTrigger.setAttribute("aria-expanded", "true");
     const saved = _popupScrollPositions.get(popupEl);
     popupEl.scrollTop = typeof saved === "number" ? saved : 0;
   }, delay || CONFIG.POPUP_SHOW_DELAY));
@@ -2084,6 +2100,7 @@ function schedulePopupHide(popupEl, delay) {
   _popupTimers.set(popupEl, setTimeout(() => {
     _popupScrollPositions.set(popupEl, popupEl.scrollTop);
     popupEl.classList.remove("visible");
+    if (popupEl._popupTrigger) popupEl._popupTrigger.setAttribute("aria-expanded", "false");
   }, delay || CONFIG.POPUP_HIDE_DELAY));
 }
 // Hide all visible popups on scroll/resize to prevent stale positioning.
@@ -2092,6 +2109,7 @@ function hideAllPopups() {
     _popupScrollPositions.set(p, p.scrollTop);
     delete p._cachedWidth;
     p.classList.remove("visible");
+    if (p._popupTrigger) p._popupTrigger.setAttribute("aria-expanded", "false");
   });
   for (const [, timer] of _popupTimers) clearTimeout(timer);
   _popupTimers.clear();
@@ -2120,7 +2138,7 @@ function makePopupTrigger(suffix, labelText, makeContent) {
     return /[A-Za-z0-9_-]/.test(ch) ? ch : `~${ch.codePointAt(0).toString(16)}~`;
   }).join('');
   return {
-    html: `<button type="button" id="fp-trigger-${safe}" class="filter-popup-trigger" aria-haspopup="true" style="color:#6e7681;font-size:0.75rem">${labelText}</button><div id="fp-popup-${safe}" class="filter-popup"></div>`,
+    html: `<button type="button" id="fp-trigger-${safe}" class="filter-popup-trigger" aria-haspopup="listbox" aria-controls="fp-popup-${safe}" aria-describedby="fp-popup-${safe}" aria-expanded="false" style="color:#6e7681;font-size:0.75rem">${labelText}</button><div id="fp-popup-${safe}" class="filter-popup" role="listbox" aria-label="Hidden models preview"></div>`,
     wire: (mc) => {
       const trigger = document.getElementById(`fp-trigger-${safe}`);
       const popup = document.getElementById(`fp-popup-${safe}`);
@@ -2218,20 +2236,20 @@ function handleSortClick(th, level, stateKey, defaultKey, refreshAfter, renderFn
 // ── Slider System: Math & Labels ──
 //   sliderValueToDate / sliderValueToLabel / isInDateRange
 function sliderValueToDate(val) {
-  if (val === 0) return new Date("2010-01-01");
+  if (val === 0) return new Date("2010-01-01T00:00:00Z");
   if (val === CONFIG.DATE_SLIDER_MAX) return new Date();
-  const d = new Date();
-  d.setDate(d.getDate() - (CONFIG.DATE_SLIDER_MAX - val) * CONFIG.DAYS_PER_STEP);
-  return d;
+  const now = new Date();
+  const utcStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const daysBack = (CONFIG.DATE_SLIDER_MAX - val) * CONFIG.DAYS_PER_STEP;
+  return new Date(utcStart - daysBack * 86400000);
 }
 function sliderValueToLabel(val) {
   if (val === 0) return "Anytime";
   if (val === CONFIG.DATE_SLIDER_MAX) return "Now";
-  const d = new Date();
-  d.setDate(d.getDate() - (CONFIG.DATE_SLIDER_MAX - val) * CONFIG.DAYS_PER_STEP);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+  const d = sliderValueToDate(val);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}/${m}/${day}`;
 }
 function isInDateRange(dateStr) {
@@ -2733,7 +2751,9 @@ async function refreshAuthorL2Section(idx, author, container, skipRender) {
         for (const m of stillUnknown) {
           if (isStale(gen)) return;
           if (m.paramB != null) continue;
-          console.assert(m.deep_status === 2, `${m.id}: Infer Missing Params ran before deepening completed`);
+          if (m.deep_status !== 2) {
+            console.warn(`${m.id}: Infer Missing Params ran before deepening completed`);
+          }
           const resolved = await tryResolveModelParam(m, gen);
         }
         if (isStale(gen)) return;
@@ -2759,7 +2779,7 @@ async function loadAuthorModels(idx, author, container) {
     const raw = await fetchJson(
       `https://huggingface.co/api/models?author=${author}&sort=downloads&direction=-1&limit=${CONFIG.AUTHOR_LIMIT}&full=true&cardData=true`
     );
-    const models = raw.map(normalizeModel);
+    const models = raw.map(normalizeModel).filter(Boolean);
 
     // Upsert fetched models into tree-backed store for this author
     for (const m of models) upsertModelIntoTree(m);
@@ -3024,14 +3044,14 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       };
 
       const nameUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(modelName)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
-      const nameResults = (await fetchJson(nameUrl)).map(normalizeModel);
+      const nameResults = (await fetchJson(nameUrl)).map(normalizeModel).filter(Boolean);
       if (isStale(gen)) return;
       processChildren(nameResults);
       let rawResults = nameResults;
 
       if (nameResults.length === 0) {
         const fullUrl = `https://huggingface.co/api/models?search=${encodeURIComponent(parentId)}&sort=downloads&direction=-1&limit=${CONFIG.CHILD_LIMIT}&full=true&cardData=true`;
-        rawResults = (await fetchJson(fullUrl)).map(normalizeModel);
+        rawResults = (await fetchJson(fullUrl)).map(normalizeModel).filter(Boolean);
         if (isStale(gen)) return;
         processChildren(rawResults);
       }
