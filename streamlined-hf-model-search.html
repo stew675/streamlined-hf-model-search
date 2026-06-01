@@ -1470,6 +1470,16 @@ function getOrphanQuantMethod(modelId) {
   return matches ? [...new Set(matches)] : [];
 }
 
+function getQuantFilterString(model) {
+  if (!model) return "derivative";
+  const byId = getOrphanQuantMethod(model.id || "");
+  if (byId.length > 0) return byId.join(', ');
+  if (model.q_method) return model.q_method;
+  const tags = Array.isArray(model.tags) ? model.tags : [];
+  if (tags.some(t => String(t).toLowerCase() === 'safetensors')) return 'safetensors';
+  return 'derivative';
+}
+
 // ── Pipeline Tag Resolution ──
 function resolveTasks() {
   return TO_TAGS.filter(t => {
@@ -1739,7 +1749,7 @@ function passesTreeNodeFilters(m) {
 // Filters an L4 (quant) node. Simpler than L2: no param/slider/task filters.
 function passesL4Filters(m) {
   if (!isInDateRange(m.lastModified)) return false;
-  if (!matchesFilter(getOrphanQuantMethod(m.id).join(', ') || m.q_method)) return false;
+  if (!matchesFilter(getQuantFilterString(m))) return false;
   const tag = m.pipeline_tag;
   if (!tag && !activeSpecialFilters.has("include untagged")) return false;
   return true;
@@ -1773,28 +1783,42 @@ function walkFilterL1(node) {
 function walkFilterL2(node) {
   const ref = node.modelRef;
   let passes = ref ? passesTreeNodeFilters(ref) : false;
-  node.display = passes;
-  let count = passes ? 1 : 0;
-  let dl = passes && ref ? (ref.downloads || 0) : 0;
-  let lk = passes && ref ? (ref.likes || 0) : 0;
+  node.display = false;
+  let childCount = 0;
+  let childDl = 0;
+  let childLk = 0;
   for (const l3Node of node.children.values()) {
     const r = walkFilterL3(l3Node);
-    count += r.count; dl += r.downloads; lk += r.likes;
+    childCount += r.count;
+    childDl += r.downloads;
+    childLk += r.likes;
   }
+
+  const qMethods = ref ? getOrphanQuantMethod(ref.id) : [];
+  const selfQuantMatch = qMethods.length > 0 && qMethods.some(qm => activeFilters.has(qMethodToCategory(qm)));
+  let includeSelf = passes && selfQuantMatch;
+
   // Parent propagation: quants reactivate their parent only when the parent's
   // own exclusion is NOT caused by param range, hide-missing-params, or L2 text filter.
-  if (!passes && count > 0) {
+  // This includes quant-chip-only exclusions at L2: a parent with matching children
+  // should remain visible even when the parent ID itself has no quant match.
+  if (!includeSelf && childCount > 0) {
     const tf2 = RC._state.textFilters.l2Model;
     const textFilterBlocks = tf2 && ref && !ref.id.split("/").slice(1).join("/").toLowerCase().includes(tf2.toLowerCase());
     if (!textFilterBlocks) {
       const pb = ref ? (ref.paramB != null ? ref.paramB : getParamCount(ref)) : null;
       if (pb !== null ? isInParamRange(pb) : !_hideMissingParamEnabled) {
-        node.display = true;
-        dl += ref ? (ref.downloads || 0) : 0;
-        lk += ref ? (ref.likes || 0) : 0;
+        includeSelf = true;
       }
     }
   }
+
+  node.display = includeSelf;
+  const selfDl = includeSelf && ref ? (ref.downloads || 0) : 0;
+  const selfLk = includeSelf && ref ? (ref.likes || 0) : 0;
+  const count = childCount + (includeSelf ? 1 : 0);
+  const dl = childDl + selfDl;
+  const lk = childLk + selfLk;
   node.aggCount = count;
   node.aggDownloads = dl;
   node.aggLikes = lk;
@@ -1842,7 +1866,7 @@ function getTreeChildren(parentId) {
         likes: ref.likes || 0,
         lastModified: ref.lastModified || '',
         pipeline_tag: ref.pipeline_tag || '',
-        q_method: ref.q_method || qMatch.map(q => q.toUpperCase()).join(', ') || 'derivative'
+        q_method: ref.q_method || qMatch.map(q => q.toUpperCase()).join(', ') || getQuantFilterString(ref)
       });
     }
   }
