@@ -1,5 +1,18 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.23 — Fix: L2 Expand Now Fetches When Cached Children Are All Filtered Out
+
+- Added `_childrenDeepened` flag to L2 tree nodes, set when `loadChildren` successfully
+  completes. Changed `setupL2Events` and `refreshAllExpanded` to check `hasDisplayedChildren`
+  instead of `hasAnyChildren`. If an L2 node has cached children but none pass current
+  filters, and `_childrenDeepened` is false, the app now fetches fresh children via
+  `loadChildren` rather than rendering an empty L3 table.
+- Fixes models like `microsoft/Phi-4-mini-instruct` where initial data pulls only found
+  1 cached child (which was filtered out by the date slider), causing first-time expand
+  to show zero L3 authors even though the dedicated HF search returns 149 children.
+- Added `default_model_debug_pull.js` — standalone Node.js debug script that simulates
+  the app's initial pulls + child search + filter pipeline for any given model ID.
+
 ### v260601.22 — Fix: resolveTrueBase Chains Past Same-Author Fine-Tunes
 
 - `resolveTrueBase` now stops when it encounters a model that `isBase` considers a base

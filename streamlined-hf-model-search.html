@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.22';
+const APP_VERSION = '260601.23';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -763,6 +763,7 @@ function createTreeNode(level, type, id, modelRef) {
     aggLikes: 0,
     totalChildren: 0,
     aggMaxLastModified: null,
+    _childrenDeepened: false,
     _filterDate: true,
     _filterQuant: true,
     _filterTask: true,
@@ -2923,12 +2924,14 @@ function setupL2Events(container) {
       if (toggleSection(detailRow, tog, modelKey, `${PREFIX_GROUP}${modelId}|`)) {
         cacheDomRef(modelKey, { row: tr, detailRow, inner, toggle: tog });
         const l2Node = _modelTree.byModelId.get(modelId);
-        const hasAnyChildren = l2Node && [...l2Node.children.values()].some(l3 => l3.children.size > 0);
-        if (hasAnyChildren) {
+        const hasDisplayedChildren = l2Node && [...l2Node.children.values()].some(l3 => [...l3.children.values()].some(l4 => l4.display));
+        if (hasDisplayedChildren) {
           renderL3(l2Idx, modelIdx, modelId, inner);
-        } else {
+        } else if (l2Node && !l2Node._childrenDeepened) {
           inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
           loadChildren(l2Idx, modelIdx, modelId, inner);
+        } else {
+          renderL3(l2Idx, modelIdx, modelId, inner);
         }
         tog?.focus();
       }
@@ -3091,6 +3094,8 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
         });
       }
       newEntry.ready = true;
+      const l2Node = _modelTree.byModelId.get(parentId);
+      if (l2Node) l2Node._childrenDeepened = true;
       if (isStale(gen)) return;
       if (container.isConnected) {
         renderL3(l2Idx, modelIdx, parentId, container);
@@ -3393,12 +3398,14 @@ function refreshAllExpanded(force, allowAsync = true) {
       detailRow.style.display = "";
       if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
       const l2NodeRef = _modelTree.byModelId.get(modelId);
-      const hasAnyChildren = l2NodeRef && [...l2NodeRef.children.values()].some(l3 => l3.children.size > 0);
-      if (hasAnyChildren) {
+      const hasDisplayedChildren = l2NodeRef && [...l2NodeRef.children.values()].some(l3 => [...l3.children.values()].some(l4 => l4.display));
+      if (hasDisplayedChildren) {
         renderL3(l2Idx, modelIdx, modelId, inner);
-      } else {
+      } else if (l2NodeRef && !l2NodeRef._childrenDeepened && allowAsync) {
         inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
         loadChildren(l2Idx, modelIdx, modelId, inner);
+      } else {
+        renderL3(l2Idx, modelIdx, modelId, inner);
       }
     }
   }

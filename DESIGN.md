@@ -28,6 +28,7 @@ Single-file, zero-dependency HTML/JS/CSS application that explores HuggingFace b
 
 - `_fetchGeneration` — Monotonically increasing counter incremented by "Get Results" and "Clear Cache". All async functions capture `const gen = _fetchGeneration` at entry and bail if stale via `isStale(gen)` — prevents stale renders without AbortController (which can't guard post-fetch side effects like cache writes).
 - `_inflightChildren` — `Map<parentId, {promise, results}>` to deduplicate concurrent L3/L4 fetches; results stored directly in the entry to survive LRU cache eviction. Entries set synchronously before the first `await`; concurrent callers read results directly from the entry, bypassing evictable LRU cache.
+- `_childrenDeepened` — Flag on L2 tree nodes set by `loadChildren` after a successful fetch. Used by `setupL2Events` and `refreshAllExpanded` to distinguish "never loaded" from "loaded but all children filtered out", preventing empty L3 tables when cached children fail current filters while undiscovered children on HF might pass.
 - `_inflightFetches` — `Map<url, promise>` to deduplicate concurrent `fetchJson` calls before they reach the queue manager.
 - `_workQueue` — Array of `{ url, resolve, reject }` work items queued by `fetchJson()`. Drained by `_dequeueNext()` gated by in-flight count and rate window.
 - `_inflightCount` — Number of HTTP requests currently executing. Gated at `INFLIGHT_MAX` (5) in `_dequeueNext`.
