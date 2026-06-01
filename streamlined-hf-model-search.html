@@ -624,7 +624,7 @@ const RenderCoordinator = {
 
       // Tree-based filter pipeline: run filter eval + parent propagation + aggregation
       runFilterPipeline();
-      // Build _authorData from tree for backward compatibility with existing renderMain
+      // Build _authorData from tree for renderMain
       const treeAuthorData = [];
       if (_modelTree.root) {
         for (const [author, l1Node] of _modelTree.root.children) {
@@ -696,12 +696,7 @@ const RenderCoordinator = {
 
   get sortKey() { return this._state.l1Sort.key; },
   get sortAsc() { return this._state.l1Sort.asc; },
-  get detailSort() { return this._state.detailSort; },
   get expandedSections() { return this._state.expandedSections; },
-  get _l1AuthorFilter() { return this._state.textFilters.l1Author; },
-  get _l2ModelFilter() { return this._state.textFilters.l2Model; },
-  get _l3AuthorFilter() { return this._state.textFilters.l3Author; },
-  get _l4ModelFilter() { return this._state.textFilters.l4Model; },
 };
 
 const RC = RenderCoordinator; // short alias used throughout call sites
@@ -1169,8 +1164,8 @@ async function injectBaseModels(onBatch) {
 // ── Data Normalization ──
 // Transforms raw API payloads into the canonical internal model shape.
 // Intentionally drops sha, siblings, config, library_name, private, and all other API fields
-// (~60% memory savings vs raw API). Callers: S3 (_mergeRequestResult, injectBaseModels),
-// S4 (resolveParamFromChildren), S6 (loadAuthorModels, loadChildren).
+// (~60% memory savings vs raw API). Callers: _mergeRequestResult, injectBaseModels,
+// resolveParamFromChildren, loadAuthorModels, loadChildren.
 function normalizeModel(m) {
   return {
     id: m.id,
@@ -1633,7 +1628,6 @@ function rebuildTree() {
 //   passesTreeNodeFilters → passesL4Filters → runFilterPipeline
 // Single recursive walk over _modelTree that evaluates filters, propagates
 // parent activation (quants reactivate their base model), and aggregates stats.
-// Replaces the flat scan in modelPassesAllFilters + the injection bypass system.
 
 // Filters an L2 (base model) node. Parent propagation in the tree walk
 // handles reactivating parents whose quants pass filters.
@@ -2521,7 +2515,7 @@ function renderMain(authorData, skipSort) {
   }
   document.getElementById("count").textContent = countText + ". Click to expand.";
 }
-async function deepenBatch(idx, author, container, unknownModels, filterApplied, nonQuantBase, gen) {
+async function deepenBatch(idx, author, container, unknownModels, gen) {
   const totalUnk = unknownModels.length;
   let completed = 0;
   unknownModels.forEach(m => m.deep_status = 1);
@@ -2552,7 +2546,7 @@ async function deepenBatch(idx, author, container, unknownModels, filterApplied,
       if (completed === totalUnk) {
         UI.setStatus("");
       }
-      // Call unconditionally — _filterBoundaryChange + RAF coalescing prevent wasted renders
+      // RAF coalescing prevents wasted renders
       _schedulePostDeepenRender(author, gen);
     });
   }));
@@ -2576,9 +2570,7 @@ async function refreshAuthorL2Section(idx, author, container, skipRender) {
     const freshUnknowns = filtered.filter(m => m.paramB === null && (m.deep_status || 0) === 0);
     const gen = _fetchGeneration;
     if (freshUnknowns.length > 0) {
-      await deepenBatch(idx, author, container, freshUnknowns,
-        () => allModels.filter(m => passesTreeNodeFilters(m)),
-        allModels, gen);
+      await deepenBatch(idx, author, container, freshUnknowns, gen);
     }
     if (_derivedParamEnabled) {
       const stillUnknown = filtered.filter(m =>
