@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.32';
+const APP_VERSION = '260601.33';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -1597,6 +1597,14 @@ function getParamCount(m) {
   else {
     result = extractParamFromId(m.id);
     if (result !== null) _paramSource.set(m.id, 'name');
+  }
+  if (_paramCache.size >= 5000) {
+    let evict = 0;
+    for (const key of _paramCache.keys()) {
+      _paramCache.delete(key);
+      _paramSource.delete(key);
+      if (++evict >= 1000) break;
+    }
   }
   _paramCache.set(m.id, result);
   return result;
@@ -2876,7 +2884,7 @@ function renderL2Empty(idx, author, container, popupSource) {
   const allBaseModels = popupSource || [];
   if (allBaseModels.length > 0) {
     const pt = makePopupTrigger(`l2-empty-${author}`, "No base models match current filters",
-      (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), allBaseModels.length)));
+      (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), 200)));
     container.innerHTML = `<div class="detail-count" style="color:#6e7681">${pt.html}</div>`;
     pt.wire();
   } else if (!hasData) {
@@ -3398,6 +3406,9 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
 //   refreshAllExpanded
 function refreshAllExpanded(force, allowAsync = true) {
   if (!_modelTree.root) return;
+  // Purge stale DOM cache entries for L2/L3/L4 before re-expansion
+  invalidateDomPrefix(PREFIX_MODEL);
+  invalidateDomPrefix(PREFIX_GROUP);
   // Phase 1: re-expand L1 author rows (walk tree for expanded L1 nodes)
   for (const [author, l1Node] of _modelTree.root.children) {
     if (!l1Node.expanded) continue;
