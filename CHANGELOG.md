@@ -1,5 +1,30 @@
 # Changelog — Streamlined HF Model Search
 
+### v260531.10 — Tree-Only Storage + Rebuild Removal
+
+- Removed `_modelDb`, `buildTreePass1`, `buildTreePass2`, and `rebuildTree()`
+- `_onFetchComplete`, `injectBaseModels`, `loadAuthorModels`, and `loadChildren`
+  now rely on incremental tree upserts and render directly (no full rebuild step)
+- `_initFetchState` seeds `_fetchSeen` from tree model refs instead of `_modelDb.keys()`
+- Removed all remaining legacy comments/references tied to `_modelDb` rebuild flow
+
+### v260531.09 — Incremental Tree Upsert Path
+
+- Added tree mutation primitives: `ensureTreeRoot`, `ensureL1AuthorNode`,
+  `ensureL2BaseNode`, `ensureL3Node`, `attachOrUpdateL4Node`,
+  `recomputeCanonicalForName`, `upsertModelIntoTree`
+- Ingestion writes now route through `upsertModelIntoTree` in
+  `_mergeRequestResult`, `injectBaseModels`, `loadAuthorModels`, and `loadChildren`
+- Added placeholder-aware L2 promotion and case-insensitive L2 fallback to avoid
+  duplicate base nodes on mixed-casing IDs
+
+### v260531.08 — Tree Access Helpers (Prep)
+
+- Added tree-backed access helpers: `getModelNode`, `getModelRef`, `hasModel`,
+  `forEachModelRef`, `hasAnyModels`
+- Switched low-risk read paths (param inheritance, deepening writeback, child
+  dedupe checks, local filter guard) to tree helpers as prep for `_modelDb` removal
+
 ### v260531.07 — UX Fixes Round 1: Progressive Render, NaN, Casing, Tiebreaker
 
 - Progressive rendering: `rebuildTree()` inside `_onFetchComplete` so each API
