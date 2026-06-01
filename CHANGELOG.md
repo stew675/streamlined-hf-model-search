@@ -1,5 +1,14 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.13 — Tree-Only L3/L4 Rendering Consistency
+
+- `loadChildren` now renders L3 from tree state (`getTreeChildren`) after upserts,
+  and no longer uses inflight snapshot lists as a render source
+- `resolveTrueBase` now considers incoming model `cardData.base_model` on first
+  upsert so cross-author derivatives attach under the correct base lineage
+- Added `passesQuantRenderFilters` and wired all L3/L4 render paths to the same
+  quant/date/tag predicate used by tree filtering, preventing L3 count vs L4 row drift
+
 ### v260531.10 — Tree-Only Storage + Rebuild Removal
 
 - Removed `_modelDb`, `buildTreePass1`, `buildTreePass2`, and `rebuildTree()`

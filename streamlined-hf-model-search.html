@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.12';
+const APP_VERSION = '260601.13';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -1745,6 +1745,11 @@ function passesL4Filters(m) {
   return true;
 }
 
+// Shared quant visibility predicate for all L3/L4 render paths.
+function passesQuantRenderFilters(m) {
+  return passesL4Filters(m);
+}
+
 // Single recursive tree walk: evaluates filters, propagates parent activation,
 // and accumulates stats. Sets node.display and node.agg{Count,Downloads,Likes}.
 function runFilterPipeline() {
@@ -3027,7 +3032,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
 // ── Level 3: Quant Author Groups ──
 //   renderL3
 function renderL3(l2Idx, modelIdx, parentId, children, container) {
-  const filtered = children.filter(c => matchesFilter(c.q_method) && isInDateRange(c.lastModified));
+  const filtered = children.filter(c => passesQuantRenderFilters(c));
   const groups = {};
   filtered.forEach(c => {
     if (!groups[c.author]) groups[c.author] = [];
@@ -3112,7 +3117,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
         if (toggleSection(detailRow, tog, groupKey)) {
           cacheDomRef(groupKey, { row: tr, detailRow, inner, toggle: tog });
           const allChildren = getTreeChildren(parentId);
-          const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
+          const quants = allChildren.filter(c => c.author === author && passesQuantRenderFilters(c));
           renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, inner);
           tog?.focus();
         }
@@ -3192,7 +3197,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
       const modelIdx = parentRow ? parseInt(parentRow.dataset.l3ModelIdx) : 0;
       const gIdx = parentRow ? parseInt(parentRow.dataset.l3Idx) : 0;
       const allChildren = getTreeChildren(parentId);
-      const quants = allChildren.filter(c => c.author === author && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
+      const quants = allChildren.filter(c => c.author === author && passesQuantRenderFilters(c));
       handleSortClick(th, "4", `l4-${parentId}-${author}`, "downloads", false, () => {
         renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, this);
       });
@@ -3321,7 +3326,7 @@ function refreshAllExpanded(force, allowAsync = true) {
         detailRow.style.display = "";
         if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
         const allChildren = getTreeChildren(modelId);
-        const quants = allChildren.filter(c => c.author === groupAuthor && matchesFilter(c.q_method) && isInDateRange(c.lastModified));
+        const quants = allChildren.filter(c => c.author === groupAuthor && passesQuantRenderFilters(c));
         renderL4(l2Idx, modelIdx, gIdx, modelId, groupAuthor, quants, inner);
       }
     }
