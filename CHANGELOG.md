@@ -1,5 +1,20 @@
 # Changelog — Streamlined HF Model Search
 
+### v260531.07 — UX Fixes Round 1: Progressive Render, NaN, Casing, Tiebreaker
+
+- Progressive rendering: `rebuildTree()` inside `_onFetchComplete` so each API
+  call updates the tree and triggers a render immediately
+- NaN fix: stubRef placeholders now include `downloads: 0, likes: 0, lastModified: ''`;
+  `walkFilterL2`/`walkFilterL4` aggregation uses `(ref.downloads || 0)` to prevent
+  undefined propagation to NaN
+- Case-insensitive author merge: `_modelTree.authorByLower` Map resolves different
+  author casings (Qwen/qwen/QWEN) to a single L1 node
+- Case-insensitive L2 merge: `buildTreePass2` falls back to case-insensitive
+  `byModelId` search, preventing duplicate placeholder L2 nodes when derivative
+  `base_model` casing differs from canonical model ID
+- Sort tiebreaker: subKey and final `id` tiebreaker now always sort ascending
+  regardless of primary sort direction
+
 ### v260531.06 — Full _modelDb Migration (Phase 14)
 
 **Phase 14 — Removed `_allFetched` array**: `_modelDb` is now the sole data store. Removed `_allFetched` array, `_allFetchedById` Map, `_trimAllFetched`, `_syncModelDbFromAllFetched`, `_rebuildAllFetchedMap` functions. Removed `CONFIG.ALL_FETCHED_MAX`. `_initFetchState` builds `_fetchSeen` from `_modelDb.keys()`. `_mergeRequestResult` writes only to `_modelDb`. `injectBaseModels` iterates `_modelDb.values()` instead of `_allFetched`. `loadChildren` dedup and param inheritance use `_modelDb.get/has`. `applyLocalFilters` guard checks `_modelDb.size`. `tryResolveModelParam` falls back to `_modelDb` for parent param lookup. Net: -50 lines.

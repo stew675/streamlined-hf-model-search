@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260531.06';
+const APP_VERSION = '260531.07';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -752,7 +752,8 @@ const _modelDb = new Map(); // Map<string, normalizedModel>
 const _modelTree = {
   root: null,       // TreeNode (level-0 synthetic root, set by buildTreePass1)
   byPath: new Map(),// string → TreeNode (O(1) path lookup)
-  byModelId: new Map() // string → TreeNode (L2 or L4 node)
+  byModelId: new Map(), // string → TreeNode (L2 or L4 node)
+  authorByLower: new Map() // lowercase author string → L1 TreeNode
 };
 function createTreeNode(level, type, id, modelRef) {
   return {
@@ -800,6 +801,7 @@ function resetAppState() {
   _modelDb.clear();
   _modelTree.byPath.clear();
   _modelTree.byModelId.clear();
+  _modelTree.authorByLower.clear();
   _modelTree.root = null;
 }
 
@@ -975,10 +977,12 @@ function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
 }
 
 // Called by each independent completion handler to update status and trigger render.
+// Rebuilds the tree from _modelDb so each progressive render reflects newly fetched data.
 // RAF coalescing in requestRender() handles burst protection — no modulo gate needed.
 function _onFetchComplete(gen, completed, total, savedExpansions) {
   if (isStale(gen)) return;
   UI.setStatus(`Fetching models… (${completed}/${total})`);
+  rebuildTree();
   recomputeAndRender(savedExpansions);
 }
 
@@ -1539,6 +1543,7 @@ function buildTreePass1() {
       root.children.set(author, n);
       n.parent = root;
       _modelTree.byPath.set(author, n);
+      _modelTree.authorByLower.set(author.toLowerCase(), n);
       l1Nodes.set(author, n);
     }
 
@@ -1568,16 +1573,25 @@ function buildTreePass2() {
 
     let l2Node = _modelTree.byModelId.get(trueBase);
     if (!l2Node || l2Node.level !== 2) {
+      // Case-insensitive fallback: search byModelId for an existing L2 node
+      const tbLower = trueBase.toLowerCase();
+      for (const [key, node] of _modelTree.byModelId) {
+        if (node.level === 2 && key.toLowerCase() === tbLower) { l2Node = node; break; }
+      }
+    }
+    if (!l2Node || l2Node.level !== 2) {
       const author = trueBase.split('/')[0];
-      if (!_modelTree.byPath.has(author)) {
-        const l1Node = createTreeNode(1, 'author', author);
+      const authorLower = author.toLowerCase();
+      let l1Node = _modelTree.authorByLower.get(authorLower);
+      if (!l1Node) {
+        l1Node = createTreeNode(1, 'author', author);
         _modelTree.root.children.set(author, l1Node);
         l1Node.parent = _modelTree.root;
         _modelTree.byPath.set(author, l1Node);
+        _modelTree.authorByLower.set(authorLower, l1Node);
       }
-      const l1Node = _modelTree.byPath.get(author);
       const paramFromName = extractParamFromId(trueBase);
-      const stubRef = paramFromName !== null ? { id: trueBase, paramB: paramFromName } : null;
+      const stubRef = paramFromName !== null ? { id: trueBase, paramB: paramFromName, downloads: 0, likes: 0, lastModified: '' } : null;
       const placeholder = createTreeNode(2, 'basemodel', trueBase, stubRef);
       placeholder.canonical = false;
       placeholder.display = false;
@@ -1674,8 +1688,8 @@ function walkFilterL2(node) {
   let passes = ref ? passesTreeNodeFilters(ref) : false;
   node.display = passes;
   let count = passes ? 1 : 0;
-  let dl = passes && ref ? ref.downloads : 0;
-  let lk = passes && ref ? ref.likes : 0;
+  let dl = passes && ref ? (ref.downloads || 0) : 0;
+  let lk = passes && ref ? (ref.likes || 0) : 0;
   for (const l3Node of node.children.values()) {
     const r = walkFilterL3(l3Node);
     count += r.count; dl += r.downloads; lk += r.likes;
@@ -1686,8 +1700,8 @@ function walkFilterL2(node) {
     const pb = ref ? (ref.paramB != null ? ref.paramB : getParamCount(ref)) : null;
     if (pb !== null ? isInParamRange(pb) : !_hideMissingParamEnabled) {
       node.display = true;
-      dl += ref ? ref.downloads : 0;
-      lk += ref ? ref.likes : 0;
+      dl += ref ? (ref.downloads || 0) : 0;
+      lk += ref ? (ref.likes || 0) : 0;
     }
   }
   node.aggCount = count;
@@ -1713,8 +1727,8 @@ function walkFilterL4(node) {
   node.display = passes;
   return {
     count: passes ? 1 : 0,
-    downloads: passes && ref ? ref.downloads : 0,
-    likes: passes && ref ? ref.likes : 0
+    downloads: passes && ref ? (ref.downloads || 0) : 0,
+    likes: passes && ref ? (ref.likes || 0) : 0
   };
 }
 
@@ -1755,15 +1769,17 @@ function sortCoerce(v, k) {
 }
 function _cmp(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
 function sortRows(rows, key, asc, subKey) {
-  const cmp = (x, y) => {
+  return rows.slice().sort((x, y) => {
     let va = sortCoerce(x[key], key), vb = sortCoerce(y[key], key);
     let r = typeof va === 'number' && typeof vb === 'number' ? _cmp(va, vb) : _cmp(va, vb);
-    if (r === 0 && subKey && x[key] === y[key]) {
-      r = _cmp(sortCoerce(x[subKey], subKey), sortCoerce(y[subKey], subKey));
+    if (r !== 0) return asc ? r : -r;
+    if (subKey && x[key] === y[key]) {
+      va = sortCoerce(x[subKey], subKey); vb = sortCoerce(y[subKey], subKey);
+      r = typeof va === 'number' && typeof vb === 'number' ? _cmp(va, vb) : _cmp(va, vb);
+      if (r !== 0) return r;
     }
-    return r || x.id.localeCompare(y.id);
-  };
-  return rows.slice().sort(asc ? cmp : (a, b) => -cmp(a, b));
+    return x.id.localeCompare(y.id);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2892,9 +2908,9 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
         if (!_modelDb.has(c.id)) {
           _modelDb.set(c.id, {
             id: c.id,
-            downloads: c.downloads,
-            likes: c.likes,
-            lastModified: c.lastModified,
+            downloads: c.downloads || 0,
+            likes: c.likes || 0,
+            lastModified: c.lastModified || '',
             pipeline_tag: c.pipeline_tag || '',
             q_method: c.q_method,
             cardData: { base_model: parentId }
