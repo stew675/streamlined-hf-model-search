@@ -1,5 +1,14 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.14 — Review Follow-Ups: Compatibility + Queue + Docs
+
+- Added an explicit browser compatibility note near param extraction: regex
+  lookbehind requires ES2018+ engines (Safari 16.4+, Firefox 78+, Chrome 64+)
+- Updated queue rate-window cleanup to use an O(1) head index over
+  `_apiTimestamps`, with periodic compaction to prevent unbounded array growth
+- Added concise JSDoc blocks for `tryResolveModelParam`, `resolveTrueBase`, and
+  `walkFilterL2` to clarify async/stale-guarded and aggregation-heavy paths
+
 ### v260601.13 — Tree-Only L3/L4 Rendering Consistency
 
 - `loadChildren` now renders L3 from tree state (`getTreeChildren`) after upserts,

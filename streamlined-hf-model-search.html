@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.17';
+const APP_VERSION = '260601.18';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -564,6 +564,7 @@ function bailQueueItem(item, cleanup) {
 
 // ── Queue State (API Request Manager) ──
 const _apiTimestamps = [];
+let _apiTimestampHead = 0;
 const _inflightFetches = new Map();
 
 // ── API Request Manager ──
@@ -982,6 +983,7 @@ function resetAppState() {
   _fetchGeneration++;
   fetchedTasks.clear();
   fetchedUntagged = false;
+  _apiTimestampHead = 0;
   _paramCache.clear();
   _inflightChildren.clear();
   _inflightFetches.clear();
@@ -992,6 +994,7 @@ function resetAppState() {
   for (const [el, timer] of _popupTimers) { clearTimeout(timer); }
   _popupTimers.clear();
   _paramSource.clear();
+  _deepeningAuthors.clear();
   _consecutive429s = 0;
   apiCalls = 0;
   _totalBytesReceived = 0;
@@ -1045,11 +1048,16 @@ function _dequeueNext() {
 
   const now = Date.now();
   const cutoff = now - CONFIG.RATE_WINDOW;
-  while (_apiTimestamps.length > 0 && _apiTimestamps[0] < cutoff) {
-    _apiTimestamps.shift();
+  while (_apiTimestampHead < _apiTimestamps.length && _apiTimestamps[_apiTimestampHead] < cutoff) {
+    _apiTimestampHead++;
   }
-  if (_apiTimestamps.length >= CONFIG.RATE_LIMIT) {
-    const wait = _apiTimestamps[0] + CONFIG.RATE_WINDOW - now + 10;
+  if (_apiTimestampHead > 100) {
+    _apiTimestamps.splice(0, _apiTimestampHead);
+    _apiTimestampHead = 0;
+  }
+  const inWindowCount = _apiTimestamps.length - _apiTimestampHead;
+  if (inWindowCount >= CONFIG.RATE_LIMIT) {
+    const wait = _apiTimestamps[_apiTimestampHead] + CONFIG.RATE_WINDOW - now + 10;
     setTimeout(_dequeueNext, Math.max(wait, 1));
     return;
   }
@@ -1502,6 +1510,8 @@ function matchesTaskFilter(pipelineTag) {
 
 // ── Parameter Extraction ──
 //   extractParamFromId → getParamCount → resolveParamFromChildren → tryResolveModelParam
+// Browser compatibility: extractParamFromId uses regex lookbehind assertions,
+// requiring ES2018+ engines (Safari 16.4+, Firefox 78+, Chrome 64+).
 function extractParamFromId(id) {
   // Pattern 1: Strict — no letter or digit before the number.
   // Catches -7B, -22B, -125m etc. but NOT 8x7B (x blocks) nor partial 2B in 22B.
@@ -1595,6 +1605,12 @@ async function resolveParamFromChildren(modelId) {
   }
   return { value: runningMax, usedApi };
 }
+/**
+ * Try resolving a model's parameter count via name, parent inheritance, then child search.
+ * @param {Object} m Normalized base-model ref being resolved.
+ * @param {number} gen Fetch generation captured by caller for stale guards.
+ * @returns {Promise<boolean>} True when a parameter value is resolved and committed.
+ */
 async function tryResolveModelParam(m, gen) {
   const rowEl = document.querySelector(`tr.l2-row[data-model="${CSS.escape(m.id)}"]`);
   if (rowEl) rowEl.classList.add("inferring");
@@ -1702,6 +1718,11 @@ function _schedulePostDeepenRender(author, gen) {
 // Follows cardData.base_model chain iteratively to find the true base ancestor.
 // Stops when chain is exhausted or the next hop is not in tree model refs.
 // Max 10 hops with cycle detection via visited Set.
+/**
+ * Resolve the deepest known base-model ancestor for a model ID.
+ * @param {string|Object} modelOrId Model ID string or normalized model object.
+ * @returns {string} Resolved base model ID (or input ID when unresolved).
+ */
 function resolveTrueBase(modelOrId) {
   const startId = typeof modelOrId === 'string' ? modelOrId : (modelOrId && modelOrId.id) || '';
   if (!startId) return startId;
@@ -1787,6 +1808,11 @@ function walkFilterL1(node) {
   node.aggLikes = lk;
   node.display = count > 0;
 }
+/**
+ * Evaluate one L2 node, aggregate descendants, and apply parent reactivation rules.
+ * @param {Object} node L2 TreeNode.
+ * @returns {{count:number, downloads:number, likes:number}} Aggregated subtree stats.
+ */
 function walkFilterL2(node) {
   const ref = node.modelRef;
   let passes = ref ? passesTreeNodeFilters(ref) : false;
