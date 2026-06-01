@@ -1,5 +1,34 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.30 — Code Review Resolution: Extract helper, byte accuracy, popup clamping, CSS cleanup, DOM cache hygiene
+
+- **Refactor:** Extracted parent-reactivation logic from `walkFilterL2` into
+  `shouldReactivateParent(l2Node, childCount)` for clarity and future testability.
+  No behavioral change.
+- **Fix:** `_totalBytesReceived` now counts true bytes via
+  `new TextEncoder().encode(text).length` instead of UTF-16 code units, making the
+  API counter payload size accurate for all character sets.
+- **Fix:** `positionPopupCenter` now accounts for `window.scrollX` when clamping the
+  popup right edge, preventing mispositioning on horizontally scrolled pages.
+- **Cleanup:** Moved popup trigger button inline styles (`color:#6e7681;font-size:0.75rem`)
+  into the existing `.filter-popup-trigger` CSS class for consistency and easier theming.
+- **Defensive:** Added `_domCache.clear()` to `resetAppState` so Clear Cache also purges
+  stale DOM references, preventing potential detached-node leaks.
+- **Docs:** Added HF API schema assumptions block above `normalizeModel` documenting
+  required/optional fields and fallback behavior if HF changes response structure.
+- **Reviewed and closed (no code change required):**
+  - *H2 — Queue Retry Promise Leak:* Current code is correct. `_inflightFetches.delete(url)`
+    lives in `.finally()` at the promise level (line 1048), which is reached for both
+    `resolve` and `reject` paths. `item.reject()` settles the promise; it does not throw.
+  - *M2 — DOM Cache Invalidation Race:* Current architecture is safe. `_domCache.clear()`
+    runs synchronously during `_doFullRender` before `_asyncDeepenPass` is scheduled via
+    rAF, and `_getSectionCached` already guards with `ref.row.isConnected`.
+- **Organization:** Moved standalone test and debug scripts into `tests/` subdirectory:
+  - `tests/phase5-test.js` (was `/tmp/phase5-test.js`) — Standalone filter pipeline test.
+  - `tests/default_model_debug_pull.js` — Node.js debug utility for specific base models.
+- **Docs:** Updated `AGENTS.md` paths and added `Debug Scripts` section documenting
+  `tests/default_model_debug_pull.js` usage.
+
 ### v260601.29 — Remove: Trending count from L1 status line
 
 - Removed the `(+N from trending)` suffix from the L1 count status line.

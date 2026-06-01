@@ -220,7 +220,7 @@
   .skip-link:focus { top: 8px; }
   #scope-notice { font-size: 0.75rem; color: #8b949e; padding: 6px 10px; margin: 6px 0; background: #161b22; border: 1px solid #30363d; border-radius: 6px; text-align: center; }
   #scope-notice a { color: #58a6ff; }
-  .filter-popup-trigger { cursor: help; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; padding: 0; border: none; background: none; font: inherit; color: inherit; }
+  .filter-popup-trigger { cursor: help; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; padding: 0; border: none; background: none; font: inherit; font-size: 0.75rem; color: #6e7681; }
   .filter-popup-trigger:hover { color: #c9d1d9; }
   .filter-popup-trigger:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; border-radius: 2px; }
   .filter-popup { display: none; position: absolute; z-index: 1000; /* Note: isolation is intentionally NOT used — it breaks stacking context with sticky table headers, causing popups to render behind them */
@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.29';
+const APP_VERSION = '260601.30';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -1002,6 +1002,7 @@ function resetAppState() {
   _popupTimers.clear();
   _paramSource.clear();
   _deepeningAuthors.clear();
+  _domCache.clear();
   _fetchSeen = null;
   needsUpdate = false;
   _consecutive429s = 0;
@@ -1106,7 +1107,7 @@ function _dispatchFetchWithRetry(item, gen, retries) {
         _consecutive429s = 0;
         updateRateLimitUI(false);
         const text = await res.text();
-        _totalBytesReceived += text.length;
+        _totalBytesReceived += new TextEncoder().encode(text).length;
         incApiCalls(1);
         const data = JSON.parse(text);
         if (isStale(gen)) { bailQueueItem(item, () => { _inflightCount--; _dequeueNext(); }); return; }
@@ -1401,6 +1402,15 @@ async function injectBaseModels(onBatch) {
 // Intentionally drops sha, siblings, config, library_name, private, and all other API fields
 // (~60% memory savings vs raw API). Callers: _mergeRequestResult, injectBaseModels,
 // resolveParamFromChildren, loadAuthorModels, loadChildren.
+//
+// HF API Schema Assumptions (as of 2026-06-01):
+//   Required: id (string, "author/name"), downloads, likes, lastModified, createdAt,
+//            pipeline_tag, tags (string[])
+//   Optional but heavily used: safetensors.total / gguf.total (for param inference),
+//            cardData.base_model (for hierarchy resolution)
+//   Fallbacks: missing numeric fields default to 0; missing string fields default to "".
+//   If HF changes structure (e.g. renames safetensors.total), param inference will
+//   gracefully degrade to name-based extraction and child-search deepening.
 function normalizeModel(m) {
   try {
     if (!m || typeof m !== "object" || typeof m.id !== "string" || m.id.length === 0) {
@@ -1860,6 +1870,27 @@ function walkFilterL1(node) {
  * @param {Object} node L2 TreeNode.
  * @returns {{count:number, downloads:number, likes:number}} Aggregated subtree stats.
  */
+function shouldReactivateParent(node, childCount) {
+  if (childCount === 0) return false;
+  const ref = node.modelRef;
+  if (!ref) return false;
+
+  // Blocked by L2 text filter?
+  const tf2 = RC._state.textFilters.l2Model;
+  if (tf2 && !(ref.displayNameLower || ref.id.split('/').slice(1).join('/').toLowerCase()).includes(tf2.toLowerCase())) return false;
+
+  // Blocked by untagged exclusion?
+  const tag = ref.pipeline_tag;
+  if (!tag && !activeSpecialFilters.has("include untagged")) return false;
+
+  // Blocked by param range or hide-missing-params?
+  const pb = ref.paramB != null ? ref.paramB : getParamCount(ref);
+  if (pb !== null && !isInParamRange(pb)) return false;
+  if (pb === null && _hideMissingParamEnabled) return false;
+
+  return true;
+}
+
 function walkFilterL2(node) {
   const ref = node.modelRef;
   let passes = ref ? passesTreeNodeFilters(ref) : false;
@@ -1886,18 +1917,9 @@ function walkFilterL2(node) {
   // own exclusion is NOT caused by param range, hide-missing-params, or L2 text filter.
   // This includes quant-chip-only exclusions at L2: a parent with matching children
   // should remain visible even when the parent ID itself has no quant match.
-  if (!includeSelf && childCount > 0) {
-    const tf2 = RC._state.textFilters.l2Model;
-    const textFilterBlocks = tf2 && ref && !(ref.displayNameLower || ref.id.split('/').slice(1).join('/').toLowerCase()).includes(tf2.toLowerCase());
-    const tag = ref ? ref.pipeline_tag : '';
-    const untaggedBlocks = !tag && !activeSpecialFilters.has("include untagged");
-    if (!textFilterBlocks && !untaggedBlocks) {
-      const pb = ref ? (ref.paramB != null ? ref.paramB : getParamCount(ref)) : null;
-      if (pb !== null ? isInParamRange(pb) : !_hideMissingParamEnabled) {
-        includeSelf = true;
-        node._reactivatedByChildren = true;
-      }
-    }
+  if (!includeSelf && shouldReactivateParent(node, childCount)) {
+    includeSelf = true;
+    node._reactivatedByChildren = true;
   }
 
   node.display = includeSelf;
@@ -2103,9 +2125,9 @@ function positionPopupCenter(trigger, popup) {
   const w = popup._cachedWidth;
   let left = (tRect.left - pRect.left) + (tRect.width / 2) - (w / 2);
   left = Math.max(5, Math.min(left, pRect.width - w - 5));
-  const vRect = document.documentElement.getBoundingClientRect();
+  const viewRight = window.innerWidth + window.scrollX;
   const popupRight = pRect.left + left + w + 5;
-  if (popupRight > vRect.width) left -= (popupRight - vRect.width);
+  if (popupRight > viewRight) left -= (popupRight - viewRight);
   popup.style.bottom = 'calc(100% + 6px)';
   popup.style.left = left + 'px';
 }
@@ -2164,7 +2186,7 @@ function makePopupTrigger(suffix, labelText, makeContent) {
     return /[A-Za-z0-9_-]/.test(ch) ? ch : `~${ch.codePointAt(0).toString(16)}~`;
   }).join('');
   return {
-    html: `<button type="button" id="fp-trigger-${safe}" class="filter-popup-trigger" aria-haspopup="listbox" aria-controls="fp-popup-${safe}" aria-describedby="fp-popup-${safe}" aria-expanded="false" style="color:#6e7681;font-size:0.75rem">${labelText}</button><div id="fp-popup-${safe}" class="filter-popup" role="listbox" aria-label="Hidden models preview"></div>`,
+    html: `<button type="button" id="fp-trigger-${safe}" class="filter-popup-trigger" aria-haspopup="listbox" aria-controls="fp-popup-${safe}" aria-describedby="fp-popup-${safe}" aria-expanded="false">${labelText}</button><div id="fp-popup-${safe}" class="filter-popup" role="listbox" aria-label="Hidden models preview"></div>`,
     wire: (mc) => {
       const trigger = document.getElementById(`fp-trigger-${safe}`);
       const popup = document.getElementById(`fp-popup-${safe}`);

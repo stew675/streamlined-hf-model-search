@@ -55,9 +55,18 @@ Open in browser, validate:
 
 ## Standalone Validation Tests
 
-The tree construction, filter pipeline, and sync rendering logic can be tested standalone by extracting the code section between `const _modelTree = {` and `Sort Utilities` from `streamlined-hf-model-search.html`, converting `const`/`let` to `var`, and running under Node.js. Fixed at `/tmp/phase5-test.js`. Run with `node /tmp/phase5-test.js`.
+The tree construction, filter pipeline, and sync rendering logic can be tested standalone by extracting the code section between `const _modelTree = {` and `Sort Utilities` from `streamlined-hf-model-search.html`, converting `const`/`let` to `var`, and running under Node.js. Fixed at `tests/phase5-test.js`. Run with `node tests/phase5-test.js`.
 
 **Critical mocks**: `activeTaskFilters` must be populated with test pipeline tags (e.g. `'text-generation'`) before calling `passesTreeNodeFilters`, or the `tag && !activeTaskFilters.has(tag)` check rejects all models. Runtime overrides (assignments like `matchesTaskFilter = function(t){return true;}`) must come *after* the extracted code block to shadow hoisted function declarations.
+
+## Debug Scripts
+
+`tests/default_model_debug_pull.js` — Standalone Node.js utility that simulates the app's full pipeline (initial pulls → dedicated child search → filter pipeline → L3 render grouping) for a specific base model. Useful for investigating why a model shows zero or fewer L3 children than expected.
+
+Usage:
+```
+node tests/default_model_debug_pull.js <author/model-name> [pipeline-tag]
+```
 
 ## Common Pitfalls
 
