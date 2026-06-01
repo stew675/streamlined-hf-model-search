@@ -1264,8 +1264,17 @@ function insertDerivative(m, byId) {
   if (!l2Node) {
     const baseAuthor = trueBase.split("/")[0];
     const l1 = ensureL1Node(baseAuthor);
-    insertBaseModel(l1, byId.get(trueBase), new Set([trueBase]));
-    l2Node = _modelTree.byModelId.get(trueBase);
+    const baseData = byId.get(trueBase);
+    if (baseData) {
+      insertBaseModel(l1, baseData, new Set([trueBase]));
+    } else {
+      // Base model not in database — create placeholder L2 node without modelRef
+      l2Node = makeTreeNode(2, 'basemodel', trueBase, l1);
+      l1.children.set(trueBase, l2Node);
+      _modelTree.byPath.set(l2Node.path, l2Node);
+      _modelTree.byModelId.set(trueBase, l2Node);
+    }
+    if (!l2Node) l2Node = _modelTree.byModelId.get(trueBase);
   }
 
   // L3 quant-author node
