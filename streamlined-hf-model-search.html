@@ -2558,11 +2558,12 @@ async function refreshAuthorL2Section(idx, author, container, skipRender) {
     const l1Node = _modelTree.byPath.get(author);
     if (!l1Node) return;
     const allModels = [];
+    const filtered = [];
     for (const l2Node of l1Node.children.values()) {
       if (!l2Node.modelRef || !l2Node.canonical) continue;
       allModels.push(l2Node.modelRef);
+      if (l2Node.display) filtered.push(l2Node.modelRef);
     }
-    const filtered = allModels.filter(m => passesTreeNodeFilters(m));
     if (!skipRender) {
       renderL2(idx, author, filtered, container, allModels.length, allModels);
     }
