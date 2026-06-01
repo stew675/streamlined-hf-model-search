@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.23';
+const APP_VERSION = '260601.24';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -3129,11 +3129,15 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
     const tf3 = RC._state.textFilters.l3Author;
     if (tf3 && !author.toLowerCase().includes(tf3.toLowerCase())) continue;
 
+    const childMaxLM = displayedL4.reduce((max, n) => {
+      const lm = n.modelRef?.lastModified;
+      return lm && (!max || lm > max) ? lm : max;
+    }, null);
     groups[author] = {
       author,
       count: displayedL4.length,
       totalDownloads: displayedL4.reduce((s, n) => s + (n.modelRef?.downloads || 0), 0),
-      maxLastModified: l3Node.aggMaxLastModified,
+      maxLastModified: childMaxLM || l2Node.modelRef?.lastModified || null,
       quants: displayedL4.map(n => ({
         id: n.modelRef.id,
         author,

@@ -1,5 +1,14 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.24 — Fix: L3 Updated Date Computed from Displayed Children + L2 Fallback
+
+- `renderL3` now computes `maxLastModified` directly from the `displayedL4` array
+  (matching how `count` and `totalDownloads` are derived) instead of reading the
+  stale `l3Node.aggMaxLastModified` set by `runFilterPipeline`.
+- If no displayed children have a `lastModified` date, the L2 parent model's
+  `lastModified` is used as a fallback so the "Updated" column never shows "—"
+  after dynamic loads.
+
 ### v260601.23 — Fix: L2 Expand Now Fetches When Cached Children Are All Filtered Out
 
 - Added `_childrenDeepened` flag to L2 tree nodes, set when `loadChildren` successfully

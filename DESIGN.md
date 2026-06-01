@@ -115,7 +115,7 @@ L2/L4 hidden count and popup hidden count must match exactly. `popupSource` pass
 
 `totalBeforeFilter` for L2 is now derived from `l1Node.totalChildren` (computed during `walkFilterL1` as the count of canonical L2 models), not passed as a render parameter. The filter pipeline stores all visibility decisions statically on tree nodes (`display`, `totalChildren`, `aggMaxLastModified`, and decomposed `_filter*` booleans), so renderers read state instead of re-evaluating predicates.
 
-`renderL3` and `renderL4` walk the tree directly via `_modelTree.byModelId.get(parentId)` → L2 → L3 → L4 iteration. No intermediate `getTreeChildren()` array allocation. L3 reads `aggMaxLastModified` from the tree node (computed during `walkFilterL3`) instead of re-scanning L4 `lastModified` values.
+`renderL3` and `renderL4` walk the tree directly via `_modelTree.byModelId.get(parentId)` → L2 → L3 → L4 iteration. No intermediate `getTreeChildren()` array allocation. L3 computes `maxLastModified` at render time from the `displayedL4` array (matching how `count` and `totalDownloads` are derived) rather than reading the stale `l3Node.aggMaxLastModified` set by `walkFilterL3`. If no displayed children have a date, it falls back to the L2 parent model's `lastModified`.
 
 ### Clear Cache + Generation Guard
 
