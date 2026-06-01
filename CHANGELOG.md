@@ -1,5 +1,126 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.30 — Code Review Resolution: Extract helper, byte accuracy, popup clamping, CSS cleanup, DOM cache hygiene
+
+- **Refactor:** Extracted parent-reactivation logic from `walkFilterL2` into
+  `shouldReactivateParent(l2Node, childCount)` for clarity and future testability.
+  No behavioral change.
+- **Fix:** `_totalBytesReceived` now counts true bytes via
+  `new TextEncoder().encode(text).length` instead of UTF-16 code units, making the
+  API counter payload size accurate for all character sets.
+- **Fix:** `positionPopupCenter` now accounts for `window.scrollX` when clamping the
+  popup right edge, preventing mispositioning on horizontally scrolled pages.
+- **Cleanup:** Moved popup trigger button inline styles (`color:#6e7681;font-size:0.75rem`)
+  into the existing `.filter-popup-trigger` CSS class for consistency and easier theming.
+- **Defensive:** Added `_domCache.clear()` to `resetAppState` so Clear Cache also purges
+  stale DOM references, preventing potential detached-node leaks.
+- **Docs:** Added HF API schema assumptions block above `normalizeModel` documenting
+  required/optional fields and fallback behavior if HF changes response structure.
+- **Reviewed and closed (no code change required):**
+  - *H2 — Queue Retry Promise Leak:* Current code is correct. `_inflightFetches.delete(url)`
+    lives in `.finally()` at the promise level (line 1048), which is reached for both
+    `resolve` and `reject` paths. `item.reject()` settles the promise; it does not throw.
+  - *M2 — DOM Cache Invalidation Race:* Current architecture is safe. `_domCache.clear()`
+    runs synchronously during `_doFullRender` before `_asyncDeepenPass` is scheduled via
+    rAF, and `_getSectionCached` already guards with `ref.row.isConnected`.
+- **Organization:** Moved standalone test and debug scripts into `tests/` subdirectory:
+  - `tests/phase5-test.js` (was `/tmp/phase5-test.js`) — Standalone filter pipeline test.
+  - `tests/default_model_debug_pull.js` — Node.js debug utility for specific base models.
+- **Docs:** Updated `AGENTS.md` paths and added `Debug Scripts` section documenting
+  `tests/default_model_debug_pull.js` usage.
+
+### v260601.29 — Remove: Trending count from L1 status line
+
+- Removed the `(+N from trending)` suffix from the L1 count status line.
+  Since the Trending API call is always issued first, this value was always
+  `+1000` and provided no useful information.
+- Removed `_trendingAdded` variable and all related tracking/calculation code.
+  Trending models are still fetched and ingested into the tree as before.
+
+### v260601.28 — Fix: Memory hygiene, GC pressure, and cleanup correctness
+
+- `resetAppState` (Clear Cache) now aborts all in-flight HTTP requests via
+  `_inflightControllers` instead of zeroing `_inflightCount`. Fixes negative
+  counter bug that caused unbounded concurrent request bursts after reset.
+- `_popupTimers` entries are now deleted after the hide timer fires, preventing
+  detached popup DOM elements from leaking via strong Map references.
+- `_apiTimestamps` array is fully cleared on reset instead of just resetting
+  the head pointer.
+- `RC._renderScheduled`, `RC._isRendering`, `UI._pendingUpdates`, and
+  `UI._flushScheduled` are all reset on Clear Cache, preventing stale RAF
+  callbacks from firing on a cleared tree.
+- `_fetchSeen` and `needsUpdate` are reset on Clear Cache.
+- `handleSortClick` caps `RC._state.detailSort` at 100 entries with FIFO
+  eviction, preventing unbounded growth during long exploration sessions.
+- Clear Cache button tooltip updated to warn that in-flight API calls are aborted.
+
+### v260601.27 — Fix: L3 Downloads/Models counts computed from displayed children
+
+- `renderL3` now always computes `count` and `totalDownloads` directly from the
+  `displayedL4` array instead of reading the stale `l3Node.aggCount` /
+  `aggDownloads` set by `runFilterPipeline`. Fixes missing/incorrect counts after
+  dynamic child loads. Same root cause as the `Updated` field fix in v260601.24.
+
+### v260601.26 — Perf: Eliminate O(n²) ingestion and repeated string splitting
+
+- Added `_modelTree.byModelName` reverse index (`displayName → L2Node[]`) to
+  `recomputeCanonicalForName`, replacing the full scan of all L2 nodes on every
+  base model upsert. This was the primary O(n²) bottleneck during ingestion.
+- Added `_modelTree.byModelIdLower` reverse index (`lowercase model ID → L2Node`)
+  to `ensureL2BaseNode`, replacing the linear case-insensitive fallback scan over
+  the entire `byModelId` map.
+- `normalizeModel` now precomputes `displayName` and `displayNameLower` on every
+  model ref. All render and filter hot paths that previously did
+  `m.id.split("/").slice(1).join("/")` per iteration now read the cached fields.
+  This eliminates thousands of redundant string split/join/toLowerCase operations
+  on every filter change and re-render.
+- `walkFilterL2` now writes `_orphanQuantMethods` to both the L2 tree node and the
+  underlying model ref. `passesTreeNodeFilters` reads the cached array instead of
+  re-running `getOrphanQuantMethod()` (regex + Set spread) per L2 node.
+
+### v260601.25 — Perf: Cache expensive filter computations on tree nodes
+
+- `walkFilterL2` now stores `_orphanQuantMethods` on L2 nodes. `buildL2TableHtml`
+  reads this cached array instead of re-running `getOrphanQuantMethod()` per row.
+- `walkFilterL4` now stores `_quantFilterString` on L4 nodes. `renderL3` and
+  `renderL4` read this cached string instead of re-running `getQuantFilterString()`
+  (which involves regex + tag iteration) per displayed child. Major win for models
+  with hundreds of quants.
+- `renderL3` now uses `l3Node.aggCount` / `l3Node.aggDownloads` when no L3 text
+  filter is active, avoiding redundant `reduce` passes over displayed children.
+  Only computes from scratch when `RC._state.textFilters.l3Author` is set.
+
+### v260601.24 — Fix: L3 Updated Date Computed from Displayed Children + L2 Fallback
+
+- `renderL3` now computes `maxLastModified` directly from the `displayedL4` array
+  (matching how `count` and `totalDownloads` are derived) instead of reading the
+  stale `l3Node.aggMaxLastModified` set by `runFilterPipeline`.
+- If no displayed children have a `lastModified` date, the L2 parent model's
+  `lastModified` is used as a fallback so the "Updated" column never shows "—"
+  after dynamic loads.
+
+### v260601.23 — Fix: L2 Expand Now Fetches When Cached Children Are All Filtered Out
+
+- Added `_childrenDeepened` flag to L2 tree nodes, set when `loadChildren` successfully
+  completes. Changed `setupL2Events` and `refreshAllExpanded` to check `hasDisplayedChildren`
+  instead of `hasAnyChildren`. If an L2 node has cached children but none pass current
+  filters, and `_childrenDeepened` is false, the app now fetches fresh children via
+  `loadChildren` rather than rendering an empty L3 table.
+- Fixes models like `microsoft/Phi-4-mini-instruct` where initial data pulls only found
+  1 cached child (which was filtered out by the date slider), causing first-time expand
+  to show zero L3 authors even though the dedicated HF search returns 149 children.
+- Added `default_model_debug_pull.js` — standalone Node.js debug script that simulates
+  the app's initial pulls + child search + filter pipeline for any given model ID.
+
+### v260601.22 — Fix: resolveTrueBase Chains Past Same-Author Fine-Tunes
+
+- `resolveTrueBase` now stops when it encounters a model that `isBase` considers a base
+  (same-author derivative or true base), preventing intermediate same-author fine-tunes
+  like `gemma-4-26B-A4B-it` from being skipped in favor of their parent base model.
+  Previously, quants of `google/gemma-4-26B-A4B-it` were incorrectly placed under
+  `google/gemma-4-26B-A4B` because the resolver walked through the `-it` node's
+  `cardData.base_model` chain.
+
 ### v260601.15 — Review Follow-Ups: Date Stability, A11y, Normalization Safety
 
 - Date slider conversion now uses UTC day-start arithmetic to avoid local DST/day-boundary drift while preserving relative-to-now behavior for the upper bound
@@ -111,6 +232,29 @@ Fixed `_rebuildAllFetchedMap()` not assigning to `_allFetchedById` (critical bug
 ### v260530.10 — O(1) Model Lookup Map
 
 Replaced three `_allFetched.find()` hot paths with a global `_allFetchedById` Map, rebuilt after merge/trim and injection. Also eliminated the O(n²) scan in `markLocalParents` by replacing its local Set + `.find()` with a single Map that serves as both existence check and reference lookup.
+
+### v260601.21 — Code Review Follow-Ups: Tree-Direct Render, Collision Fix, Set Comparison
+
+- `renderL3` and `renderL4` now walk the tree directly via `_modelTree.byModelId.get(parentId)` → L2 → L3 → L4 iteration; removed the intermediate `getTreeChildren()` array allocator entirely
+- `renderL3` reads `aggMaxLastModified` from the L3 tree node (computed during `walkFilterL3`) instead of re-scanning L4 `lastModified` values
+- `upsertModelIntoTree` now evicts the old L4 node from its L3 parent when a model is promoted from quant to base model, preventing `byModelId` identity collisions where L4 filter bypasses could occur
+- `_schedulePostDeepenRender` now compares the actual set of displayed canonical L2 model IDs (pre/post filter), not just the count, to catch swap-in/swap-out scenarios where the total stays the same but membership changes
+- `getQuantFilterString`: removed dead `model.q_method` branch (never produced by `normalizeModel`)
+- Unified all filter chip ARIA to `role="checkbox"` + `aria-checked` (was mixed `aria-pressed` / `aria-checked`)
+- Updated `loadChildren` comment to reflect current behavior (no ingestion-time task filter gate)
+- `walkFilterL2` now tracks `_reactivatedByChildren` on L2 nodes when parent propagation activates them; L2 rows show a tooltip on the Updated cell explaining why the model is displayed
+- `DESIGN.md` updated to match current `_schedulePostDeepenRender` set-comparison behavior and `loadChildren` documentation
+
+### v260601.20 — Static Filter Fields on Tree Nodes
+
+- Added `totalChildren`, `aggMaxLastModified`, and decomposed `_filterDate` / `_filterQuant` / `_filterTask` / `_filterUntagged` fields to `TreeNode`
+- `walkFilterL4` now stores individual filter decisions on each L4 node instead of returning a single boolean
+- `walkFilterL3` computes `aggMaxLastModified` (max `lastModified` of displayed L4 children) and `totalChildren`
+- `walkFilterL2` computes `totalChildren` as the sum of all L4 descendants under the base model
+- `walkFilterL1` computes `totalChildren` as the count of canonical L2 models
+- `renderL3`, `refreshAllExpanded` Phase 3, and L4 sort handlers now read `node.display` directly from tree state instead of re-evaluating `passesQuantRenderFilters`
+- `loadChildren` no longer drops fetched children at ingestion time based on active task filters; all children enter the tree and visibility is controlled by `runFilterPipeline`
+- Removed dead `passesL4Filters` and `passesQuantRenderFilters` functions
 
 ### v260530.09 — Initial Release
 

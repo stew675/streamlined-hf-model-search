@@ -16,7 +16,7 @@ Single-file, zero-dependency HTML/JS/CSS application that explores HuggingFace b
 
 1. **Init** (Get Results click): Resolve pipeline tags from From/To bars → fire each request independently through queue-based API manager (`_workQueue`, gated by `INFLIGHT_MAX` ≤5 concurrent + rate window ≤4 req/s) → each completion normalizes models and upserts directly into `_modelTree` via `upsertModelIntoTree` → progressive render via `_onFetchComplete`.
 2. **Canonical dedup**: `recomputeCanonicalForName()` runs during upsert for L2 base models. For duplicate model names across authors, only the highest-download author copy remains canonical.
-3. **Hierarchy resolution**: `resolveTrueBase()` follows `cardData.base_model` links already present in tree refs. Derivatives attach to L3/L4 under their true L2 ancestor; missing parents create non-canonical hidden placeholders.
+3. **Hierarchy resolution**: `resolveTrueBase()` follows `cardData.base_model` links already present in tree refs, but **stops at same-author fine-tunes** (models where `isBase()` is true) because those are treated as L2 parents in the tree. This prevents quants of `gemma-4-26B-A4B-it` from being incorrectly placed under `gemma-4-26B-A4B`. Missing parents create non-canonical hidden placeholders.
 4. **Render**: `runFilterPipeline()` applies date/param/chip/text filters and parent propagation directly on tree nodes (`display`, `agg*`) → `RenderCoordinator` builds L1 rows from visible L1 nodes.
 5. **L1 expand** → `loadAuthorModels()`: fetch 1000 author models → filter base models (including same-author fine-tunes) → render L2 → deepen unknown `paramB` in batches of 4 via individual model API.
 6. **L2 expand** → `loadChildren()`: search HF API for children by parent ID + name → match on `cardData.base_model` or quant tags. Same-author fine-tunes at L2 only; cross-author at L3 labeled "finetune". Deduplicated via `_inflightChildren`.
@@ -28,6 +28,7 @@ Single-file, zero-dependency HTML/JS/CSS application that explores HuggingFace b
 
 - `_fetchGeneration` — Monotonically increasing counter incremented by "Get Results" and "Clear Cache". All async functions capture `const gen = _fetchGeneration` at entry and bail if stale via `isStale(gen)` — prevents stale renders without AbortController (which can't guard post-fetch side effects like cache writes).
 - `_inflightChildren` — `Map<parentId, {promise, results}>` to deduplicate concurrent L3/L4 fetches; results stored directly in the entry to survive LRU cache eviction. Entries set synchronously before the first `await`; concurrent callers read results directly from the entry, bypassing evictable LRU cache.
+- `_childrenDeepened` — Flag on L2 tree nodes set by `loadChildren` after a successful fetch. Used by `setupL2Events` and `refreshAllExpanded` to distinguish "never loaded" from "loaded but all children filtered out", preventing empty L3 tables when cached children fail current filters while undiscovered children on HF might pass.
 - `_inflightFetches` — `Map<url, promise>` to deduplicate concurrent `fetchJson` calls before they reach the queue manager.
 - `_workQueue` — Array of `{ url, resolve, reject }` work items queued by `fetchJson()`. Drained by `_dequeueNext()` gated by in-flight count and rate window.
 - `_inflightCount` — Number of HTTP requests currently executing. Gated at `INFLIGHT_MAX` (5) in `_dequeueNext`.
@@ -52,7 +53,7 @@ Two-tier rendering separates progressive feedback from structural DOM rebuilds:
 - **Progressive UI Layer** (`UI` object): Provides `setStatus`, `updateCellBadge`, and `queueUpdate` for immediate visual feedback without touching table structure. Batch micro-updates via rAF-gated `_pendingUpdates` queue to avoid layout thrashing.
 - **Structural Renders** (`RenderCoordinator` / `RC`): Handles full table rebuilds via `requestRender()` → `_doFullRender()`. Synchronous-only, guarded by `_isRendering` re-entrancy barrier. RAF coalescing ensures at most 1 render/frame.
 
-`_asyncDeepenPass()` runs post-render for async deepening of expanded sections outside the synchronous pipeline. `_schedulePostDeepenRender(author, gen)` triggers a structural render only when param resolution crosses a filter boundary (detected by `_filterBoundaryChanged` comparing against `_lastFilteredCounts`).
+`_asyncDeepenPass()` runs post-render for async deepening of expanded sections outside the synchronous pipeline. `_schedulePostDeepenRender(author, gen)` triggers a structural render only when param resolution changes the set of displayed canonical L2 model IDs under the author (compares the pre/post filter sets, not just counts, to catch swap-in/swap-out scenarios where the total stays the same).
 
 `refreshAllExpanded(force, allowAsync = true)`: The `allowAsync` parameter distinguishes user-triggered refreshes (`true`, deepens via `refreshAuthorL2Section`) from structural-pass re-renders (`false`, renders L2 from cache without deepening).
 
@@ -82,7 +83,7 @@ Deterministic 3-step pipeline in `tryResolveModelParam`: name regex → parent i
 
 ### Two-Phase Search in loadChildren
 
-First try model name alone (covers quant suffixes), fall back to full parent ID. `strictNameMatch` strips known quant suffixes from candidate IDs before comparing, so Qwen2.5-7B-GGUF matches a search for "Qwen2.5-7B". Same-author fine-tunes are skipped (already shown at L2). Cross-author fine-tunes without explicit base_model are only included if they pass the active task filter and aren't already in tree model refs.
+First try model name alone (covers quant suffixes), fall back to full parent ID. `strictNameMatch` strips known quant suffixes from candidate IDs before comparing, so Qwen2.5-7B-GGUF matches a search for "Qwen2.5-7B". Same-author fine-tunes are skipped (already shown at L2). Cross-author fine-tunes without explicit base_model are included if they pass `strictNameMatch` and `isQuant`; visibility is controlled entirely by `runFilterPipeline`.
 
 ### Two-Pass Base Model Injection
 
@@ -112,9 +113,32 @@ Popup trigger/popup IDs are generated by `makePopupTrigger(suffix, ...)` which c
 
 L2/L4 hidden count and popup hidden count must match exactly. `popupSource` passed to `renderL2` must be the same array that `totalBeforeFilter` was computed from (typically `nonQuantBase`). L2 label says "hidden by current filters" and counts models removed by ALL filters, with popup showing all hidden (no sample cap). L4 says "hidden by text filter" and counts only text-filtered models, popup capped at 200 samples. This difference is intentional: L2 filters are many and layered (sliders + chips + text), while L4 only has the text filter.
 
+`totalBeforeFilter` for L2 is now derived from `l1Node.totalChildren` (computed during `walkFilterL1` as the count of canonical L2 models), not passed as a render parameter. The filter pipeline stores all visibility decisions statically on tree nodes (`display`, `totalChildren`, `aggMaxLastModified`, and decomposed `_filter*` booleans), so renderers read state instead of re-evaluating predicates.
+
+**Performance-cached fields:** The filter pipeline also pre-computes expensive string operations and stores them on nodes to avoid redundant work during render:
+- L2 nodes carry `_orphanQuantMethods` (set by `walkFilterL2`), read by `buildL2TableHtml` for orphan badge rendering and by `passesTreeNodeFilters` to avoid re-running regex matching.
+- L4 nodes carry `_quantFilterString` (set by `walkFilterL4`), read by `renderL3` and `renderL4` instead of re-running `getQuantFilterString()` (which does regex matching + tag iteration) per child.
+- L3 `count` and `totalDownloads` are always computed from the `displayedL4` array in `renderL3` (not read from `l3Node.aggCount` / `aggDownloads`) so they remain correct after dynamic child loads without requiring a full `runFilterPipeline` re-run.
+
+**Reverse indices for O(n) ingestion:** `_modelTree` maintains two additional indices beyond `byModelId`:
+- `byModelName` (Map: `displayName → L2Node[]`) — used by `recomputeCanonicalForName` to find canonical dedup candidates in O(k) where k = models with that name, replacing the previous O(n) full scan over all L2 nodes.
+- `byModelIdLower` (Map: `lowercase model ID → L2Node`) — used by `ensureL2BaseNode` for case-insensitive L2 lookup without scanning the entire `byModelId` map.
+
+**displayName precomputation:** `normalizeModel` computes `displayName` (`id.split('/').slice(1).join('/')`) and `displayNameLower` at ingestion time. All render and filter hot paths read these cached fields instead of repeatedly splitting and lowercasing model IDs.
+
+`renderL3` and `renderL4` walk the tree directly via `_modelTree.byModelId.get(parentId)` → L2 → L3 → L4 iteration. No intermediate `getTreeChildren()` array allocation. L3 computes `maxLastModified` at render time from the `displayedL4` array (matching how `count` and `totalDownloads` are derived) rather than reading the stale `l3Node.aggMaxLastModified` set by `walkFilterL3`. If no displayed children have a date, it falls back to the L2 parent model's `lastModified`.
+
 ### Clear Cache + Generation Guard
 
 Clears all caches via `resetAppState()` and increments `_fetchGeneration` to abort stale async. Unlike `applyFilters`, collapses all expanded sections (no cached data to restore from). Resets `apiCalls`, `_totalBytesReceived`, `_consecutive429s` counters together. Also resets `_dequeueScheduled` so the queue manager can resume cleanly. Rejects all queued items before truncation to prevent promise leaks.
+
+**AbortControllers on reset:** `_inflightControllers` (Map: `url → AbortController`) tracks every active HTTP request. On Clear Cache, all controllers are aborted, rejected promises are caught by `.catch`, and `_inflightCount` decrements naturally. Previously `_inflightCount` was zeroed directly, which caused negative counts when the aborted requests later decremented in their `finally` paths, breaking the `INFLIGHT_MAX` gate.
+
+**RAF / progressive state reset:** `RC._renderScheduled`, `RC._isRendering`, `UI._pendingUpdates`, `UI._flushScheduled`, and `_uiRafId` are all cleared so stale animation frames cannot fire on a destroyed tree.
+
+**Popup timer cleanup:** `_popupTimers` entries are deleted after the hide timer fires, preventing detached DOM elements from leaking via strong Map references. `hideAllPopups()` clears pending timers proactively on scroll/resize.
+
+**detailSort eviction:** `RC._state.detailSort` is capped at 100 entries (FIFO eviction in `handleSortClick`) to prevent unbounded growth during long exploration sessions.
 
 ### Forward-Reference Method Wiring
 
