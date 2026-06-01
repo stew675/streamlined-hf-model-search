@@ -315,7 +315,7 @@
     <button id="get-quick-results-btn" class="action-btn" title="Fetch top models per pipeline tag (by downloads + lastModified) — no cross-author base model injection. Faster but may miss quantizations whose parent base model is from a different author.">Get Quick Results</button>
     <button id="get-deep-results-btn" class="action-btn" title="Same as Quick, plus resolve cross-author base models referenced by quantizations via individual model API calls. Slower but surfaces more quantizations.">Get Deep Results</button>
   </div>
-  <button type="button" id="clear-cache-btn" title="Clears: in-memory param cache, inflight fetch state, tree indexes, and generation-bound tracking. Collapses expanded sections (re-expand to reload). Preserves all filters and sliders.">Clear Cache</button><span id="clear-cache-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></span>
+  <button type="button" id="clear-cache-btn" title="Aborts all in-flight API calls. Clears: in-memory param cache, inflight fetch state, tree indexes, and generation-bound tracking. Collapses expanded sections (re-expand to reload). Preserves all filters and sliders.">Clear Cache</button><span id="clear-cache-announce" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)"></span>
   <span id="api-counter-wrap" style="margin-left:auto; min-width: 100px; text-align: right;">
     <span id="api-counter" class="filter-label" style="font-variant-numeric: tabular-nums;">API Requests: 0</span>
       <div class="api-counter-tooltip" role="tooltip">Anonymous API requests are rate-limited by Hugging Face (~100 req/min). Counter includes successful and permanently-failed requests only — retries are not counted. When the counter glows amber, rate limiting is actively throttling requests.</div>
@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.27';
+const APP_VERSION = '260601.28';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -566,6 +566,7 @@ function bailQueueItem(item, cleanup) {
 const _apiTimestamps = [];
 let _apiTimestampHead = 0;
 const _inflightFetches = new Map();
+const _inflightControllers = new Map(); // url → AbortController (aborted on Clear Cache)
 
 // ── API Request Manager ──
 // Queue-based dispatcher: callers push work items via fetchJson(), the manager dequeues
@@ -990,24 +991,35 @@ function resetAppState() {
   fetchedTasks.clear();
   fetchedUntagged = false;
   _apiTimestampHead = 0;
+  _apiTimestamps.length = 0;
   _paramCache.clear();
   _inflightChildren.clear();
   _inflightFetches.clear();
   for (const item of _workQueue) { item.reject(new Error("stale generation")); }
   _workQueue.length = 0;
-  _inflightCount = 0;
   _dequeueScheduled = false;
+  for (const [url, ctrl] of _inflightControllers) { ctrl.abort(); }
+  _inflightControllers.clear();
   for (const [el, timer] of _popupTimers) { clearTimeout(timer); }
   _popupTimers.clear();
   _paramSource.clear();
   _deepeningAuthors.clear();
+  _fetchSeen = null;
+  needsUpdate = false;
   _consecutive429s = 0;
   apiCalls = 0;
   _totalBytesReceived = 0;
   _trendingAdded = 0;
   fetchedTrending = false;
   updateRateLimitUI(false);
+  RenderCoordinator._renderScheduled = false;
+  RenderCoordinator._isRendering = false;
+  RenderCoordinator._savedExpansions = null;
+  RenderCoordinator._skipL1Sort = false;
   RenderCoordinator.expandedSections.clear();
+  UI._pendingUpdates.length = 0;
+  UI._flushScheduled = false;
+  if (_uiRafId) { cancelAnimationFrame(_uiRafId); _uiRafId = null; }
   _modelTree.byPath.clear();
   _modelTree.byModelId.clear();
   _modelTree.authorByLower.clear();
@@ -1085,11 +1097,13 @@ function _dequeueNext() {
 function _dispatchFetchWithRetry(item, gen, retries) {
   if (isStale(gen)) { bailQueueItem(item, () => { _inflightCount--; _dequeueNext(); }); return; }
   const controller = new AbortController();
+  _inflightControllers.set(item.url, controller);
   const timer = setTimeout(() => controller.abort(), CONFIG.FETCH_TIMEOUT);
 
   fetch(item.url, { signal: controller.signal })
     .then(async res => {
       clearTimeout(timer);
+      _inflightControllers.delete(item.url);
       if (isStale(gen)) { bailQueueItem(item, () => { _inflightCount--; _dequeueNext(); }); return; }
       if (res.ok) {
         _consecutive429s = 0;
@@ -1133,6 +1147,7 @@ function _dispatchFetchWithRetry(item, gen, retries) {
     })
     .catch(err => {
       clearTimeout(timer);
+      _inflightControllers.delete(item.url);
       if (isStale(gen)) { bailQueueItem(item, () => { _inflightCount--; _dequeueNext(); }); return; }
       if (retries < CONFIG.MAX_RETRIES) {
         const delay = Math.min(1000 * Math.pow(2, retries), 30000);
@@ -2088,7 +2103,7 @@ function positionPopupCenter(trigger, popup) {
 function schedulePopupShow(popupEl, delay) {
   clearTimeout(_popupTimers.get(popupEl));
   _popupTimers.set(popupEl, setTimeout(() => {
-    if (!popupEl.isConnected) return;
+    if (!popupEl.isConnected) { _popupTimers.delete(popupEl); return; }
     if (popupEl._popupTrigger) positionPopupCenter(popupEl._popupTrigger, popupEl);
     popupEl.classList.add("visible");
     if (popupEl._popupTrigger) popupEl._popupTrigger.setAttribute("aria-expanded", "true");
@@ -2102,6 +2117,7 @@ function schedulePopupHide(popupEl, delay) {
     _popupScrollPositions.set(popupEl, popupEl.scrollTop);
     popupEl.classList.remove("visible");
     if (popupEl._popupTrigger) popupEl._popupTrigger.setAttribute("aria-expanded", "false");
+    _popupTimers.delete(popupEl);
   }, delay || CONFIG.POPUP_HIDE_DELAY));
 }
 // Hide all visible popups on scroll/resize to prevent stale positioning.
@@ -2231,6 +2247,10 @@ function handleSortClick(th, level, stateKey, defaultKey, refreshAfter, renderFn
   if (st.key === key) st.asc = !st.asc;
   else { st.key = key; st.asc = false; }
   RC._state.detailSort[stateKey] = st;
+  const keys = Object.keys(RC._state.detailSort);
+  if (keys.length > 100) {
+    for (let i = 0; i < keys.length - 100; i++) delete RC._state.detailSort[keys[i]];
+  }
   renderFn();
   if (refreshAfter) refreshAllExpanded();
 }

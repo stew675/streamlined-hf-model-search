@@ -1,5 +1,22 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.28 — Fix: Memory hygiene, GC pressure, and cleanup correctness
+
+- `resetAppState` (Clear Cache) now aborts all in-flight HTTP requests via
+  `_inflightControllers` instead of zeroing `_inflightCount`. Fixes negative
+  counter bug that caused unbounded concurrent request bursts after reset.
+- `_popupTimers` entries are now deleted after the hide timer fires, preventing
+  detached popup DOM elements from leaking via strong Map references.
+- `_apiTimestamps` array is fully cleared on reset instead of just resetting
+  the head pointer.
+- `RC._renderScheduled`, `RC._isRendering`, `UI._pendingUpdates`, and
+  `UI._flushScheduled` are all reset on Clear Cache, preventing stale RAF
+  callbacks from firing on a cleared tree.
+- `_fetchSeen` and `needsUpdate` are reset on Clear Cache.
+- `handleSortClick` caps `RC._state.detailSort` at 100 entries with FIFO
+  eviction, preventing unbounded growth during long exploration sessions.
+- Clear Cache button tooltip updated to warn that in-flight API calls are aborted.
+
 ### v260601.27 — Fix: L3 Downloads/Models counts computed from displayed children
 
 - `renderL3` now always computes `count` and `totalDownloads` directly from the

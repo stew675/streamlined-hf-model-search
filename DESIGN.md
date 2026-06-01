@@ -132,6 +132,14 @@ L2/L4 hidden count and popup hidden count must match exactly. `popupSource` pass
 
 Clears all caches via `resetAppState()` and increments `_fetchGeneration` to abort stale async. Unlike `applyFilters`, collapses all expanded sections (no cached data to restore from). Resets `apiCalls`, `_totalBytesReceived`, `_consecutive429s` counters together. Also resets `_dequeueScheduled` so the queue manager can resume cleanly. Rejects all queued items before truncation to prevent promise leaks.
 
+**AbortControllers on reset:** `_inflightControllers` (Map: `url → AbortController`) tracks every active HTTP request. On Clear Cache, all controllers are aborted, rejected promises are caught by `.catch`, and `_inflightCount` decrements naturally. Previously `_inflightCount` was zeroed directly, which caused negative counts when the aborted requests later decremented in their `finally` paths, breaking the `INFLIGHT_MAX` gate.
+
+**RAF / progressive state reset:** `RC._renderScheduled`, `RC._isRendering`, `UI._pendingUpdates`, `UI._flushScheduled`, and `_uiRafId` are all cleared so stale animation frames cannot fire on a destroyed tree.
+
+**Popup timer cleanup:** `_popupTimers` entries are deleted after the hide timer fires, preventing detached DOM elements from leaking via strong Map references. `hideAllPopups()` clears pending timers proactively on scroll/resize.
+
+**detailSort eviction:** `RC._state.detailSort` is capped at 100 entries (FIFO eviction in `handleSortClick`) to prevent unbounded growth during long exploration sessions.
+
 ### Forward-Reference Method Wiring
 
 RenderCoordinator (Section 2) declares `renderL1: null`, `updateArrows: null`, etc. — assigned in Section 7 after the DOM render functions exist. This violates strict top-down dependency ordering but is a deliberate pattern for concern-based section layout in single-file apps: Section 2 owns all state management, Section 6 owns the render pipeline functions, and Section 7 bridges the two. Methods are only called after `_initApp()` completes, so the forward references are safe in practice.
