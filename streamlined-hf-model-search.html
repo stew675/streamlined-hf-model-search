@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260531.07';
+const APP_VERSION = '260531.08';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -764,6 +764,37 @@ function createTreeNode(level, type, id, modelRef) {
   };
 }
 
+function getModelNode(modelId) {
+  return _modelTree.byModelId.get(modelId) || null;
+}
+
+function getModelRef(modelId) {
+  const node = getModelNode(modelId);
+  return node ? node.modelRef : null;
+}
+
+function hasModel(modelId) {
+  const ref = getModelRef(modelId);
+  return !!(ref && ref.id);
+}
+
+function forEachModelRef(cb) {
+  const seen = new Set();
+  for (const node of _modelTree.byModelId.values()) {
+    const ref = node && node.modelRef;
+    if (!ref || !ref.id || seen.has(ref.id)) continue;
+    seen.add(ref.id);
+    cb(ref, node);
+  }
+}
+
+function hasAnyModels() {
+  for (const node of _modelTree.byModelId.values()) {
+    if (node && node.modelRef && node.modelRef.id) return true;
+  }
+  return false;
+}
+
 
 // ── DOM Reference Cache ──
 const _domCache = new Map();
@@ -1089,16 +1120,18 @@ async function injectBaseModels(onBatch) {
   if (isStale(gen)) return;
   const seenAuthors = new Set();
   const seen = new Set();
-  for (const m of _modelDb.values()) {
+  forEachModelRef((m) => {
     seenAuthors.add(m.id.split("/")[0]);
     seen.add(m.id);
-  }
+  });
   const injected = [];
   const fetchQueue = new Map();
 
-  for (const m of _modelDb.values()) {
-    if (isStale(gen)) return;
-    if (!isInDateRange(m.lastModified)) continue;
+  let stale = false;
+  forEachModelRef((m) => {
+    if (stale) return;
+    if (isStale(gen)) { stale = true; return; }
+    if (!isInDateRange(m.lastModified)) return;
 
     let baseId = null;
     const cd = m.cardData;
@@ -1106,12 +1139,12 @@ async function injectBaseModels(onBatch) {
 
     if (bm) {
       baseId = getBaseModelId(cd);
-      if (!baseId) continue;
+      if (!baseId) return;
     } else {
       const idLower = m.id.toLowerCase();
-      if (!RE_Q_EXISTS.test(idLower)) continue;
+      if (!RE_Q_EXISTS.test(idLower)) return;
       baseId = inferParent(m.id, seen);
-      if (!baseId) continue;
+      if (!baseId) return;
     }
 
     if (!seen.has(baseId) && bm && !isBase(m)) {
@@ -1122,7 +1155,8 @@ async function injectBaseModels(onBatch) {
         }
       }
     }
-  }
+  });
+  if (stale) return;
 
   const baseIds = [...fetchQueue.keys()];
   let completed = 0;
@@ -1403,9 +1437,9 @@ async function tryResolveModelParam(m, gen) {
       const cachedP = _paramCache.get(candId);
       if (cachedP != null) { resolved = cachedP; source = 'parent'; break; }
 
-      // Fallback to _modelDb lookup (covers injected/visible base models)
+      // Fallback to tree lookup (covers injected/visible base models)
       if (!resolved) {
-        const parent = _modelDb.get(candId);
+        const parent = getModelRef(candId);
         if (parent && parent.paramB != null) { resolved = parent.paramB; source = 'parent'; }
       }
     }
@@ -1436,7 +1470,7 @@ async function tryResolveModelParam(m, gen) {
     const ps = source === 'name' ? 'name' : source === 'parent' ? 'parent_inherit' : (source === 'children' && childUsedApi) ? 'child_api' : 'child_name';
     _paramSource.set(m.id, ps);
 
-    const dbEntry = _modelDb.get(m.id);
+    const dbEntry = getModelRef(m.id);
     if (dbEntry) dbEntry.paramB = resolved;
   }
 
@@ -1475,14 +1509,14 @@ function _schedulePostDeepenRender(author, gen) {
 // ── Tree Construction (Refactored Architecture) ──
 //   resolveTrueBase → buildTreePass1 → buildTreePass2
 // Follows cardData.base_model chain iteratively to find the true base ancestor.
-// Stops when chain is exhausted or the next hop is not in _modelDb.
+// Stops when chain is exhausted or the next hop is not in tree model refs.
 // Max 10 hops with cycle detection via visited Set.
 function resolveTrueBase(modelId) {
   let current = modelId;
   const visited = new Set();
   for (let i = 0; i < 10; i++) {
     visited.add(current);
-    const m = _modelDb.get(current);
+    const m = getModelRef(current);
     if (!m || !m.cardData) return current;
     const baseId = getBaseModelId(m.cardData);
     if (!baseId || visited.has(baseId)) return current;
@@ -2528,7 +2562,7 @@ async function deepenBatch(idx, author, container, unknownModels, gen) {
         if (p !== null) {
           m.paramB = p;
           _paramCache.set(m.id, p);
-          const dbEntry = _modelDb.get(m.id);
+          const dbEntry = getModelRef(m.id);
           if (dbEntry) dbEntry.paramB = p;
           UI.queueUpdate(() => UI.updateCellBadge(m.id, paramBadgeHtml(m)));
         }
@@ -2791,7 +2825,7 @@ function renderL2(idx, author, models, container, totalBeforeFilter, popupSource
 // before comparing, so Qwen2.5-7B-GGUF matches a search for "Qwen2.5-7B".
 // Same-author fine-tunes are skipped (already shown at L2).
 // Cross-author fine-tunes without explicit base_model are only included if they pass the
-// active task filter and aren't already in _modelDb (avoids duplicating base models
+// active task filter and aren't already in tree model refs (avoids duplicating base models
 // that happen to be surfaced by the search endpoint).
 // No _fetchGeneration guard needed: container.isConnected catches stale renders after
 // L2 re-render. _inflightChildren dedup shares the inflight promise across concurrent
@@ -2839,7 +2873,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
           if (childHasBase || (strictNameMatch(m.id, modelName) && isQuant)) {
               if (!childHasBase) {
                 if (m.pipeline_tag && !activeTaskFilters.has(m.pipeline_tag)) continue;
-                if (_modelDb.has(m.id)) continue;
+                if (hasModel(m.id)) continue;
               }
               const qSet = new Set();
               (idLower.match(RE_Q_MATCH) || []).forEach(m => qSet.add(m));
@@ -2893,7 +2927,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
         if (cached === undefined || cached === null) {
           _paramCache.set(parentId, maxChildParam);
           _paramSource.set(parentId, 'child_name');
-          const md = _modelDb.get(parentId);
+          const md = getModelRef(parentId);
           if (md && md.paramB == null) md.paramB = maxChildParam;
         }
       }
@@ -3248,7 +3282,7 @@ const debouncedTextFilter = debounce(applyTextFilters, CONFIG.DEBOUNCE_MS);
 
 // Re-render using existing in-memory data — no API calls, no generation bump.
 function applyLocalFilters() {
-  if (_modelDb.size === 0) return;
+  if (!hasAnyModels()) return;
   const saved = new Set(RenderCoordinator.expandedSections);
   recomputeAndRender(saved);
 }
