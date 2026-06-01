@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.26';
+const APP_VERSION = '260601.27';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -3137,8 +3137,8 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
     }, null);
     groups[author] = {
       author,
-      count: tf3 ? displayedL4.length : l3Node.aggCount,
-      totalDownloads: tf3 ? displayedL4.reduce((s, n) => s + (n.modelRef?.downloads || 0), 0) : l3Node.aggDownloads,
+      count: displayedL4.length,
+      totalDownloads: displayedL4.reduce((s, n) => s + (n.modelRef?.downloads || 0), 0),
       maxLastModified: childMaxLM || l2Node.modelRef?.lastModified || null,
       quants: displayedL4.map(n => ({
         id: n.modelRef.id,

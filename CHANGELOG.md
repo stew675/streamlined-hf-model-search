@@ -1,5 +1,12 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.27 — Fix: L3 Downloads/Models counts computed from displayed children
+
+- `renderL3` now always computes `count` and `totalDownloads` directly from the
+  `displayedL4` array instead of reading the stale `l3Node.aggCount` /
+  `aggDownloads` set by `runFilterPipeline`. Fixes missing/incorrect counts after
+  dynamic child loads. Same root cause as the `Updated` field fix in v260601.24.
+
 ### v260601.26 — Perf: Eliminate O(n²) ingestion and repeated string splitting
 
 - Added `_modelTree.byModelName` reverse index (`displayName → L2Node[]`) to

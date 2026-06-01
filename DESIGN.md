@@ -118,7 +118,7 @@ L2/L4 hidden count and popup hidden count must match exactly. `popupSource` pass
 **Performance-cached fields:** The filter pipeline also pre-computes expensive string operations and stores them on nodes to avoid redundant work during render:
 - L2 nodes carry `_orphanQuantMethods` (set by `walkFilterL2`), read by `buildL2TableHtml` for orphan badge rendering and by `passesTreeNodeFilters` to avoid re-running regex matching.
 - L4 nodes carry `_quantFilterString` (set by `walkFilterL4`), read by `renderL3` and `renderL4` instead of re-running `getQuantFilterString()` (which does regex matching + tag iteration) per child.
-- L3 `aggCount` / `aggDownloads` are used by `renderL3` when no L3 text filter is active, avoiding a second reduce pass over displayed children.
+- L3 `count` and `totalDownloads` are always computed from the `displayedL4` array in `renderL3` (not read from `l3Node.aggCount` / `aggDownloads`) so they remain correct after dynamic child loads without requiring a full `runFilterPipeline` re-run.
 
 **Reverse indices for O(n) ingestion:** `_modelTree` maintains two additional indices beyond `byModelId`:
 - `byModelName` (Map: `displayName → L2Node[]`) — used by `recomputeCanonicalForName` to find canonical dedup candidates in O(k) where k = models with that name, replacing the previous O(n) full scan over all L2 nodes.
