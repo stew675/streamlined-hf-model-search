@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.30';
+const APP_VERSION = '260601.31';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -1906,9 +1906,9 @@ function walkFilterL2(node) {
     childLk += r.likes;
   }
 
-  const qMethods = ref ? getOrphanQuantMethod(ref.id) : [];
+  const qMethods = ref ? (ref._orphanQuantMethods || getOrphanQuantMethod(ref.id)) : [];
+  if (ref && !ref._orphanQuantMethods) ref._orphanQuantMethods = qMethods;
   node._orphanQuantMethods = qMethods;
-  if (ref) ref._orphanQuantMethods = qMethods;
   const selfQuantMatch = qMethods.length > 0 && qMethods.some(qm => activeFilters.has(qMethodToCategory(qm)));
   const hasOrphanQuant = qMethods.length > 0;
   let includeSelf = passes && (!hasOrphanQuant || selfQuantMatch);
@@ -1931,7 +1931,9 @@ function walkFilterL2(node) {
   node.aggCount = count;
   node.aggDownloads = dl;
   node.aggLikes = lk;
-  node.totalChildren = [...node.children.values()].reduce((s, l3) => s + l3.totalChildren, 0);
+  let totalChildren = 0;
+  for (const l3 of node.children.values()) totalChildren += l3.totalChildren;
+  node.totalChildren = totalChildren;
   return { count, downloads: dl, likes: lk };
 }
 
@@ -3171,31 +3173,39 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
   const groups = {};
   let totalDisplayedL4 = 0;
   for (const [author, l3Node] of l2Node.children) {
-    const displayedL4 = [...l3Node.children.values()].filter(n => n.display);
-    if (displayedL4.length === 0) continue;
-    totalDisplayedL4 += displayedL4.length;
+    let count = 0, dl = 0, maxLM = null;
+    const quants = [];
+    for (const n of l3Node.children.values()) {
+      if (!n.display) continue;
+      count++;
+      const ref = n.modelRef;
+      if (ref) {
+        dl += ref.downloads || 0;
+        const lm = ref.lastModified;
+        if (lm && (!maxLM || lm > maxLM)) maxLM = lm;
+        quants.push({
+          id: ref.id,
+          author,
+          downloads: ref.downloads || 0,
+          likes: ref.likes || 0,
+          lastModified: ref.lastModified || '',
+          pipeline_tag: ref.pipeline_tag || '',
+          q_method: n._quantFilterString || getQuantFilterString(ref)
+        });
+      }
+    }
+    if (count === 0) continue;
+    totalDisplayedL4 += count;
 
     const tf3 = RC._state.textFilters.l3Author;
     if (tf3 && !author.toLowerCase().includes(tf3.toLowerCase())) continue;
 
-    const childMaxLM = displayedL4.reduce((max, n) => {
-      const lm = n.modelRef?.lastModified;
-      return lm && (!max || lm > max) ? lm : max;
-    }, null);
     groups[author] = {
       author,
-      count: displayedL4.length,
-      totalDownloads: displayedL4.reduce((s, n) => s + (n.modelRef?.downloads || 0), 0),
-      maxLastModified: childMaxLM || l2Node.modelRef?.lastModified || null,
-      quants: displayedL4.map(n => ({
-        id: n.modelRef.id,
-        author,
-        downloads: n.modelRef.downloads || 0,
-        likes: n.modelRef.likes || 0,
-        lastModified: n.modelRef.lastModified || '',
-        pipeline_tag: n.modelRef.pipeline_tag || '',
-        q_method: n._quantFilterString || getQuantFilterString(n.modelRef)
-      }))
+      count,
+      totalDownloads: dl,
+      maxLastModified: maxLM || l2Node.modelRef?.lastModified || null,
+      quants
     };
   }
 
