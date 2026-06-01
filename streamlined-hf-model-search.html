@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.31';
+const APP_VERSION = '260601.32';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -2699,9 +2699,10 @@ function renderMain(authorData, skipSort) {
     const domAuthors = [];
     const rows = tbody.querySelectorAll("tr.l1-row");
     for (const r of rows) { if (r.dataset.author) domAuthors.push(r.dataset.author); }
-    const rank = new Map(domAuthors.map((a, i) => [a, i]));
-    sorted = [...authorData].sort((a, b) => {
-      const ra = rank.get(a.author), rb = rank.get(b.author);
+    const rank = {};
+    for (let i = 0; i < domAuthors.length; i++) rank[domAuthors[i]] = i;
+    sorted = authorData.slice().sort((a, b) => {
+      const ra = rank[a.author], rb = rank[b.author];
       if (ra !== undefined && rb !== undefined) return ra - rb;
       if (ra !== undefined) return -1;
       if (rb !== undefined) return 1;
@@ -2712,7 +2713,7 @@ function renderMain(authorData, skipSort) {
     const tf1 = RC._state.textFilters.l1Author;
     if (tf1) {
       const f = tf1.toLowerCase();
-      sorted = [...sorted].sort((a, b) => {
+      sorted.sort((a, b) => {
         const aMatch = a.author.toLowerCase().includes(f);
         const bMatch = b.author.toLowerCase().includes(f);
         if (aMatch && !bMatch) return -1;
@@ -2894,7 +2895,8 @@ function buildL2TableHtml(idx, author, sorted, state) {
     { key: "likes", label: "Likes", align: 'right', cls: "right", width: 80 },
     { key: "lastModified", label: "Updated", align: 'center', cls: "updated-cell", headerCls: "updated-header", width: 125 }
   ];
-  const l2Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Base Models for ${author}` } : c);
+  const l2Cols = cols.slice();
+  l2Cols[0] = Object.assign({}, cols[0], { label: `Base Models for ${author}` });
   let html = `<table aria-label="Base models for ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` style="width:${c.width}px"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
   l2Cols.forEach((c, i) => { html += thHtml(c, state, "2", i + 1); });
   html += `</tr></thead><tbody>`;
@@ -3298,19 +3300,22 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
   const l3Node = l2Node.children.get(author);
   if (!l3Node) return;
 
-  const allQuants = [...l3Node.children.values()]
-    .filter(n => n.display)
-    .map(n => ({
-      id: n.modelRef.id,
-      displayName: n.modelRef.displayName || n.modelRef.id.split('/').slice(1).join('/'),
-      displayNameLower: n.modelRef.displayNameLower || (n.modelRef.displayName || n.modelRef.id.split('/').slice(1).join('/')).toLowerCase(),
+  const allQuants = [];
+  for (const n of l3Node.children.values()) {
+    if (!n.display) continue;
+    const ref = n.modelRef;
+    allQuants.push({
+      id: ref.id,
+      displayName: ref.displayName || ref.id.split('/').slice(1).join('/'),
+      displayNameLower: ref.displayNameLower || (ref.displayName || ref.id.split('/').slice(1).join('/')).toLowerCase(),
       author,
-      downloads: n.modelRef.downloads || 0,
-      likes: n.modelRef.likes || 0,
-      lastModified: n.modelRef.lastModified || '',
-      pipeline_tag: n.modelRef.pipeline_tag || '',
-      q_method: n._quantFilterString || getQuantFilterString(n.modelRef)
-    }));
+      downloads: ref.downloads || 0,
+      likes: ref.likes || 0,
+      lastModified: ref.lastModified || '',
+      pipeline_tag: ref.pipeline_tag || '',
+      q_method: n._quantFilterString || getQuantFilterString(ref)
+    });
+  }
 
   const st = RC.getDetailSort(`l4-${parentId}-${author}`) || { key: "downloads", asc: false };
   const tf4 = RC._state.textFilters.l4Model;
@@ -3328,7 +3333,8 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
     { key: "lastModified", label: "Updated", align: 'right', cls: "right", width: 110 }
   ];
 
-  const l4Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Derivative Models for ${author}` } : c);
+  const l4Cols = cols.slice();
+  l4Cols[0] = Object.assign({}, cols[0], { label: `Derivative Models for ${author}` });
   let html = `<table aria-label="Individual quantizations for ${escapeHtml(parentId)} by ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` style="width:${c.width}px"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
   l4Cols.forEach((c, i) => { html += thHtml(c, st, "4", i + 1); });
   html += `</tr></thead><tbody>`;
