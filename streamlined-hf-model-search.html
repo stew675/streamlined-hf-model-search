@@ -365,7 +365,7 @@ const TO_TAGS = [
   // Audio
   { tag: "automatic-speech-recognition", from: ["audio"], to: "text", desc: "Transcribe speech to text" },
   { tag: "audio-classification", from: ["audio"], to: "text", desc: "Classify audio by sound type" },
-  { tag:   "voice-activity-detection", from: ["audio"], to: "audio", desc: "Detect when speech is present" },
+  { tag: "voice-activity-detection", from: ["audio"], to: "audio", desc: "Detect when speech is present" },
   { tag: "audio-to-audio", from: ["audio"], to: "audio", desc: "Transform input audio to output audio" },
   { tag: "audio-text-to-text", from: ["audio", "text"], to: "text", desc: "Generate text from speech + text prompt" },
   // Text → *
@@ -501,7 +501,6 @@ const activeTaskFilters = new Set();
 const fetchedTasks = new Set();
 let fetchedUntagged = false;
 let fetchedTrending = false;
-
 
 // ── Generation Counter & Guards ──
 // Generation counter: monotonic tick on every "Get Results" click.
@@ -740,7 +739,7 @@ const UI = {
 const _inflightChildren = new Map();
 
 
-// ── Tree Data Structures (Refactored Architecture) ──
+// ── Tree Data Structures ──
 // 4-level TreeNode hierarchy with O(1) lookup indexes.
 // The rendering pipeline is a recursive walk of display/expanded flags.
 const _modelTree = {
@@ -977,7 +976,6 @@ function upsertModelIntoTree(model) {
     _modelTree.byModelId.set(modelRef.id, l4Node);
   }
 }
-
 
 // ── DOM Reference Cache ──
 const _domCache = new Map();
@@ -1461,6 +1459,7 @@ function _clearDescendantExpanded(node) {
     _clearDescendantExpanded(child);
   }
 }
+
 // Sync tree node.expanded flags from the expandedSections persistence Set.
 function _syncExpandedFromSet() {
   for (const key of RC.expandedSections) {
@@ -1537,6 +1536,7 @@ function resolveTasks() {
     return fromMatch && toMatch;
   }).map(t => t.tag);
 }
+
 function matchesTaskFilter(pipelineTag) {
   if (!pipelineTag) return true;
   const t = TO_TAGS.find(x => x.tag === pipelineTag);
@@ -1577,6 +1577,7 @@ function extractParamFromId(id) {
   }
   return null;
 }
+
 function getParamCount(m) {
   const cached = _paramCache.get(m.id);
   if (cached !== undefined) return cached;
@@ -1590,6 +1591,7 @@ function getParamCount(m) {
   _paramCache.set(m.id, result);
   return result;
 }
+
 async function resolveParamFromChildren(modelId) {
   const bits = modelId.split('/');
   const modelName = bits[1];
@@ -1644,6 +1646,7 @@ async function resolveParamFromChildren(modelId) {
   }
   return { value: runningMax, usedApi };
 }
+
 /**
  * Try resolving a model's parameter count via name, parent inheritance, then child search.
  * @param {Object} m Normalized base-model ref being resolved.
@@ -1733,6 +1736,7 @@ function matchesFilter(qMethod) {
     return activeFilters.has(cat);
   });
 }
+
 function qMethodToCategory(method) {
   const m = method.toLowerCase();
   if (m.includes('fp4')) return 'fp4';
@@ -1740,6 +1744,7 @@ function qMethodToCategory(method) {
   if (["awq", "finetune", "gguf", "mlx", "fp4", "fp8", "safetensors"].includes(m)) return m;
   return "others";
 }
+
 // ── Post-Deepen Tree Re-evaluation ──
 function _schedulePostDeepenRender(author, gen) {
   if (isStale(gen)) return;
@@ -1796,7 +1801,6 @@ function resolveTrueBase(modelOrId) {
   return current;
 }
 
-
 // ── Tree Filter Pipeline (Refactored Architecture) ──
 //   passesTreeNodeFilters → passesL4Filters → runFilterPipeline
 // Single recursive walk over _modelTree that evaluates filters, propagates
@@ -1835,6 +1839,7 @@ function runFilterPipeline() {
     walkFilterL1(l1Node);
   }
 }
+
 function walkFilterL1(node) {
   let count = 0, dl = 0, lk = 0, totalCanonical = 0;
   for (const l2Node of node.children.values()) {
@@ -1849,6 +1854,7 @@ function walkFilterL1(node) {
   node.display = count > 0;
   node.totalChildren = totalCanonical;
 }
+
 /**
  * Evaluate one L2 node, aggregate descendants, and apply parent reactivation rules.
  * @param {Object} node L2 TreeNode.
@@ -1906,6 +1912,7 @@ function walkFilterL2(node) {
   node.totalChildren = [...node.children.values()].reduce((s, l3) => s + l3.totalChildren, 0);
   return { count, downloads: dl, likes: lk };
 }
+
 function walkFilterL3(node) {
   let count = 0, dl = 0, lk = 0, maxLM = null;
   for (const l4Node of node.children.values()) {
@@ -1923,6 +1930,7 @@ function walkFilterL3(node) {
   node.totalChildren = node.children.size;
   return { count, downloads: dl, likes: lk };
 }
+
 function walkFilterL4(node) {
   const ref = node.modelRef;
   const qStr = ref ? getQuantFilterString(ref) : 'derivative';
@@ -1947,6 +1955,7 @@ function sortCoerce(v, k) {
   if (k === "created_at" || k === "updated_at" || k.includes("Modified")) { const t = new Date(v || 0).getTime(); return t === t ? t : Infinity; }
   return String(v || "").toLowerCase();
 }
+
 function _cmp(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
 function sortRows(rows, key, asc, subKey) {
   return rows.slice().sort((x, y) => {
@@ -1977,6 +1986,7 @@ function fmtAge(d) {
   if (days < 365) return `${Math.floor(days / 30)}mo`;
   return `${(days / 365).toFixed(1)}y`;
 }
+
 // Object-lookup escape: single-pass replacement, faster than chained .replaceAll calls.
 const _htmlEsc = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(str) { return String(str).replace(/[&<>"']/g, c => _htmlEsc[c]); }
