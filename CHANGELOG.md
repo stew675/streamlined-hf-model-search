@@ -112,6 +112,18 @@ Fixed `_rebuildAllFetchedMap()` not assigning to `_allFetchedById` (critical bug
 
 Replaced three `_allFetched.find()` hot paths with a global `_allFetchedById` Map, rebuilt after merge/trim and injection. Also eliminated the O(n²) scan in `markLocalParents` by replacing its local Set + `.find()` with a single Map that serves as both existence check and reference lookup.
 
+### v260601.21 — Code Review Follow-Ups: Tree-Direct Render, Collision Fix, Set Comparison
+
+- `renderL3` and `renderL4` now walk the tree directly via `_modelTree.byModelId.get(parentId)` → L2 → L3 → L4 iteration; removed the intermediate `getTreeChildren()` array allocator entirely
+- `renderL3` reads `aggMaxLastModified` from the L3 tree node (computed during `walkFilterL3`) instead of re-scanning L4 `lastModified` values
+- `upsertModelIntoTree` now evicts the old L4 node from its L3 parent when a model is promoted from quant to base model, preventing `byModelId` identity collisions where L4 filter bypasses could occur
+- `_schedulePostDeepenRender` now compares the actual set of displayed canonical L2 model IDs (pre/post filter), not just the count, to catch swap-in/swap-out scenarios where the total stays the same but membership changes
+- `getQuantFilterString`: removed dead `model.q_method` branch (never produced by `normalizeModel`)
+- Unified all filter chip ARIA to `role="checkbox"` + `aria-checked` (was mixed `aria-pressed` / `aria-checked`)
+- Updated `loadChildren` comment to reflect current behavior (no ingestion-time task filter gate)
+- `walkFilterL2` now tracks `_reactivatedByChildren` on L2 nodes when parent propagation activates them; L2 rows show a tooltip on the Updated cell explaining why the model is displayed
+- `DESIGN.md` updated to match current `_schedulePostDeepenRender` set-comparison behavior and `loadChildren` documentation
+
 ### v260601.20 — Static Filter Fields on Tree Nodes
 
 - Added `totalChildren`, `aggMaxLastModified`, and decomposed `_filterDate` / `_filterQuant` / `_filterTask` / `_filterUntagged` fields to `TreeNode`

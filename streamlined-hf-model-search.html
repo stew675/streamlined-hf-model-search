@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.20';
+const APP_VERSION = '260601.21';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -933,6 +933,14 @@ function upsertModelIntoTree(model) {
   const modelRef = existingNode && existingNode.modelRef ? _mergeModelRef(existingNode.modelRef, model) : model;
 
   if (isBase(modelRef)) {
+    // If this model was previously ingested as an L4 quant, evict it from
+    // its old L3 parent so it doesn't shadow the new L2 node in byModelId.
+    if (existingNode && existingNode.level === 4 && existingNode.parent) {
+      existingNode.parent.children.delete(model.id);
+      if (existingNode.parent.children.size === 0 && existingNode.parent.parent) {
+        existingNode.parent.parent.children.delete(existingNode.parent.id);
+      }
+    }
     const l2Node = ensureL2BaseNode(modelRef.id, modelRef);
     l2Node.placeholder = false;
     const name = modelRef.id.split('/').slice(1).join('/');
@@ -1505,7 +1513,6 @@ function getQuantFilterString(model) {
   if (idLower.includes('fp8')) return 'fp8';
   const byId = getOrphanQuantMethod(model.id || "");
   if (byId.length > 0) return byId.join(', ');
-  if (model.q_method) return model.q_method;
   const tags = Array.isArray(model.tags) ? model.tags : [];
   if (tags.some(t => String(t).toLowerCase() === 'safetensors')) return 'safetensors';
   return 'derivative';
@@ -1727,10 +1734,20 @@ function _schedulePostDeepenRender(author, gen) {
   if (isStale(gen)) return;
   const l1Node = _modelTree.byPath.get(author);
   if (!l1Node) return;
-  const prevCount = l1Node.aggCount;
+  const prevIds = new Set();
+  for (const l2Node of l1Node.children.values()) {
+    if (l2Node.display && l2Node.canonical) prevIds.add(l2Node.id);
+  }
   walkFilterL1(l1Node);
-  if (l1Node.aggCount !== prevCount) {
+  if (prevIds.size !== l1Node.aggCount) {
     RC.requestRender(null, true);
+    return;
+  }
+  for (const l2Node of l1Node.children.values()) {
+    if (l2Node.display && l2Node.canonical && !prevIds.has(l2Node.id)) {
+      RC.requestRender(null, true);
+      return;
+    }
   }
 }
 
@@ -1828,6 +1845,7 @@ function walkFilterL2(node) {
   const ref = node.modelRef;
   let passes = ref ? passesTreeNodeFilters(ref) : false;
   node.display = false;
+  node._reactivatedByChildren = false;
   let childCount = 0;
   let childDl = 0;
   let childLk = 0;
@@ -1856,6 +1874,7 @@ function walkFilterL2(node) {
       const pb = ref ? (ref.paramB != null ? ref.paramB : getParamCount(ref)) : null;
       if (pb !== null ? isInParamRange(pb) : !_hideMissingParamEnabled) {
         includeSelf = true;
+        node._reactivatedByChildren = true;
       }
     }
   }
@@ -1902,33 +1921,6 @@ function walkFilterL4(node) {
     likes: node.display && ref ? (ref.likes || 0) : 0
   };
 }
-
-// Returns a flat array of child model objects for a given parent (L2) model ID
-// by traversing the tree (L3 → L4 nodes). Each entry matches the format that
-// renderL3 / renderL4 expect (id, author, q_method, downloads, likes, etc.).
-function getTreeChildren(parentId) {
-  const l2Node = _modelTree.byModelId.get(parentId);
-  if (!l2Node || l2Node.level !== 2) return [];
-  const out = [];
-  for (const l3Node of l2Node.children.values()) {
-    for (const l4Node of l3Node.children.values()) {
-      const ref = l4Node.modelRef;
-      if (!ref) continue;
-      const qMatch = [...new Set((ref.id || '').toLowerCase().match(RE_Q_MATCH) || [])];
-      out.push({
-        id: ref.id,
-        author: ref.id.split('/')[0],
-        downloads: ref.downloads || 0,
-        likes: ref.likes || 0,
-        lastModified: ref.lastModified || '',
-        pipeline_tag: ref.pipeline_tag || '',
-        q_method: ref.q_method || qMatch.map(q => q.toUpperCase()).join(', ') || getQuantFilterString(ref)
-      });
-    }
-  }
-  return out;
-}
-
 
 // ── Sort Utilities ──
 //   sortCoerce → _cmp → sortRows
@@ -2192,16 +2184,17 @@ function syncChipSet(selector, isActiveFn) {
     const on = isActiveFn(chip);
     chip.classList.toggle("active", on);
     chip.classList.toggle("inactive", !on);
-    chip.setAttribute("aria-pressed", String(on));
+    chip.setAttribute("aria-checked", String(on));
   });
 }
 function createFilterChip({ container, dataset, text, className, ariaPressed, onClick }) {
   const chip = document.createElement("button");
   chip.type = "button";
   chip.className = className;
+  chip.setAttribute("role", "checkbox");
   Object.entries(dataset).forEach(([k, v]) => chip.dataset[k] = v);
   chip.textContent = text;
-  chip.setAttribute("aria-pressed", String(ariaPressed));
+  chip.setAttribute("aria-checked", String(ariaPressed));
   chip.addEventListener("click", onClick);
   container.appendChild(chip);
   return chip;
@@ -2864,7 +2857,7 @@ function buildL2TableHtml(idx, author, sorted, state) {
       <td class="center" aria-colindex="3" style="font-size:0.78rem">${paramBadgeHtml(m)}</td>
       <td class="right" aria-colindex="4">${fmt(m.downloads)}</td>
       <td class="right" aria-colindex="5">${fmt(m.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
-      <td class="updated-cell" aria-colindex="6">${fmtDate(m.lastModified)} <span style="color:#6e7681;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
+      <td class="updated-cell" aria-colindex="6"${(_modelTree.byModelId.get(m.id) || {})._reactivatedByChildren ? ' title="Displayed because its children match the current filters"' : ''}>${fmtDate(m.lastModified)} <span style="color:#6e7681;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
     </tr>
     <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none" aria-rowindex="${detailRowIdx}"><td colspan="6"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
   }).join('');
@@ -2927,9 +2920,10 @@ function setupL2Events(container) {
       const modelKey = `${PREFIX_MODEL}${modelId}`;
       if (toggleSection(detailRow, tog, modelKey, `${PREFIX_GROUP}${modelId}|`)) {
         cacheDomRef(modelKey, { row: tr, detailRow, inner, toggle: tog });
-        const treeChildren = getTreeChildren(modelId);
-        if (treeChildren.length > 0) {
-          renderL3(l2Idx, modelIdx, modelId, treeChildren, inner);
+        const l2Node = _modelTree.byModelId.get(modelId);
+        const hasAnyChildren = l2Node && [...l2Node.children.values()].some(l3 => l3.children.size > 0);
+        if (hasAnyChildren) {
+          renderL3(l2Idx, modelIdx, modelId, inner);
         } else {
           inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
           loadChildren(l2Idx, modelIdx, modelId, inner);
@@ -2969,9 +2963,8 @@ function renderL2(idx, author, models, container, popupSource) {
 // full parent ID. strictNameMatch strips known quant suffixes from candidate IDs
 // before comparing, so Qwen2.5-7B-GGUF matches a search for "Qwen2.5-7B".
 // Same-author fine-tunes are skipped (already shown at L2).
-// Cross-author fine-tunes without explicit base_model are only included if they pass the
-// active task filter and aren't already in tree model refs (avoids duplicating base models
-// that happen to be surfaced by the search endpoint).
+// Cross-author fine-tunes without explicit base_model are included if they pass
+// strictNameMatch and isQuant. Visibility is controlled entirely by runFilterPipeline.
 // Generation guard is required here because this path mutates shared caches/tree after
 // async fetches. _inflightChildren dedup shares the inflight promise across concurrent
 // expansions; fallback to a fresh fetch when the promise resolves with null results
@@ -2989,8 +2982,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
     await entry.promise;
     if (isStale(gen)) return;
     if (entry.ready && container.isConnected) {
-      const treeChildren = getTreeChildren(parentId);
-      renderL3(l2Idx, modelIdx, parentId, treeChildren, container);
+      renderL3(l2Idx, modelIdx, parentId, container);
       return;
     }
     // Inflight entry resolved with no results (fetch failed) or old container was
@@ -3099,8 +3091,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       newEntry.ready = true;
       if (isStale(gen)) return;
       if (container.isConnected) {
-        const treeChildren = getTreeChildren(parentId);
-        renderL3(l2Idx, modelIdx, parentId, treeChildren, container);
+        renderL3(l2Idx, modelIdx, parentId, container);
       }
     } catch (err) {
       if (isStale(gen)) return;
@@ -3117,27 +3108,38 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
 
 // ── Level 3: Quant Author Groups ──
 //   renderL3
-function renderL3(l2Idx, modelIdx, parentId, children, container) {
-  const filtered = children.filter(c => {
-    const node = _modelTree.byModelId.get(c.id);
-    return node && node.display;
-  });
-  const groups = {};
-  filtered.forEach(c => {
-    if (!groups[c.author]) groups[c.author] = [];
-    groups[c.author].push(c);
-  });
+function renderL3(l2Idx, modelIdx, parentId, container) {
+  const l2Node = _modelTree.byModelId.get(parentId);
+  if (!l2Node || l2Node.level !== 2) return;
 
-  const groupEntries = Object.entries(groups).map(([author, quants]) => {
-    const maxLastModified = quants.reduce((max, q) => (!max || q.lastModified > max) ? q.lastModified : max, null);
-    return {
+  const groups = {};
+  let totalDisplayedL4 = 0;
+  for (const [author, l3Node] of l2Node.children) {
+    const displayedL4 = [...l3Node.children.values()].filter(n => n.display);
+    if (displayedL4.length === 0) continue;
+    totalDisplayedL4 += displayedL4.length;
+
+    const tf3 = RC._state.textFilters.l3Author;
+    if (tf3 && !author.toLowerCase().includes(tf3.toLowerCase())) continue;
+
+    groups[author] = {
       author,
-      count: quants.length,
-      totalDownloads: quants.reduce((s, q) => s + q.downloads, 0),
-      maxLastModified,
-      quants
+      count: displayedL4.length,
+      totalDownloads: displayedL4.reduce((s, n) => s + (n.modelRef?.downloads || 0), 0),
+      maxLastModified: l3Node.aggMaxLastModified,
+      quants: displayedL4.map(n => ({
+        id: n.modelRef.id,
+        author,
+        downloads: n.modelRef.downloads || 0,
+        likes: n.modelRef.likes || 0,
+        lastModified: n.modelRef.lastModified || '',
+        pipeline_tag: n.modelRef.pipeline_tag || '',
+        q_method: getQuantFilterString(n.modelRef)
+      }))
     };
-  }).filter(g => { const tf = RC._state.textFilters.l3Author; return !tf || g.author.toLowerCase().includes(tf.toLowerCase()); });
+  }
+
+  const groupEntries = Object.values(groups);
 
   const state = RC.getDetailSort(`l3-${parentId}`) || { key: "totalDownloads", asc: false };
   const sorted = sortRows(groupEntries, state.key, state.asc, state.key === "author" ? undefined : "author");
@@ -3169,7 +3171,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
     <tr class="detail-row" id="d3-${l2Idx}-${modelIdx}-${gIdx}" style="display:none" aria-rowindex="${detailRowIdx}"><td colspan="4" aria-colindex="1"><div class="detail-inner" id="i3-${l2Idx}-${modelIdx}-${gIdx}"></div></td></tr>`;
   }).join('');
   html += `</tbody></table>`;
-  html += `<div class="detail-count">${filtered.length} child model(s) from ${groupEntries.length} author(s)${filtered.length !== children.length ? ` (filtered from ${children.length})` : ''}</div>`;
+  html += `<div class="detail-count">${totalDisplayedL4} child model(s) from ${groupEntries.length} author(s)</div>`;
   container.innerHTML = html;
   container.dataset.l3Parent = parentId;
 
@@ -3186,9 +3188,8 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
         const firstRow = this.querySelector("tr.l3-row");
         const l2Idx = firstRow ? parseInt(firstRow.dataset.l3L2) : 0;
         const modelIdx = firstRow ? parseInt(firstRow.dataset.l3ModelIdx) : 0;
-        const children = getTreeChildren(parentId);
         handleSortClick(th, "3", `l3-${parentId}`, "totalDownloads", true, () => {
-          renderL3(l2Idx, modelIdx, parentId, children, this);
+          renderL3(l2Idx, modelIdx, parentId, this);
         });
         return;
       }
@@ -3205,13 +3206,7 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
         const groupKey = `${PREFIX_GROUP}${parentId}|${author}`;
         if (toggleSection(detailRow, tog, groupKey)) {
           cacheDomRef(groupKey, { row: tr, detailRow, inner, toggle: tog });
-          const allChildren = getTreeChildren(parentId);
-          const quants = allChildren.filter(c => {
-            if (c.author !== author) return false;
-            const node = _modelTree.byModelId.get(c.id);
-            return node && node.display;
-          });
-          renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, inner);
+          renderL4(l2Idx, modelIdx, gIdx, parentId, author, inner);
           tog?.focus();
         }
       }
@@ -3227,11 +3222,29 @@ function renderL3(l2Idx, modelIdx, parentId, children, container) {
 
 // ── Level 4: Individual Quants ──
 //   renderL4
-function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
+function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
+  const l2Node = _modelTree.byModelId.get(parentId);
+  if (!l2Node || l2Node.level !== 2) return;
+  const l3Node = l2Node.children.get(author);
+  if (!l3Node) return;
+
+  const allQuants = [...l3Node.children.values()]
+    .filter(n => n.display)
+    .map(n => ({
+      id: n.modelRef.id,
+      author,
+      downloads: n.modelRef.downloads || 0,
+      likes: n.modelRef.likes || 0,
+      lastModified: n.modelRef.lastModified || '',
+      pipeline_tag: n.modelRef.pipeline_tag || '',
+      q_method: getQuantFilterString(n.modelRef)
+    }));
+
   const st = RC.getDetailSort(`l4-${parentId}-${author}`) || { key: "downloads", asc: false };
-  // quants is the pre-text-filter array (from cache or state). Create a filtered copy for display.
   const tf4 = RC._state.textFilters.l4Model;
-  const displayed = tf4 ? quants.filter(q => q.id.split("/").slice(1).join("/").toLowerCase().includes(tf4.toLowerCase())) : quants;
+  const displayed = tf4 ? allQuants.filter(q =>
+    q.id.split("/").slice(1).join("/").toLowerCase().includes(tf4.toLowerCase())
+  ) : allQuants;
   const sorted = sortRows(displayed, st.key, st.asc, st.key === "id" ? undefined : "id");
 
   const cols = [
@@ -3260,7 +3273,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
     </tr>`;
   }).join('');
 
-  const hiddenL4 = quants.length - displayed.length;
+  const hiddenL4 = allQuants.length - displayed.length;
   let pt = null;
   if (hiddenL4 > 0) {
     pt = makePopupTrigger(`l4-${parentId}|${author}`, `+${hiddenL4} hidden by text filter`, null);
@@ -3272,7 +3285,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
   const l4Key = `${parentId}|${author}`;
   container.dataset.l4Key = l4Key;
 
-  if (pt) pt.wire((p) => renderFilteredPopup(p, getFilteredOutModels(quants, new Set(displayed.map(q => q.id)), CONFIG.POPUP_MAX_SAMPLES_L4)));
+  if (pt) pt.wire((p) => renderFilteredPopup(p, getFilteredOutModels(allQuants, new Set(displayed.map(q => q.id)), CONFIG.POPUP_MAX_SAMPLES_L4)));
 
   if (!container._delegatedL4) {
     container._delegatedL4 = true;
@@ -3286,19 +3299,12 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, container) {
       const pipeIdx = l4Key.indexOf('|');
       const parentId = l4Key.slice(0, pipeIdx);
       const author = l4Key.slice(pipeIdx + 1);
-      // Derive l2Idx/modelIdx/gIdx from the parent L3 row (sibling of the detail row)
       const parentRow = this.parentNode?.parentNode?.previousElementSibling;
       const l2Idx = parentRow ? parseInt(parentRow.dataset.l3L2) : 0;
       const modelIdx = parentRow ? parseInt(parentRow.dataset.l3ModelIdx) : 0;
       const gIdx = parentRow ? parseInt(parentRow.dataset.l3Idx) : 0;
-      const allChildren = getTreeChildren(parentId);
-      const quants = allChildren.filter(c => {
-        if (c.author !== author) return false;
-        const node = _modelTree.byModelId.get(c.id);
-        return node && node.display;
-      });
       handleSortClick(th, "4", `l4-${parentId}-${author}`, "downloads", false, () => {
-        renderL4(l2Idx, modelIdx, gIdx, parentId, author, quants, this);
+        renderL4(l2Idx, modelIdx, gIdx, parentId, author, this);
       });
     });
     container.addEventListener("keydown", function(e) {
@@ -3384,9 +3390,10 @@ function refreshAllExpanded(force, allowAsync = true) {
       if (!detailRow || detailRow.style.display !== "none") continue;
       detailRow.style.display = "";
       if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
-      const children = getTreeChildren(modelId);
-      if (children.length > 0) {
-        renderL3(l2Idx, modelIdx, modelId, children, inner);
+      const l2NodeRef = _modelTree.byModelId.get(modelId);
+      const hasAnyChildren = l2NodeRef && [...l2NodeRef.children.values()].some(l3 => l3.children.size > 0);
+      if (hasAnyChildren) {
+        renderL3(l2Idx, modelIdx, modelId, inner);
       } else {
         inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
         loadChildren(l2Idx, modelIdx, modelId, inner);
@@ -3424,13 +3431,7 @@ function refreshAllExpanded(force, allowAsync = true) {
         if (!detailRow || detailRow.style.display !== "none") continue;
         detailRow.style.display = "";
         if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
-        const allChildren = getTreeChildren(modelId);
-        const quants = allChildren.filter(c => {
-          if (c.author !== groupAuthor) return false;
-          const node = _modelTree.byModelId.get(c.id);
-          return node && node.display;
-        });
-        renderL4(l2Idx, modelIdx, gIdx, modelId, groupAuthor, quants, inner);
+        renderL4(l2Idx, modelIdx, gIdx, modelId, groupAuthor, inner);
       }
     }
   }
