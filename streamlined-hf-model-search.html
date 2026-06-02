@@ -327,8 +327,8 @@
   <span class="fiw"><input type="text" id="l1-author-filter" placeholder="All authors (pinned top)" title="Pins matching authors to the top of L1; does not hide non-matching authors." autocomplete="off"><button type="button" class="fic" data-for="l1-author-filter" aria-label="Clear">✕</button></span>
   <label for="l2-model-filter"><b>L2 Model ID:</b></label>
   <span class="fiw"><input type="text" id="l2-model-filter" placeholder="Any base model" title="Filters base models across all authors. L1 counts will update to reflect only matching models." autocomplete="off"><button type="button" class="fic" data-for="l2-model-filter" aria-label="Clear">✕</button></span>
-  <label for="l3-author-filter"><b>L3 Author:</b></label>
-  <span class="fiw"><input type="text" id="l3-author-filter" placeholder="Any quant author" title="Filters quant authors within already-expanded L2 sections." autocomplete="off"><button type="button" class="fic" data-for="l3-author-filter" aria-label="Clear">✕</button></span>
+  <label for="l3-author-filter" title="Filters quant authors across all base models using currently cached data. L1/L2 counts update accordingly. Does not fetch additional models from Hugging Face."><b>L3 Author:</b></label>
+  <span class="fiw"><input type="text" id="l3-author-filter" placeholder="Any quant author" title="Filters quant authors across all base models using currently cached data. L1/L2 counts update accordingly. Does not fetch additional models from Hugging Face." autocomplete="off"><button type="button" class="fic" data-for="l3-author-filter" aria-label="Clear">✕</button></span>
   <label for="l4-model-filter"><b>L4 Model ID:</b></label>
   <span class="fiw"><input type="text" id="l4-model-filter" placeholder="Any quant model" title="Filters individual quant models within already-expanded L3 sections." autocomplete="off"><button type="button" class="fic" data-for="l4-model-filter" aria-label="Clear">✕</button></span>
 </div>
@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260602.02';
+const APP_VERSION = '260602.04';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -1925,6 +1925,21 @@ function walkFilterL2(node) {
     node._reactivatedByChildren = true;
   }
 
+  // When the L3 author filter is active, suppress an L2 row's self-display
+  // if it has no matching L3 children. This keeps the filter behavior consistent
+  // with how the L2 model filter works: only show rows that contribute to the
+  // user's filtered view.
+  // Exception: if the filter text also matches the L1 author name, keep the base
+  // model visible (additive match). Authors like DavidAU are both base-model and
+  // derivative authors; users typing their name should see both their own base
+  // models and their derivative models under others.
+  const tf3 = RC._state.textFilters.l3Author;
+  const l1Author = node.parent?.id;
+  const l1Matches = tf3 && l1Author && l1Author.toLowerCase().includes(tf3.toLowerCase());
+  if (includeSelf && tf3 && childCount === 0 && !l1Matches) {
+    includeSelf = false;
+  }
+
   node.display = includeSelf;
   const selfDl = includeSelf && ref ? (ref.downloads || 0) : 0;
   const selfLk = includeSelf && ref ? (ref.likes || 0) : 0;
@@ -1941,6 +1956,15 @@ function walkFilterL2(node) {
 }
 
 function walkFilterL3(node) {
+  const tf3 = RC._state.textFilters.l3Author;
+  if (tf3 && !node.id.toLowerCase().includes(tf3.toLowerCase())) {
+    node.display = false;
+    node.aggCount = 0;
+    node.aggDownloads = 0;
+    node.aggLikes = 0;
+    node.aggMaxLastModified = null;
+    return { count: 0, downloads: 0, likes: 0 };
+  }
   let count = 0, dl = 0, lk = 0, maxLM = null;
   for (const l4Node of node.children.values()) {
     const r = walkFilterL4(l4Node);
@@ -1979,7 +2003,7 @@ function walkFilterL4(node) {
 const _NUMERIC_SORT_KEYS = new Set(["downloads", "likes", "totalDownloads", "totalLikes", "count", "paramB"]);
 function sortCoerce(v, k) {
   if (_NUMERIC_SORT_KEYS.has(k)) return Number(v);
-  if (k === "created_at" || k === "updated_at" || k.includes("Modified")) { const t = new Date(v || 0).getTime(); return Number.isNaN(t) ? Infinity : t; }
+  if (k.includes("Modified")) { const t = new Date(v || 0).getTime(); return Number.isNaN(t) ? Infinity : t; }
   return String(v || "").toLowerCase();
 }
 
@@ -3082,32 +3106,13 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
               if (!childHasBase) {
                 if (hasModel(m.id)) continue;
               }
-              // All matched quant methods from id/tags are joined into a single
-              // string stored in q_method. A model with multiple quant tags
-              // (e.g. "gguf, awq") appears once at L3 (grouped by author) and
-              // shows all methods in the L4 badge column.
-              const qSet = new Set();
-              (idLower.match(RE_Q_MATCH) || []).forEach(m => qSet.add(m));
-              (tagsStr.match(RE_Q_MATCH) || []).forEach(m => qSet.add(m));
-              const qMethods = [...qSet];
-              let qMethod;
-              if (childHasBase) {
-                qMethod = qMethods.length ? "finetune, " + qMethods.join(", ") : "finetune";
-              } else {
-                qMethod = qMethods.length ? qMethods.join(", ") : (tagsStr.includes("safetensors") ? "safetensors" : "derivative");
-              }
               results.push({
-              id: m.id,
-              author: m.id.split("/")[0],
-              downloads: m.downloads || 0,
-              likes: m.likes || 0,
-              created_at: m.createdAt || "",
-              updated_at: m.lastModified || "",
-              lastModified: m.lastModified || "",
-              pipeline_tag: m.pipeline_tag || "",
-              q_method: qMethod,
-              tags: m.tags || []
-            });
+                id: m.id,
+                downloads: m.downloads || 0,
+                likes: m.likes || 0,
+                lastModified: m.lastModified || "",
+                pipeline_tag: m.pipeline_tag || ""
+              });
           }
         }
       };
@@ -3153,7 +3158,6 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
           likes: c.likes || 0,
           lastModified: c.lastModified || '',
           pipeline_tag: c.pipeline_tag || '',
-          q_method: c.q_method,
           cardData: { base_model: parentId }
         });
       }
@@ -3186,8 +3190,8 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
   const groups = {};
   let totalDisplayedL4 = 0;
   for (const [author, l3Node] of l2Node.children) {
+    if (!l3Node.display) continue;
     let count = 0, dl = 0, maxLM = null;
-    const quants = [];
     for (const n of l3Node.children.values()) {
       if (!n.display) continue;
       count++;
@@ -3196,20 +3200,13 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
         dl += ref.downloads || 0;
         const lm = ref.lastModified;
         if (lm && (!maxLM || lm > maxLM)) maxLM = lm;
-        quants.push({
-          id: ref.id,
-          author,
-          downloads: ref.downloads || 0,
-          likes: ref.likes || 0,
-          lastModified: ref.lastModified || '',
-          pipeline_tag: ref.pipeline_tag || '',
-          q_method: n._quantFilterString || getQuantFilterString(ref)
-        });
       }
     }
-    if (count === 0) continue;
     totalDisplayedL4 += count;
 
+    // Safety net: freshly loaded L3 nodes from loadChildren may not have
+    // been re-evaluated by runFilterPipeline yet. The local tf3 check
+    // prevents temporary leakage of non-matching authors.
     const tf3 = RC._state.textFilters.l3Author;
     if (tf3 && !author.toLowerCase().includes(tf3.toLowerCase())) continue;
 
@@ -3218,8 +3215,7 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
       author,
       count,
       totalDownloads: dl,
-      maxLastModified: maxLM || l2Node.modelRef?.lastModified || null,
-      quants
+      maxLastModified: maxLM || l2Node.modelRef?.lastModified || null
     };
   }
 
