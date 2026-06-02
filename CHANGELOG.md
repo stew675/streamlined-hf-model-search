@@ -1,5 +1,22 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.41 — Code review resolution: 5 fixes across CSS, deepening, sort, L4 signature, docs
+
+- **Fix:** `_deepeningAuthors` is now cleared in `applyFilters` after the generation bump,
+  preventing stale gen-prefixed keys from accumulating when `finally` blocks don't fire
+  promptly (e.g., backgrounded tab during deepening).
+- **Cleanup:** Removed unused `l2Idx`, `modelIdx`, `gIdx` parameters from `renderL4` and
+  all call sites. The L4 sort handler no longer performs fragile DOM traversal
+  (`this.parentNode?.parentNode?.previousElementSibling`) to derive these dead indices.
+- **Docs:** Added known-limitation doc comment to `resolveTrueBase` documenting that
+  progressive ingestion may stop at an intermediate ancestor when the true base model
+  hasn't been fetched yet — self-heals as more data arrives.
+- **Style:** Popup sort comparator now uses `_cmp(va, vb)` instead of raw `va - vb`
+  subtraction, consistent with `sortRows` and the rest of the codebase.
+- **CSS:** Replaced `table-layout: auto !important` on `.filter-popup table` with
+  `#main-table .filter-popup table { table-layout: auto }` — more specific selector
+  eliminates the `!important` override.
+
 ### v260601.40 — Fix param badge color tied to Infer Missing Params chip state
 
 - **Fix:** `paramBadgeHtml` no longer checks `_derivedParamEnabled` when

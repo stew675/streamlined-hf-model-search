@@ -227,7 +227,7 @@
     background: #1c2129; border: 1px solid #30363d; border-radius: 6px; padding: 0;
     box-shadow: 0 4px 16px rgba(0,0,0,0.6); max-height: 300px; overflow-y: auto; width: 65%; min-width: 320px; }
   .filter-popup.visible { display: block; }
-  .filter-popup table { width: 100%; font-size: 0.75rem; border-collapse: collapse; margin: 0; table-layout: auto !important; }
+  #main-table .filter-popup table { width: 100%; font-size: 0.75rem; border-collapse: collapse; margin: 0; table-layout: auto; }
   .filter-popup th { background: #161b22; padding: 4px 8px; font-size: 0.7rem; cursor: pointer; position: sticky; top: 20px; border-bottom: 1px solid #30363d; white-space: nowrap; z-index: 1; user-select: none; min-height: 24px; }
   .filter-popup th:hover { background: #1c2129; }
   .filter-popup td { padding: 3px 8px; border-bottom: none !important; font-size: 0.75rem; border-right: 1px solid #21262d !important; }
@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.40';
+const APP_VERSION = '260601.41';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -1228,6 +1228,7 @@ function applyFilters(force, deep) {
   needsUpdate = false;
   const savedExpansions = new Set(RC.expandedSections);
   _fetchGeneration++;
+  _deepeningAuthors.clear();
   const gen = _fetchGeneration;
   const quickBtn = document.getElementById("get-quick-results-btn");
   const deepBtn = document.getElementById("get-deep-results-btn");
@@ -1784,6 +1785,9 @@ function _schedulePostDeepenRender(author, gen) {
 // Max 10 hops with cycle detection via visited Set.
 /**
  * Resolve the deepest known base-model ancestor for a model ID.
+ * Known limitation: during progressive ingestion, may stop at an intermediate
+ * ancestor when the true base model hasn't been fetched yet. Hierarchy self-
+ * corrects as more data arrives (deep mode, author expansion).
  * @param {string|Object} modelOrId Model ID string or normalized model object.
  * @returns {string} Resolved base model ID (or input ID when unresolved).
  */
@@ -2059,7 +2063,7 @@ function renderFilteredPopup(container, result) {
     if (sp.key === 'paramB') {
       const va = a.paramB != null ? a.paramB : -1;
       const vb = b.paramB != null ? b.paramB : -1;
-      cmp = va - vb;
+      cmp = _cmp(va, vb);
     } else if (sp.key === 'updated') {
       cmp = (a.updated || '').localeCompare(b.updated || '');
     } else if (sp.key === 'id') {
@@ -3295,7 +3299,7 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
         const groupKey = `${PREFIX_GROUP}${parentId}|${author}`;
         if (toggleSection(detailRow, tog, groupKey)) {
           cacheDomRef(groupKey, { row: tr, detailRow, inner, toggle: tog });
-          renderL4(l2Idx, modelIdx, gIdx, parentId, author, inner);
+          renderL4(parentId, author, inner);
           tog?.focus();
         }
       }
@@ -3311,7 +3315,7 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
 
 // ── Level 4: Individual Quants ──
 //   renderL4
-function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
+function renderL4(parentId, author, container) {
   const l2Node = _modelTree.byModelId.get(parentId);
   if (!l2Node || l2Node.level !== 2) return;
   const l3Node = l2Node.children.get(author);
@@ -3394,12 +3398,8 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
       const pipeIdx = l4Key.indexOf('|');
       const parentId = l4Key.slice(0, pipeIdx);
       const author = l4Key.slice(pipeIdx + 1);
-      const parentRow = this.parentNode?.parentNode?.previousElementSibling;
-      const l2Idx = parentRow ? parseInt(parentRow.dataset.l3L2) : 0;
-      const modelIdx = parentRow ? parseInt(parentRow.dataset.l3ModelIdx) : 0;
-      const gIdx = parentRow ? parseInt(parentRow.dataset.l3Idx) : 0;
       handleSortClick(th, "4", `l4-${parentId}-${author}`, "downloads", false, () => {
-        renderL4(l2Idx, modelIdx, gIdx, parentId, author, this);
+        renderL4(parentId, author, this);
       });
     });
     container.addEventListener("keydown", function(e) {
@@ -3522,7 +3522,7 @@ function _refreshAuthorSubtree(l1Node, author, force, allowAsync) {
       if (!gDetailRow || gDetailRow.style.display !== "none") continue;
       gDetailRow.style.display = "";
       if (gTog) { gTog.classList.add("open"); gTog.setAttribute("aria-expanded", "true"); }
-      renderL4(l2Idx, modelIdx, gIdx, modelId, groupAuthor, gInner);
+      renderL4(modelId, groupAuthor, gInner);
     }
   }
 }
