@@ -1,5 +1,12 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.40 — Fix param badge color tied to Infer Missing Params chip state
+
+- **Fix:** `paramBadgeHtml` no longer checks `_derivedParamEnabled` when
+  deciding between red (failed inference) and orange (never attempted)
+  emdash color. The color now depends solely on `m._inferredAttempted`,
+  which is persisted across chip toggles and L2 close/re-open cycles.
+
 ### v260601.39 — Targeted re-render on sort
 
 - **Perf:** `refreshAllExpanded` now accepts an optional `authorFilter`

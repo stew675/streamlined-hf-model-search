@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.39';
+const APP_VERSION = '260601.40';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -2598,7 +2598,7 @@ function applyBarLogic(option, options, activeSet) {
 // ── Param Badge System ──
 function paramBadgeHtml(m) {
   if (m.paramB == null) {
-    if (_derivedParamEnabled && m._inferredAttempted) {
+    if (m._inferredAttempted) {
       return '<span class="no-param" title="Infer Missing Params attempted but could not resolve">—</span>';
     }
     return '<span class="no-param-maybe" title="No parameter count — enable Infer Missing Params to attempt resolution">—</span>';
