@@ -1,9 +1,7 @@
 var _modelTree = {
   root: null,       // TreeNode (level-0 synthetic root)
   byPath: new Map(),// string → TreeNode (O(1) path lookup)
-  byModelId: new Map(), // string → TreeNode (L2 or L4 node)
-  authorByLower: new Map(), // lowercase author string → L1 TreeNode
-  byModelIdLower: new Map(), // lowercase model ID → L2 TreeNode (case-insensitive lookup)
+  byModelId: new Map(), // lowercase model ID → TreeNode (L2 or L4 node)
   byModelName: new Map() // display name → L2 TreeNode[] (canonical dedup candidates)
 };
 function createTreeNode(level, type, id, modelRef) {
@@ -30,7 +28,7 @@ function createTreeNode(level, type, id, modelRef) {
 }
 
 function getModelNode(modelId) {
-  return _modelTree.byModelId.get(modelId) || null;
+  return _modelTree.byModelId.get((modelId || '').toLowerCase()) || null;
 }
 
 function getModelRef(modelId) {
@@ -70,13 +68,11 @@ function ensureTreeRoot() {
 
 function ensureL1AuthorNode(author) {
   ensureTreeRoot();
-  var key = (author || '').toLowerCase();
-  var node = _modelTree.authorByLower.get(key);
+  var node = _modelTree.byPath.get(author);
   if (!node) {
     node = createTreeNode(1, 'author', author);
     node.parent = _modelTree.root;
     _modelTree.root.children.set(author, node);
-    _modelTree.authorByLower.set(key, node);
   }
   _modelTree.byPath.set(author, node);
   return node;
@@ -96,9 +92,6 @@ function ensureL2BaseNode(baseId, modelRefOrStub) {
   var author = baseId.split('/')[0];
   var l1Node = ensureL1AuthorNode(author);
   var l2Node = getModelNode(baseId);
-  if (!l2Node) {
-    l2Node = _modelTree.byModelIdLower.get(baseId.toLowerCase()) || null;
-  }
   if (l2Node && l2Node.level === 2) {
     if (modelRefOrStub) {
       l2Node.modelRef = _mergeModelRef(l2Node.modelRef, modelRefOrStub);
@@ -114,8 +107,7 @@ function ensureL2BaseNode(baseId, modelRefOrStub) {
       l2Node.parent = l1Node;
     }
     _modelTree.byPath.set(baseId, l2Node);
-    _modelTree.byModelId.set(baseId, l2Node);
-    _modelTree.byModelIdLower.set(baseId.toLowerCase(), l2Node);
+    _modelTree.byModelId.set(baseId.toLowerCase(), l2Node);
     return l2Node;
   }
 
@@ -128,8 +120,7 @@ function ensureL2BaseNode(baseId, modelRefOrStub) {
   l1Node.children.set(baseId, l2Node);
   l2Node.parent = l1Node;
   _modelTree.byPath.set(baseId, l2Node);
-  _modelTree.byModelId.set(baseId, l2Node);
-  _modelTree.byModelIdLower.set(baseId.toLowerCase(), l2Node);
+  _modelTree.byModelId.set(baseId.toLowerCase(), l2Node);
   var name = baseId.split('/').slice(1).join('/');
   var arr = _modelTree.byModelName.get(name);
   if (arr) arr.push(l2Node); else _modelTree.byModelName.set(name, [l2Node]);
@@ -170,13 +161,13 @@ function attachOrUpdateL4Node(l3Node, modelRef) {
   var l4Node = l3Node.children.get(modelRef.id);
   if (l4Node) {
     l4Node.modelRef = _mergeModelRef(l4Node.modelRef, modelRef);
-    _modelTree.byModelId.set(modelRef.id, l4Node);
+    _modelTree.byModelId.set(modelRef.id.toLowerCase(), l4Node);
     return l4Node;
   }
   l4Node = createTreeNode(4, 'quant', modelRef.id, modelRef);
   l4Node.parent = l3Node;
   l3Node.children.set(modelRef.id, l4Node);
-  _modelTree.byModelId.set(modelRef.id, l4Node);
+  _modelTree.byModelId.set(modelRef.id.toLowerCase(), l4Node);
   return l4Node;
 }
 
@@ -188,8 +179,6 @@ function upsertModelIntoTree(model) {
   var modelRef = existingNode && existingNode.modelRef ? _mergeModelRef(existingNode.modelRef, model) : model;
 
   if (isBase(modelRef)) {
-    // If this model was previously ingested as an L4 quant, evict it from
-    // its old L3 parent so it doesn't shadow the new L2 node in byModelId.
     if (existingNode && existingNode.level === 4 && existingNode.parent) {
       existingNode.parent.children.delete(model.id);
       if (existingNode.parent.children.size === 0 && existingNode.parent.parent) {
@@ -199,15 +188,12 @@ function upsertModelIntoTree(model) {
     var l2Node = ensureL2BaseNode(modelRef.id, modelRef);
     l2Node.placeholder = false;
     recomputeCanonicalForName(modelRef.displayName || modelRef.id.split('/').slice(1).join('/'));
-    _modelTree.byModelId.set(modelRef.id, l2Node);
+    _modelTree.byModelId.set(modelRef.id.toLowerCase(), l2Node);
     return;
   }
 
   var trueBase = resolveTrueBase(modelRef);
   var l2Node = getModelNode(trueBase);
-  if (!l2Node) {
-    l2Node = _modelTree.byModelIdLower.get(trueBase.toLowerCase()) || null;
-  }
   if (!l2Node || l2Node.level !== 2) {
     var paramFromName = extractParamFromId(trueBase);
     var stubRef = paramFromName !== null ?
@@ -227,9 +213,9 @@ function upsertModelIntoTree(model) {
     if (existingNode.parent) existingNode.parent.children.delete(modelRef.id);
     l3Node.children.set(modelRef.id, existingNode);
     existingNode.parent = l3Node;
-    _modelTree.byModelId.set(modelRef.id, existingNode);
+    _modelTree.byModelId.set(modelRef.id.toLowerCase(), existingNode);
   } else {
-    _modelTree.byModelId.set(modelRef.id, l4Node);
+    _modelTree.byModelId.set(modelRef.id.toLowerCase(), l4Node);
   }
 }
 
@@ -275,8 +261,6 @@ function resetAppState() {
   if (_uiRafId) { cancelAnimationFrame(_uiRafId); _uiRafId = null; }
   _modelTree.byPath.clear();
   _modelTree.byModelId.clear();
-  _modelTree.authorByLower.clear();
-  _modelTree.byModelIdLower.clear();
   _modelTree.byModelName.clear();
   _modelTree.root = null;
 }
@@ -695,7 +679,7 @@ function _resolveExpandKey(key) {
   }
   if (key.startsWith(PREFIX_MODEL)) {
     var modelId = key.slice(PREFIX_MODEL.length);
-    return _modelTree.byModelId.get(modelId) || null;
+    return getModelNode(modelId) || null;
   }
   if (key.startsWith(PREFIX_GROUP)) {
     var rest = key.slice(PREFIX_GROUP.length);
@@ -703,7 +687,7 @@ function _resolveExpandKey(key) {
     if (pipeIdx === -1) return null;
     var modelId = rest.slice(0, pipeIdx);
     var author = rest.slice(pipeIdx + 1);
-    var l2 = _modelTree.byModelId.get(modelId);
+    var l2 = getModelNode(modelId);
     if (!l2) return null;
     return l2.children.get(author) || null;
   }
@@ -1327,7 +1311,7 @@ assert(l2c2.display === true, 'Canonical should be visible');
 
 console.log('PASS: Canonical dedup with byModelName index');
 
-// ── Test 4: byModelIdLower case-insensitive lookup ──
+// ── Test 4: byModelId case-insensitive lookup ──
 ensureTreeRoot();
 var l1d = ensureL1AuthorNode('Test');
 var l2d = ensureL2BaseNode('Test/Case-Model', {
@@ -1336,10 +1320,10 @@ var l2d = ensureL2BaseNode('Test/Case-Model', {
   paramB: 8, tags: []
 });
 
-var found = _modelTree.byModelIdLower.get('test/case-model');
-assert(found === l2d, 'byModelIdLower should find L2 node with different case');
+var found = _modelTree.byModelId.get('test/case-model');
+assert(found === l2d, 'byModelId should find L2 node with different case via lowercase key');
 
-console.log('PASS: byModelIdLower case-insensitive lookup');
+console.log('PASS: byModelId case-insensitive lookup');
 
 // ── Test 5: displayName precomputation ──
 var nm = normalizeModel({ id: 'Qwen/Qwen2.5-7B', downloads: 100, likes: 10 });
