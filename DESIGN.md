@@ -124,7 +124,7 @@ L2/L4 hidden count and popup hidden count must match exactly. `popupSource` pass
 
 `byModelId` itself uses lowercase keys so lookups are case-insensitive without a separate index. This is a deliberate design decision: HF IDs are case-sensitive, but derivative authors (and occasionally base model authors) use inconsistent casing for the same model, causing mismatches. Treating all IDs case-insensitively works around this common issue.
 
-**Author matching is case-sensitive for security:** Unlike model IDs, author names are matched with original case via `byPath`. This prevents impersonation attacks where a malicious actor uses a mixed-case variant of a known author name (e.g. `"qwEn"` vs `"Qwen"`) to inject their models into the legitimate author's subtree. The `authorByLower` map was removed in favor of case-sensitive `byPath` lookups.
+**Author matching (L1 and L3) is case-sensitive for security:** Unlike model IDs, all author names are matched with original case via direct Map lookups. This prevents impersonation attacks where a malicious actor uses a mixed-case variant of a known author name (e.g. `"qwEn"` vs `"Qwen"`) to inject their models into the legitimate author's subtree. The `authorByLower` map was removed in favor of case-sensitive `byPath` lookups.
 
 **displayName precomputation:** `normalizeModel` computes `displayName` (`id.split('/').slice(1).join('/')`) and `displayNameLower` at ingestion time. All render and filter hot paths read these cached fields instead of repeatedly splitting and lowercasing model IDs.
 
