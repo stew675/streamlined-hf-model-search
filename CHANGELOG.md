@@ -1,5 +1,24 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.37 — Code review fixes: B1-B5, C4, C5, C7
+
+- **Fix:** L2 hidden-models popup no longer caps at 200 samples; passes
+  `allBaseModels.length` instead (B1).
+- **Cleanup:** Removed unreachable `else` branch in `renderL2Empty` (B2).
+- **Fix:** `_consecutive429s` now resets on the network-error catch path
+  in `_dispatchFetchWithRetry`, preventing stale amber flash after transient
+  network failures (B3).
+- **Fix:** `Retry-After` header parser now falls back to exponential
+  backoff when the value is non-numeric (HTTP-date format) (B4).
+- **Docs:** Documented intentional non-canonical L2 download/like
+  aggregation in `walkFilterL1` (B5).
+- **Docs:** Documented intentional `${gen}|${author}` composite key in
+  `_deepeningAuthors` (C4).
+- **Cleanup:** `incApiCalls` now reuses the cached `_rateLimitCounter`
+  ref instead of re-querying the DOM on every call (C5).
+- **Docs:** Added contract comment above `enforceFromGap` explaining the
+  bidirectional push behavior (C7).
+
 ### v260601.36 — JSON.parse hardening & `_asyncDeepenPass` DOM cache optimization
 
 - **Fix:** Wrapped `JSON.parse(text)` in `_dispatchFetchWithRetry` with try/catch.

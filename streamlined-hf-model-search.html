@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.36';
+const APP_VERSION = '260601.37';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -537,7 +537,10 @@ function _formatBytes(n) {
   if (mb < 1024) return mb.toFixed(1) + " MB";
   return (mb / 1024).toFixed(1) + " GB";
 }
-function incApiCalls(n) { apiCalls += n; document.getElementById("api-counter").textContent = "API Requests: " + String(apiCalls) + " / " + _formatBytes(_totalBytesReceived); }
+function incApiCalls(n) {
+  apiCalls += n;
+  _rateLimitCounter.textContent = "API Requests: " + String(apiCalls) + " / " + _formatBytes(_totalBytesReceived);
+}
 
 // ── Dirty Flag ──
 let needsUpdate = false;
@@ -1121,7 +1124,8 @@ function _dispatchFetchWithRetry(item, gen, retries) {
           _consecutive429s++;
           updateRateLimitUI(_consecutive429s >= 3);
           const ra = res.headers.get('Retry-After');
-          delay = ra ? parseInt(ra, 10) * 1000 : Math.min(1000 * Math.pow(2, retries), 30000);
+          const raN = parseInt(ra, 10);
+          delay = (ra && !isNaN(raN)) ? raN * 1000 : Math.min(1000 * Math.pow(2, retries), 30000);
         } else {
           _consecutive429s = 0;
           updateRateLimitUI(false);
@@ -1147,6 +1151,8 @@ function _dispatchFetchWithRetry(item, gen, retries) {
       clearTimeout(timer);
       _inflightControllers.delete(item.url);
       if (isStale(gen)) { bailQueueItem(item, () => { _inflightCount--; _dequeueNext(); }); return; }
+      _consecutive429s = 0;
+      updateRateLimitUI(false);
       if (retries < CONFIG.MAX_RETRIES) {
         const delay = Math.min(1000 * Math.pow(2, retries), 30000);
         console.warn(`Network error for ${item.url}, retry ${retries + 1}/${CONFIG.MAX_RETRIES} in ${delay}ms`);
@@ -1844,6 +1850,14 @@ function runFilterPipeline() {
   }
 }
 
+/**
+ * Aggregate L2 children into L1 author stats.
+ * Note: non-canonical L2 nodes (dedup losers across same-named models from
+ * different authors) still contribute their downloads/likes to the author's
+ * aggDownloads/aggLikes via r.downloads/r.likes below. This is intentional —
+ * the author still "owns" the model even though only one copy is displayed
+ * at L2. The visible L2 count (aggCount) does correctly skip non-canonicals.
+ */
 function walkFilterL1(node) {
   let count = 0, dl = 0, lk = 0, totalCanonical = 0;
   for (const l2Node of node.children.values()) {
@@ -2361,6 +2375,11 @@ function clampRange(fromEl, toEl, minGap, max) {
     toEl.value = String(Math.min(fv + minGap, max));
   }
 }
+// Bidirectional push: if the `from` knob advances past `to - (minGap-1)`,
+// drag the `to` knob forward to maintain the gap. Symmetric helper
+// `enforceToGap` pushes the `from` knob backwards when `to` retreats past
+// the gap. `clampRange` is the final safety net for the case where both
+// knobs reach the boundaries simultaneously. See setupDualSlider wiring.
 function enforceFromGap(fromEl, toEl, minGap, max) {
   const nv = parseInt(fromEl.value);
   const tv = parseInt(toEl.value);
@@ -2769,6 +2788,9 @@ async function deepenBatch(idx, author, container, unknownModels, gen) {
 }
 async function refreshAuthorL2Section(idx, author, container, skipRender) {
   const gen = _fetchGeneration;
+  // Composite key: a bumped _fetchGeneration in resetAppState invalidates
+  // the guard naturally as the in-flight async finally runs and removes
+  // the old gen|author entry. No manual cross-generation cleanup needed.
   const deepKey = `${gen}|${author}`;
   if (_deepeningAuthors.has(deepKey)) return;
   _deepeningAuthors.add(deepKey);
@@ -2865,17 +2887,14 @@ function thHtml(c, state, level, colindex) {
 }
 
 function renderL2Empty(idx, author, container, popupSource) {
-  const hasData = popupSource && popupSource.length > 0;
   const allBaseModels = popupSource || [];
   if (allBaseModels.length > 0) {
     const pt = makePopupTrigger(`l2-empty-${author}`, "No base models match current filters",
-      (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), 200)));
+      (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), allBaseModels.length)));
     container.innerHTML = `<div class="detail-count" style="color:#6e7681">${pt.html}</div>`;
     pt.wire();
-  } else if (!hasData) {
-    container.innerHTML = '<div class="detail-count" style="color:#6e7681">No data loaded yet.</div>';
   } else {
-    container.innerHTML = '<div class="detail-count" style="color:#6e7681">No base models match current filters.</div>';
+    container.innerHTML = '<div class="detail-count" style="color:#6e7681">No data loaded yet.</div>';
   }
 }
 
