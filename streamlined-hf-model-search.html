@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260602.06';
+const APP_VERSION = '260602.07';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -3088,10 +3088,7 @@ function setupL2Events(container) {
       if (toggleSection(detailRow, tog, modelKey, `${PREFIX_GROUP}${modelId}|`)) {
         cacheDomRef(modelKey, { row: tr, detailRow, inner, toggle: tog });
         const l2Node = getModelNode(modelId);
-        const hasDisplayedChildren = l2Node && [...l2Node.children.values()].some(l3 => [...l3.children.values()].some(l4 => l4.display));
-        if (hasDisplayedChildren) {
-          renderL3(l2Idx, modelIdx, modelId, inner);
-        } else if (l2Node && !l2Node._childrenDeepened) {
+        if (l2Node && !l2Node._childrenDeepened) {
           inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
           loadChildren(l2Idx, modelIdx, modelId, inner);
         } else {
@@ -3241,7 +3238,12 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
       }
       newEntry.ready = true;
       const l2Node = getModelNode(parentId);
-      if (l2Node) l2Node._childrenDeepened = true;
+      if (l2Node) {
+        l2Node._childrenDeepened = true;
+        for (const l3Node of l2Node.children.values()) {
+          walkFilterL3(l3Node);
+        }
+      }
       if (isStale(gen)) return;
       if (container.isConnected) {
         renderL3(l2Idx, modelIdx, parentId, container);
@@ -3551,10 +3553,7 @@ function _refreshAuthorSubtree(l1Node, author, force, allowAsync) {
     mDetailRow.style.display = "";
     if (mTog) { mTog.classList.add("open"); mTog.setAttribute("aria-expanded", "true"); }
     const l2NodeRef = getModelNode(modelId);
-    const hasDisplayedChildren = l2NodeRef && [...l2NodeRef.children.values()].some(l3 => [...l3.children.values()].some(l4 => l4.display));
-    if (hasDisplayedChildren) {
-      renderL3(l2Idx, modelIdx, modelId, mInner);
-    } else if (l2NodeRef && !l2NodeRef._childrenDeepened && allowAsync) {
+    if (l2NodeRef && !l2NodeRef._childrenDeepened && allowAsync) {
       mInner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
       loadChildren(l2Idx, modelIdx, modelId, mInner);
     } else {

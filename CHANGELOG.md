@@ -1,5 +1,25 @@
 # Changelog — Streamlined HF Model Search
 
+### v260602.07 — Fix: L2 expand always fetches dedicated children on first open; filter pipeline runs after upsert
+
+- **Fix:** Removed the `hasDisplayedChildren` gating logic in `setupL2Events` and
+  `_refreshAuthorSubtree` that was skipping `loadChildren` when any pre-existing
+  child happened to pass current filters. The check was inverted: it was meant to
+  avoid re-fetching when children were already loaded, but it actually prevented
+  the dedicated search from running whenever an initial-pull child was visible.
+  The sole gate is now `!l2Node._childrenDeepened`, which is set only after
+  `loadChildren` completes.
+- **Impact:** Models like `MiniMaxAI/MiniMax-M2.7` that are popular enough to have
+  a few quants in the initial trending/downloads/recent pulls were permanently
+  stuck showing only those 1–3 pre-existing children. The dedicated search that
+  discovers the remaining ~160+ derivative authors is now guaranteed to fire once
+  on the first L2 expand, regardless of filter state.
+- **Post-upsert filtering:** After `loadChildren` upserts fetched children into the
+  tree, it now iterates over every L3 author node under the L2 parent and calls
+  `walkFilterL3(l3Node)`. This ensures newly loaded children are correctly
+  filtered by date, quant, task, and text filters before `renderL3` generates
+  the DOM, preventing unfiltered leakage.
+
 ### v260602.05 — Fix: Quants of same-author fine-tunes no longer treated as base models; base-model-aware finetune classification
 
 - **Fix:** `isBase()` now returns `false` for quant models (GGUF, GPTQ, AWQ, etc.)
