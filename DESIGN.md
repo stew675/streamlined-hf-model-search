@@ -119,9 +119,10 @@ L2/L4 hidden count and popup hidden count must match exactly. `popupSource` pass
 - L4 nodes carry `_quantFilterString` (set by `walkFilterL4`), read by `renderL3` and `renderL4` instead of re-running `getQuantFilterString()` (which does regex matching + tag iteration) per child.
 - L3 `count` and `totalDownloads` are always computed from the `displayedL4` array in `renderL3` (not read from `l3Node.aggCount` / `aggDownloads`) so they remain correct after dynamic child loads without requiring a full `runFilterPipeline` re-run.
 
-**Reverse indices for O(n) ingestion:** `_modelTree` maintains two additional indices beyond `byModelId`:
+**Reverse indices for O(n) ingestion:** `_modelTree` maintains one additional index beyond `byModelId`:
 - `byModelName` (Map: `displayName → L2Node[]`) — used by `recomputeCanonicalForName` to find canonical dedup candidates in O(k) where k = models with that name, replacing the previous O(n) full scan over all L2 nodes.
-- `byModelIdLower` (Map: `lowercase model ID → L2Node`) — used by `ensureL2BaseNode` for case-insensitive L2 lookup without scanning the entire `byModelId` map.
+
+`byModelId` itself uses lowercase keys so lookups are case-insensitive without a separate index. This matches HF's case-insensitive ID semantics.
 
 **displayName precomputation:** `normalizeModel` computes `displayName` (`id.split('/').slice(1).join('/')`) and `displayNameLower` at ingestion time. All render and filter hot paths read these cached fields instead of repeatedly splitting and lowercasing model IDs.
 
