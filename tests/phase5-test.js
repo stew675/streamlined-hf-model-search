@@ -247,7 +247,6 @@ function resetAppState() {
   fetchedUntagged = false;
   _apiTimestampHead = 0;
   _apiTimestamps.length = 0;
-  _paramCache.clear();
   _inflightChildren.clear();
   _inflightFetches.clear();
   for (var item of _workQueue) { item.reject(new Error("stale generation")); }
@@ -257,7 +256,6 @@ function resetAppState() {
   _inflightControllers.clear();
   for (var [el, timer] of _popupTimers) { clearTimeout(timer); }
   _popupTimers.clear();
-  _paramSource.clear();
   _deepeningAuthors.clear();
   _fetchSeen = null;
   needsUpdate = false;
@@ -834,16 +832,15 @@ function extractParamFromId(id) {
   return null;
 }
 function getParamCount(m) {
-  var cached = _paramCache.get(m.id);
-  if (cached !== undefined) return cached;
+  if (m.paramB !== undefined) return m.paramB;
   var result;
   if (m.safetensors && m.safetensors.total != null) result = m.safetensors.total / 1e9;
   else if (m.gguf && m.gguf.total != null) result = m.gguf.total / 1e9;
   else {
     result = extractParamFromId(m.id);
-    if (result !== null) _paramSource.set(m.id, 'name');
+    if (result !== null) m._paramSource = 'name';
   }
-  _paramCache.set(m.id, result);
+  m.paramB = result;
   return result;
 }
 async function resolveParamFromChildren(modelId) {
@@ -892,7 +889,6 @@ async function resolveParamFromChildren(modelId) {
       } catch (e) { /* skip */ }
     }
     if (childP !== null) {
-      _paramCache.set(childId, childP);
       if (childP > runningMax) { runningMax = childP; maxConfidence = 1; }
       else if (childP === runningMax) { maxConfidence++; }
       if (maxConfidence >= 3) break;
@@ -929,15 +925,9 @@ async function tryResolveModelParam(m, gen) {
       name = name.substring(0, dash);
       var candId = bits[0] + '/' + name;
 
-      // Check param cache first (fastest path for already-resolved parents)
-      var cachedP = _paramCache.get(candId);
-      if (cachedP != null) { resolved = cachedP; source = 'parent'; break; }
-
-      // Fallback to tree lookup (covers injected/visible base models)
-      if (!resolved) {
-        var parent = getModelRef(candId);
-        if (parent && parent.paramB != null) { resolved = parent.paramB; source = 'parent'; }
-      }
+      // Tree lookup for already-resolved parents
+      var parent = getModelRef(candId);
+      if (parent && parent.paramB != null) { resolved = parent.paramB; source = 'parent'; break; }
     }
   }
 
@@ -963,15 +953,17 @@ async function tryResolveModelParam(m, gen) {
 
   if (rowEl) rowEl.classList.remove("inferring");
 
-  // Commit to state & cache only on success
+  // Commit to state only on success
   if (resolved !== null) {
     m.paramB = resolved;
-    _paramCache.set(m.id, resolved);
     var ps = source === 'name' ? 'name' : source === 'parent' ? 'parent_inherit' : (source === 'children' && childUsedApi) ? 'child_api' : 'child_name';
-    _paramSource.set(m.id, ps);
+    m._paramSource = ps;
 
     var dbEntry = getModelRef(m.id);
-    if (dbEntry) dbEntry.paramB = resolved;
+    if (dbEntry && dbEntry !== m) {
+      dbEntry.paramB = resolved;
+      dbEntry._paramSource = ps;
+    }
   }
 
   // Progressive UI update only — no structural render

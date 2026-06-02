@@ -34,8 +34,7 @@ Single-file, zero-dependency HTML/JS/CSS application that explores HuggingFace b
 - `_inflightCount` — Number of HTTP requests currently executing. Gated at `INFLIGHT_MAX` (5) in `_dequeueNext`.
 - `_dequeueScheduled` — Boolean flag preventing duplicate `_scheduleDequeue` calls; reset when queue drains.
 - `_fetchSeen`, `_fetchCompleted` — Shared progressive render state initialized by `_initFetchState()` at start of each "Get Results" cycle. Each request's completion handler increments `_fetchCompleted` and triggers re-render via `_onFetchComplete`.
-- `_paramCache` — `Map<modelId, paramB>` persists across renders; cleared only by Clear Cache. Bound by unique models encountered (~1.4MB at 16k entries).
-- `_paramSource Map<string, string>` — Tracks how each model's param was resolved (e.g., `"name"`, `"parent_inherit"`, `"child_name"`, `"child_api"`, `"deepen"`).
+- `modelRef.paramB` / `modelRef._paramSource` — Parameter count and resolution method stored directly on each tree model ref. Replaces the previous `_paramCache`/`_paramSource` parallel Maps, eliminating maintenance overhead and ~1.4MB of side-map memory.
 - `_apiTimestamps` — Sliding window enforcing ≤4 req/s (1 call per 250ms, no burst). Managed inside `_dequeueNext`, not in `fetchJson`.
 - `_modelTree` — Single source of truth for fetched models and hierarchy. Holds the root node plus lookup maps (`byPath`, `byModelId`, `authorByLower`).
 - `sliderFrom/sliderTo` — 0..80 (0=Anytime, 1-79=14-day increments, 80=Now).
@@ -91,7 +90,7 @@ Scan in-memory tree models, identify parent IDs not yet present, then fetch thos
 
 ### Tree-Backed Memory Management
 
-Models are stored once as `modelRef` objects in `_modelTree` nodes and indexes (`byModelId`/`byPath`). `_paramCache` persists across renders and is bounded by unique models encountered.
+Models are stored once as `modelRef` objects in `_modelTree` nodes and indexes (`byModelId`/`byPath`). Parameter counts and resolution metadata live directly on each `modelRef` (`paramB`, `_paramSource`), so there is no separate param cache to maintain or evict.
 
 ### normalizeModel — Field Stripping
 

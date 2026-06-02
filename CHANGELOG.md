@@ -1,5 +1,20 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.35 — Fold `_paramCache` and `_paramSource` into tree model refs
+
+- **Architecture:** Removed `_paramCache` (`Map<modelId, paramB>`) and
+  `_paramSource` (`Map<modelId, string>`) entirely. Parameter counts
+  and resolution metadata now live directly on each `modelRef` as
+  `paramB` and `_paramSource` properties. Eliminates ~1.4MB of side-map
+  memory, removes FIFO eviction logic, and replaces Map lookups with
+  monomorphic object property access.
+- **Cleanup:** Removed 6 `_paramCache.set`, 3 `_paramCache.get`, and 4
+  `_paramSource.set`/`get` call sites across `getParamCount`,
+  `tryResolveModelParam`, `deepenBatch`, `loadChildren`, and
+  `resolveParamFromChildren`.
+- **Docs:** Updated `DESIGN.md` State Management and Tree-Backed Memory
+  Management sections to reflect the folded state.
+
 ### v260601.30 — Code Review Resolution: Extract helper, byte accuracy, popup clamping, CSS cleanup, DOM cache hygiene
 
 - **Refactor:** Extracted parent-reactivation logic from `walkFilterL2` into
