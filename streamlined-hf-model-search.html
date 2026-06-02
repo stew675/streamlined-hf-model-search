@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.37';
+const APP_VERSION = '260601.38';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -3085,6 +3085,10 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
               if (!childHasBase) {
                 if (hasModel(m.id)) continue;
               }
+              // All matched quant methods from id/tags are joined into a single
+              // string stored in q_method. A model with multiple quant tags
+              // (e.g. "gguf, awq") appears once at L3 (grouped by author) and
+              // shows all methods in the L4 badge column.
               const qSet = new Set();
               (idLower.match(RE_Q_MATCH) || []).forEach(m => qSet.add(m));
               (tagsStr.match(RE_Q_MATCH) || []).forEach(m => qSet.add(m));

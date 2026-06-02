@@ -1,5 +1,12 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.38 — Document multi-method q_method display
+
+- **Docs:** Added comment in `loadChildren` explaining that multi-method
+  quant info is preserved as a comma-joined string in `q_method`, not
+  discarded. A model with multiple quant tags appears once at L3 (grouped
+  by author) and shows all methods in the L4 badge.
+
 ### v260601.37 — Code review fixes: B1-B5, C4, C5, C7
 
 - **Fix:** L2 hidden-models popup no longer caps at 200 samples; passes
