@@ -45,6 +45,10 @@
 - **L4 badge:** The `deriv` CSS class is now applied when `q_method.includes('finetune')`
   instead of exact equality, so combined labels like `finetune, safetensors` still
   render with the derivative styling.
+- **No magic string literals:** All `fp4` / `fp8` detection in `isQuantModel`,
+  `getQuantFilterString`, and `qMethodToCategory` is now driven by the single
+  `SUBSTR_Q_METHODS` constant (derived from `Q_METHODS`). Adding a new embedded
+  quant format (e.g. `bf16`, `nf8`) requires editing only `SUBSTR_Q_METHODS`.
 
 ### v260602.04 — Dead code removal audit
 

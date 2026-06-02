@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260602.05';
+const APP_VERSION = '260602.06';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -487,6 +487,12 @@ const _Q_PATTERN = Q_METHODS.join("|");
 const RE_Q_EXISTS = new RegExp(`\\b(?:${_Q_PATTERN})\\b`, 'i');
 const RE_Q_MATCH = new RegExp(`\\b(?:${_Q_PATTERN})\\b`, 'gi');
 const RE_Q_STRIP = new RegExp(`-(?:${_Q_PATTERN})$`, 'i');
+
+// Methods that also appear embedded as substrings inside compound names
+// (e.g. NVFP4, MXFP4) without a leading word boundary.
+const SUBSTR_Q_METHODS = ["fp4", "fp8"];
+const _SUBSTR_Q_PATTERN = SUBSTR_Q_METHODS.join("|");
+const RE_Q_SUBSTR = new RegExp(_SUBSTR_Q_PATTERN, 'i');
 
 // ── Filter Display Constants ──
 const FILTER_DISPLAY = ["awq", "fp4", "fp8", "finetune", "gguf", "mlx", "safetensors", "others"];
@@ -1519,7 +1525,7 @@ function isQuantModel(model) {
   const idLower = (model.id || "").toLowerCase();
   const tagsStr = (model.tags || []).join(" ").toLowerCase();
   return RE_Q_EXISTS.test(idLower) || RE_Q_EXISTS.test(tagsStr) ||
-         idLower.includes('fp4') || idLower.includes('fp8');
+         RE_Q_SUBSTR.test(idLower);
 }
 
 // Iteratively strip trailing -segments from a model ID until a known parent is found.
@@ -1555,8 +1561,9 @@ function getQuantFilterString(model) {
   if (isQuant) {
     // Quant model: collect quant method(s) from ID and tags
     const methods = [];
-    if (idLower.includes('fp4')) methods.push('fp4');
-    else if (idLower.includes('fp8')) methods.push('fp8');
+    for (const sq of SUBSTR_Q_METHODS) {
+      if (idLower.includes(sq)) { methods.push(sq); break; }
+    }
     if (byId.length > 0) methods.push(...byId);
 
     // Also scan tags for quant methods not found in the ID (e.g. models
@@ -1590,8 +1597,9 @@ function getQuantFilterString(model) {
   }
 
   // No base_model — existing logic for true base models
-  if (idLower.includes('fp4')) return 'fp4';
-  if (idLower.includes('fp8')) return 'fp8';
+  for (const sq of SUBSTR_Q_METHODS) {
+    if (idLower.includes(sq)) return sq;
+  }
   if (byId.length > 0) return byId.join(', ');
   if (tags.some(t => String(t).toLowerCase() === 'safetensors')) return 'safetensors';
   return 'derivative';
@@ -1802,9 +1810,10 @@ function matchesFilter(qMethod) {
 
 function qMethodToCategory(method) {
   const m = method.toLowerCase();
-  if (m.includes('fp4')) return 'fp4';
-  if (m.includes('fp8')) return 'fp8';
-  if (["awq", "finetune", "gguf", "mlx", "fp4", "fp8", "safetensors"].includes(m)) return m;
+  for (const sq of SUBSTR_Q_METHODS) {
+    if (m.includes(sq)) return sq;
+  }
+  if (Q_METHODS.includes(m) || m === "finetune" || m === "safetensors") return m;
   return "others";
 }
 
