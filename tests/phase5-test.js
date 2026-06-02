@@ -1126,6 +1126,17 @@ function walkFilterL2(node) {
     }
   }
 
+  // When the L3 author filter is active, suppress an L2 row's self-display
+  // if it has no matching L3 children.
+  // Exception: additive L1 author match — keep base models visible when the filter
+  // text also matches the L1 author name.
+  var tf3 = RC._state.textFilters.l3Author;
+  var l1Author = node.parent ? node.parent.id : null;
+  var l1Matches = tf3 && l1Author && l1Author.toLowerCase().includes(tf3.toLowerCase());
+  if (includeSelf && tf3 && childCount === 0 && !l1Matches) {
+    includeSelf = false;
+  }
+
   node.display = includeSelf;
   var selfDl = includeSelf && ref ? (ref.downloads || 0) : 0;
   var selfLk = includeSelf && ref ? (ref.likes || 0) : 0;
@@ -1139,6 +1150,15 @@ function walkFilterL2(node) {
   return { count, downloads: dl, likes: lk };
 }
 function walkFilterL3(node) {
+  var tf3 = RC._state.textFilters.l3Author;
+  if (tf3 && !node.id.toLowerCase().includes(tf3.toLowerCase())) {
+    node.display = false;
+    node.aggCount = 0;
+    node.aggDownloads = 0;
+    node.aggLikes = 0;
+    node.aggMaxLastModified = null;
+    return { count: 0, downloads: 0, likes: 0 };
+  }
   var count = 0, dl = 0, lk = 0, maxLM = null;
   for (var l4Node of node.children.values()) {
     var r = walkFilterL4(l4Node);

@@ -1,5 +1,53 @@
 # Changelog — Streamlined HF Model Search
 
+### v260602.04 — Dead code removal audit
+
+- **Cleanup:** Scanned codebase for objects created but never consumed. Removed three clusters of dead code:
+  - `loadChildren` quant-method computation (`qSet`, `qMethods`, `qMethod`) was building a
+    `q_method` string that was pushed into temporary `results` objects, passed through
+    `upsertModelIntoTree`, then completely ignored — L4 rendering recomputes quant methods
+    fresh via `getQuantFilterString(ref)` and `node._quantFilterString`. Removing this
+    eliminates a `Set`, two regex scans, array spread, string joins, and a pointless
+    property assignment for every child model processed.
+  - `loadChildren` temporary `results.push` properties `author`, `created_at`, `updated_at`,
+    `tags`, and `q_method` were never read by the `upsertModelIntoTree` consumer. Only
+    `id`, `downloads`, `likes`, `lastModified`, and `pipeline_tag` are required.
+  - `sortCoerce` contained dead branches `k === "created_at" || k === "updated_at"` — no
+    column header uses those keys; the active date sort key is `lastModified`, caught by
+    the `k.includes("Modified")` branch.
+- Standalone test (`tests/phase5-test.js`) still passes.
+
+### v260602.03 — Global L3 Author Text Filter
+
+- **Feature:** The L3 Author text filter is now global, analogous to the L2 Model ID filter.
+  - Moved the filter evaluation from render-time local filtering (`renderL3`) into the tree
+    filter pipeline (`walkFilterL3`). Non-matching L3 authors return `count: 0`, so they
+    contribute nothing to `walkFilterL2` and naturally cascade the suppression up to L1.
+  - `walkFilterL2` now suppresses an L2 base model's self-display when the L3 filter is
+    active and `childCount === 0`. This mirrors the L2 model filter behavior and reduces
+    visual noise — a base model with no matching derivative authors is hidden entirely.
+  - `renderL3` adds `if (!l3Node.display) continue` to respect the pipeline, while
+    keeping its local `tf3` check as a safety net for freshly loaded L3 nodes from
+    `loadChildren` that haven't been re-evaluated by a full `runFilterPipeline` pass yet.
+  - Added a `title` tooltip to the "L3 Author:" label explaining that the search is
+    cache-limited (operates on already-ingested tree data only) and does not issue new
+    HF API calls to pull complete derivative sets.
+  - **Cleanup:** Removed dead/redundant code from `renderL3`:
+    - The `if (count === 0) continue;` guard is redundant because `walkFilterL3` already
+      sets `node.display = count > 0`, and `renderL3` skips non-displayed L3 nodes.
+    - The `quants` array and its construction were dead code — the array was built and
+      stored in `groups[author]` but never read by any caller.
+  - **Refinement:** `walkFilterL2` now exempts an L2 base model from L3-child-count
+    suppression when the L3 filter text also matches the L1 author name. Authors who
+    are both base-model and derivative authors (e.g., DavidAU) remain visible at L1/L2
+    while their derivative models under other authors are still shown at L3/L4. This is
+    a purely additive match — all other filter criteria (date, param, task, L2 text)
+    still apply. Demonstrates the power of separating the filter pipeline from the render
+    pipeline: a small, localized change in `walkFilterL2` propagates correctly through
+    all render paths without touching any renderer code.
+  - Updated `tests/phase5-test.js` `walkFilterL3` and `walkFilterL2` to match the new
+    behavior.
+
 ### v260601.41 — Code review resolution: 5 fixes across CSS, deepening, sort, L4 signature, docs
 
 - **Fix:** `_deepeningAuthors` is now cleared in `applyFilters` after the generation bump,
