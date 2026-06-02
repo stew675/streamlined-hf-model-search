@@ -122,7 +122,7 @@ L2/L4 hidden count and popup hidden count must match exactly. `popupSource` pass
 **Reverse indices for O(n) ingestion:** `_modelTree` maintains one additional index beyond `byModelId`:
 - `byModelName` (Map: `displayName → L2Node[]`) — used by `recomputeCanonicalForName` to find canonical dedup candidates in O(k) where k = models with that name, replacing the previous O(n) full scan over all L2 nodes.
 
-`byModelId` itself uses lowercase keys so lookups are case-insensitive without a separate index. This matches HF's case-insensitive ID semantics.
+`byModelId` itself uses lowercase keys so lookups are case-insensitive without a separate index. This is a deliberate design decision: HF IDs are case-sensitive, but derivative authors (and occasionally base model authors) use inconsistent casing for the same model, causing mismatches. Treating all IDs case-insensitively works around this common issue.
 
 **displayName precomputation:** `normalizeModel` computes `displayName` (`id.split('/').slice(1).join('/')`) and `displayNameLower` at ingestion time. All render and filter hot paths read these cached fields instead of repeatedly splitting and lowercasing model IDs.
 
