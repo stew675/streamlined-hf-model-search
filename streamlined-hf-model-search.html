@@ -1812,7 +1812,7 @@ function resolveTrueBase(modelOrId) {
 }
 
 // ── Tree Filter Pipeline (Refactored Architecture) ──
-//   passesTreeNodeFilters → passesL4Filters → runFilterPipeline
+//   passesTreeNodeFilters → walkFilterL1..L4 → runFilterPipeline
 // Single recursive walk over _modelTree that evaluates filters, propagates
 // parent activation (quants reactivate their base model), and aggregates stats.
 
@@ -3412,7 +3412,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
 }
 
 // ── Refresh & Re-expansion ──
-//   refreshAllExpanded
+//   _refreshAuthorSubtree / refreshAllExpanded
 function _refreshAuthorSubtree(l1Node, author, force, allowAsync) {
   // Phase 1: re-expand L1 author row
   const key = `${PREFIX_AUTHOR}${author}`;
@@ -3636,8 +3636,8 @@ document.getElementById("derived-param-chip").addEventListener("click", () => {
 document.getElementById("hide-missing-param-chip").addEventListener("click", () => {
   _hideMissingParamEnabled = !_hideMissingParamEnabled;
   toggleChipUI(document.getElementById("hide-missing-param-chip"), _hideMissingParamEnabled);
-  // Cosmetic-only re-render: infer-missing-params already handled inline
-  // within refreshAuthorL2Section for newly-visible models.
+  // Full recompute needed: hide-missing-params changes which L2 models pass
+  // filters, which cascades up to L1 counts and visibility.
   const saved = new Set(RC.expandedSections);
   recomputeAndRender(saved);
 });
