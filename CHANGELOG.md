@@ -1,5 +1,55 @@
 # Changelog — Streamlined HF Model Search
 
+### v260602.05 — Fix: Quants of same-author fine-tunes no longer treated as base models; base-model-aware finetune classification
+
+- **Fix:** `isBase()` now returns `false` for quant models (GGUF, GPTQ, AWQ, etc.)
+  even when their `cardData.base_model` points to a model by the same author.
+  Previously, quants of same-author fine-tunes (e.g., `llmfan46/...-GGUF` whose
+  base is another `llmfan46` model) were incorrectly treated as L2 base models and
+  placed under their own author's L1 node, stranding them away from the true
+  cross-author base model lineage.
+- **Mechanism:** Added `isQuantModel()` helper that checks `RE_Q_EXISTS` against
+  both the model ID and its tags. `isBase()` now calls this helper in the
+  same-author branch and returns `false` for quants, allowing them to follow the
+  `base_model` chain via `resolveTrueBase()` to their ultimate L2 parent.
+- **Ingestion ordering:** Added pre-upsert sorts in `_mergeRequestResult` and
+  `loadAuthorModels` that process non-quant models before quants. This ensures
+  parent fine-tunes are in the tree before their quant children are resolved,
+  preventing `resolveTrueBase` from stopping at a placeholder intermediate.
+- **Preserved behavior:** Same-author non-quant fine-tunes (e.g., `google/...-it`
+  derived from `google/...`) continue to be treated as base models (L2 under their
+  author). Their quants correctly stop at the fine-tune level in `resolveTrueBase`,
+  appearing as L4 under the fine-tune rather than the grandparent base model.
+- **Impact:** `llmfan46` models and similar derivative authors now correctly appear
+  as L3/L4 children under the original base model author instead of creating
+  standalone L1 author nodes.
+- **Classification:** `getQuantFilterString()` now inspects `cardData.base_model`.
+  Non-quant models with a `base_model` are classified as `finetune`. Quant models
+  are classified by their quant method only when their direct parent is a true
+  base model (no `base_model`); when the parent is itself a derivative, the quant
+  also carries `finetune` (e.g. `gguf, finetune`). This replaces the previous
+  behavior where finetunes carrying the `safetensors` tag were incorrectly labeled
+  `safetensors` instead of `finetune`.
+- **`isQuantModel` FP4/FP8 substring detection:** `isQuantModel()` now also checks
+  `idLower.includes('fp4')` and `idLower.includes('fp8')` in addition to the
+  word-boundary regex (`RE_Q_EXISTS`). This catches compound quant names like
+  `NVFP4` and `MXFP4` that embed `fp4` as a substring without a leading word
+  boundary, preventing them from being misclassified as non-quant finetunes.
+- **Tag-based quant method detection:** The `isQuant` branch in `getQuantFilterString()`
+  now scans all tags against `Q_METHODS` when the ID does not reveal a quant suffix.
+  Previously, models like `HauhauCS/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive`
+  (GGUF-tagged but with no quant suffix in the ID) received an empty quant label
+  because the fallback only checked for the `safetensors` tag. The new tag scan
+  correctly assigns `gguf`, `awq`, and other quant tags even when the ID does not
+  carry a recognizable suffix.
+- **L4 badge:** The `deriv` CSS class is now applied when `q_method.includes('finetune')`
+  instead of exact equality, so combined labels like `finetune, safetensors` still
+  render with the derivative styling.
+- **No magic string literals:** All `fp4` / `fp8` detection in `isQuantModel`,
+  `getQuantFilterString`, and `qMethodToCategory` is now driven by the single
+  `SUBSTR_Q_METHODS` constant (derived from `Q_METHODS`). Adding a new embedded
+  quant format (e.g. `bf16`, `nf8`) requires editing only `SUBSTR_Q_METHODS`.
+
 ### v260602.04 — Dead code removal audit
 
 - **Cleanup:** Scanned codebase for objects created but never consumed. Removed three clusters of dead code:
