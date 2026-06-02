@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.38';
+const APP_VERSION = '260601.39';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -2280,7 +2280,7 @@ function createTaskTag(tag, isActive) {
   });
   return el;
 }
-function handleSortClick(th, level, stateKey, defaultKey, refreshAfter, renderFn) {
+function handleSortClick(th, level, stateKey, defaultKey, refreshAfter, renderFn, scope = null) {
   if (th.dataset.level !== level) return;
   const key = th.dataset.key;
   if (!key) return;
@@ -2293,7 +2293,7 @@ function handleSortClick(th, level, stateKey, defaultKey, refreshAfter, renderFn
     for (let i = 0; i < keys.length - 100; i++) delete RC._state.detailSort[keys[i]];
   }
   renderFn();
-  if (refreshAfter) refreshAllExpanded();
+  if (refreshAfter) refreshAllExpanded(undefined, true, scope?.author ?? null);
 }
 
 // ── Slider System: Math & Labels ──
@@ -2974,7 +2974,7 @@ function setupL2Events(container) {
       const d = _getAuthorL2Data(author);
       handleSortClick(th, "2", `l2-${author}`, "downloads", true, () => {
         renderL2(idx, author, d.models, this, d.allBaseModels);
-      });
+      }, { author });
       return;
     }
     const tr = e.target.closest("tr.l2-row");
@@ -3274,9 +3274,12 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
         const firstRow = this.querySelector("tr.l3-row");
         const l2Idx = firstRow ? parseInt(firstRow.dataset.l3L2) : 0;
         const modelIdx = firstRow ? parseInt(firstRow.dataset.l3ModelIdx) : 0;
+        // Derive L1 author from the L2 model node for scoped refresh.
+        const l2NodeForScope = _modelTree.byModelId.get(parentId);
+        const l1Author = l2NodeForScope?.parent?.id;
         handleSortClick(th, "3", `l3-${parentId}`, "totalDownloads", true, () => {
           renderL3(l2Idx, modelIdx, parentId, this);
-        });
+        }, { author: l1Author });
         return;
       }
       const tr = e.target.closest("tr.l3-row");
@@ -3410,39 +3413,35 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
 
 // ── Refresh & Re-expansion ──
 //   refreshAllExpanded
-function refreshAllExpanded(force, allowAsync = true) {
-  if (!_modelTree.root) return;
-  // Purge stale DOM cache entries for L2/L3/L4 before re-expansion
-  invalidateDomPrefix(PREFIX_MODEL);
-  invalidateDomPrefix(PREFIX_GROUP);
-  // Phase 1: re-expand L1 author rows (walk tree for expanded L1 nodes)
-  for (const [author, l1Node] of _modelTree.root.children) {
-    if (!l1Node.expanded) continue;
-    const key = `${PREFIX_AUTHOR}${author}`;
-    let ref = _getSectionCached(key), row, detailRow, inner, tog;
-    if (ref) {
-      ({ row, detailRow, inner, tog } = ref);
-    } else {
-      row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
-      if (!row) continue;
-      const idx = parseInt(row.dataset.l1Idx);
-      detailRow = document.getElementById(`d1-${idx}`);
-      inner = document.getElementById(`i1-${idx}`);
-      tog = document.getElementById(`t1-${idx}`);
-      cacheDomRef(key, { row, detailRow, inner, toggle: tog });
-    }
-    if (!detailRow) continue;
-    const currentlyHidden = detailRow.style.display === "none";
-    if (!force && !currentlyHidden) continue;
-    if (currentlyHidden) {
-      detailRow.style.display = "";
-      if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
-    }
+function _refreshAuthorSubtree(l1Node, author, force, allowAsync) {
+  // Phase 1: re-expand L1 author row
+  const key = `${PREFIX_AUTHOR}${author}`;
+  let ref = _getSectionCached(key), row, detailRow, inner, tog;
+  if (ref) {
+    ({ row, detailRow, inner, tog } = ref);
+  } else {
+    row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
+    if (!row) return;
+    const idx = parseInt(row.dataset.l1Idx);
+    detailRow = document.getElementById(`d1-${idx}`);
+    inner = document.getElementById(`i1-${idx}`);
+    tog = document.getElementById(`t1-${idx}`);
+    cacheDomRef(key, { row, detailRow, inner, toggle: tog });
+  }
+  if (!detailRow) return;
+  const currentlyHidden = detailRow.style.display === "none";
+  let skipL2Render = false;
+  if (!force && !currentlyHidden) {
+    skipL2Render = true; // L1 already visible — skip L2 re-render but still expand L3/L4
+  } else if (currentlyHidden) {
+    detailRow.style.display = "";
+    if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
+  }
+  if (!skipL2Render) {
     const idx = parseInt(row.dataset.l1Idx);
     if (allowAsync) {
       refreshAuthorL2Section(idx, author, inner);
     } else {
-      // Sync-only: show cached L2 without deepening (from tree)
       if (l1Node.children.size > 0) {
         const allModels = [];
         const filtered = [];
@@ -3458,79 +3457,94 @@ function refreshAllExpanded(force, allowAsync = true) {
     }
   }
 
-  // Phase 2: re-expand L2 model rows (walk tree for expanded L2 nodes)
-  for (const [author, l1Node] of _modelTree.root.children) {
-    if (!l1Node.expanded) continue;
-    for (const [modelId, l2Node] of l1Node.children) {
-      if (!l2Node.expanded) continue;
-      const key = `${PREFIX_MODEL}${modelId}`;
-      let ref = _getSectionCached(key), row, detailRow, inner, tog;
-      if (ref) {
-        ({ row, detailRow, inner, tog } = ref);
-      } else {
-        row = document.querySelector(`tr.l2-row[data-model="${CSS.escape(modelId)}"]`);
-        if (!row) continue;
-        const l2Idx = parseInt(row.dataset.l2Idx);
-        const modelIdx = parseInt(row.dataset.modelIdx);
-        detailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
-        inner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
-        tog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
-        cacheDomRef(key, { row, detailRow, inner, toggle: tog });
-      }
+  // Phase 2: re-expand L2 model rows under this author
+  for (const [modelId, l2Node] of l1Node.children) {
+    if (!l2Node.expanded) continue;
+    const mKey = `${PREFIX_MODEL}${modelId}`;
+    let mRef = _getSectionCached(mKey), mRow, mDetailRow, mInner, mTog;
+    if (mRef) {
+      ({ row: mRow, detailRow: mDetailRow, inner: mInner, toggle: mTog } = mRef);
+    } else {
+      mRow = document.querySelector(`tr.l2-row[data-model="${CSS.escape(modelId)}"]`);
+      if (!mRow) continue;
+      const l2Idx = parseInt(mRow.dataset.l2Idx);
+      const modelIdx = parseInt(mRow.dataset.modelIdx);
+      mDetailRow = document.getElementById(`d2-${l2Idx}-${modelIdx}`);
+      mInner = document.getElementById(`i2-${l2Idx}-${modelIdx}`);
+      mTog = document.getElementById(`t2-${l2Idx}-${modelIdx}`);
+      cacheDomRef(mKey, { row: mRow, detailRow: mDetailRow, inner: mInner, toggle: mTog });
+    }
 
-      if (!row || !row.closest(".detail-inner")) continue;
+    if (!mRow || !mRow.closest(".detail-inner")) continue;
 
-      const l2Idx = parseInt(row.dataset.l2Idx);
-      const modelIdx = parseInt(row.dataset.modelIdx);
-      if (!detailRow || detailRow.style.display !== "none") continue;
-      detailRow.style.display = "";
-      if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
-      const l2NodeRef = _modelTree.byModelId.get(modelId);
-      const hasDisplayedChildren = l2NodeRef && [...l2NodeRef.children.values()].some(l3 => [...l3.children.values()].some(l4 => l4.display));
-      if (hasDisplayedChildren) {
-        renderL3(l2Idx, modelIdx, modelId, inner);
-      } else if (l2NodeRef && !l2NodeRef._childrenDeepened && allowAsync) {
-        inner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
-        loadChildren(l2Idx, modelIdx, modelId, inner);
-      } else {
-        renderL3(l2Idx, modelIdx, modelId, inner);
-      }
+    const l2Idx = parseInt(mRow.dataset.l2Idx);
+    const modelIdx = parseInt(mRow.dataset.modelIdx);
+    if (!mDetailRow || mDetailRow.style.display !== "none") continue;
+    mDetailRow.style.display = "";
+    if (mTog) { mTog.classList.add("open"); mTog.setAttribute("aria-expanded", "true"); }
+    const l2NodeRef = _modelTree.byModelId.get(modelId);
+    const hasDisplayedChildren = l2NodeRef && [...l2NodeRef.children.values()].some(l3 => [...l3.children.values()].some(l4 => l4.display));
+    if (hasDisplayedChildren) {
+      renderL3(l2Idx, modelIdx, modelId, mInner);
+    } else if (l2NodeRef && !l2NodeRef._childrenDeepened && allowAsync) {
+      mInner.innerHTML = '<div class="detail-loading" role="status">Fetching children/quantizations…</div>';
+      loadChildren(l2Idx, modelIdx, modelId, mInner);
+    } else {
+      renderL3(l2Idx, modelIdx, modelId, mInner);
     }
   }
 
-  // Phase 3: re-expand L3 quant author group rows (walk tree for expanded L3 nodes)
-  for (const [, l1Node] of _modelTree.root.children) {
-    if (!l1Node.expanded) continue;
-    for (const [modelId, l2Node] of l1Node.children) {
-      if (!l2Node.expanded) continue;
-      for (const [groupAuthor, l3Node] of l2Node.children) {
-        if (!l3Node.expanded) continue;
-        const key = `${PREFIX_GROUP}${modelId}|${groupAuthor}`;
-        let ref = _getSectionCached(key), row, detailRow, inner, tog;
-        if (ref) {
-          ({ row, detailRow, inner, tog } = ref);
-        } else {
-          row = document.querySelector(`tr.l3-row[data-l3-parent="${CSS.escape(modelId)}"][data-l3-author="${CSS.escape(groupAuthor)}"]`);
-          if (!row || !row.closest(".detail-inner")) continue;
-          const l2Idx = parseInt(row.dataset.l3L2);
-          const modelIdx = parseInt(row.dataset.l3ModelIdx);
-          const gIdx = parseInt(row.dataset.l3Idx);
-          detailRow = document.getElementById(`d3-${l2Idx}-${modelIdx}-${gIdx}`);
-          inner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
-          tog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
-          cacheDomRef(key, { row, detailRow, inner, toggle: tog });
-        }
-
-        if (!row || !row.closest(".detail-inner")) continue;
-        const l2Idx = parseInt(row.dataset.l3L2);
-        const modelIdx = parseInt(row.dataset.l3ModelIdx);
-        const gIdx = parseInt(row.dataset.l3Idx);
-        if (!detailRow || detailRow.style.display !== "none") continue;
-        detailRow.style.display = "";
-        if (tog) { tog.classList.add("open"); tog.setAttribute("aria-expanded", "true"); }
-        renderL4(l2Idx, modelIdx, gIdx, modelId, groupAuthor, inner);
+  // Phase 3: re-expand L3 quant author group rows under this author
+  for (const [modelId, l2Node] of l1Node.children) {
+    if (!l2Node.expanded) continue;
+    for (const [groupAuthor, l3Node] of l2Node.children) {
+      if (!l3Node.expanded) continue;
+      const gKey = `${PREFIX_GROUP}${modelId}|${groupAuthor}`;
+      let gRef = _getSectionCached(gKey), gRow, gDetailRow, gInner, gTog;
+      if (gRef) {
+        ({ row: gRow, detailRow: gDetailRow, inner: gInner, toggle: gTog } = gRef);
+      } else {
+        gRow = document.querySelector(`tr.l3-row[data-l3-parent="${CSS.escape(modelId)}"][data-l3-author="${CSS.escape(groupAuthor)}"]`);
+        if (!gRow || !gRow.closest(".detail-inner")) continue;
+        const l2Idx = parseInt(gRow.dataset.l3L2);
+        const modelIdx = parseInt(gRow.dataset.l3ModelIdx);
+        const gIdx = parseInt(gRow.dataset.l3Idx);
+        gDetailRow = document.getElementById(`d3-${l2Idx}-${modelIdx}-${gIdx}`);
+        gInner = document.getElementById(`i3-${l2Idx}-${modelIdx}-${gIdx}`);
+        gTog = document.getElementById(`t3-${l2Idx}-${modelIdx}-${gIdx}`);
+        cacheDomRef(gKey, { row: gRow, detailRow: gDetailRow, inner: gInner, toggle: gTog });
       }
+
+      if (!gRow || !gRow.closest(".detail-inner")) continue;
+      const l2Idx = parseInt(gRow.dataset.l3L2);
+      const modelIdx = parseInt(gRow.dataset.l3ModelIdx);
+      const gIdx = parseInt(gRow.dataset.l3Idx);
+      if (!gDetailRow || gDetailRow.style.display !== "none") continue;
+      gDetailRow.style.display = "";
+      if (gTog) { gTog.classList.add("open"); gTog.setAttribute("aria-expanded", "true"); }
+      renderL4(l2Idx, modelIdx, gIdx, modelId, groupAuthor, gInner);
     }
+  }
+}
+
+function refreshAllExpanded(force, allowAsync = true, authorFilter = null) {
+  if (!_modelTree.root) return;
+  // Purge stale DOM cache entries for L2/L3/L4 before re-expansion
+  invalidateDomPrefix(PREFIX_MODEL);
+  invalidateDomPrefix(PREFIX_GROUP);
+
+  if (authorFilter) {
+    // Fast path: O(1) Map lookup for a single author
+    const l1Node = _modelTree.root.children.get(authorFilter);
+    if (!l1Node || !l1Node.expanded) return;
+    _refreshAuthorSubtree(l1Node, authorFilter, force, allowAsync);
+    return;
+  }
+
+  // Slow path: iterate all expanded authors
+  for (const [author, l1Node] of _modelTree.root.children) {
+    if (!l1Node.expanded) continue;
+    _refreshAuthorSubtree(l1Node, author, force, allowAsync);
   }
 }
 

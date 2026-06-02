@@ -1,5 +1,12 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.39 — Targeted re-render on sort
+
+- **Perf:** `refreshAllExpanded` now accepts an optional `authorFilter`
+  parameter. L2 and L3 sort handlers pass the affected author so only that
+  author's sub-tree is re-expanded, avoiding a full re-render of all
+  expanded L2/L3/L4 sections across all authors.
+
 ### v260601.38 — Document multi-method q_method display
 
 - **Docs:** Added comment in `loadChildren` explaining that multi-method
