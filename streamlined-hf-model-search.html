@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260602.04';
+const APP_VERSION = '260602.05';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -1190,6 +1190,14 @@ function _initFetchState() {
 function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
   if (isStale(gen)) return 0;
   if (!Array.isArray(rawModels)) return 0;
+  // Process non-quant models before quants so parent fine-tunes are in the
+  // tree before their quant children, allowing resolveTrueBase to follow the
+  // full chain instead of stopping at a placeholder intermediate.
+  rawModels.sort((a, b) => {
+    const aQ = RE_Q_EXISTS.test((a.id || "").toLowerCase()) || RE_Q_EXISTS.test((a.tags || []).join(" ").toLowerCase());
+    const bQ = RE_Q_EXISTS.test((b.id || "").toLowerCase()) || RE_Q_EXISTS.test((b.tags || []).join(" ").toLowerCase());
+    return aQ - bQ;
+  });
   let added = 0;
   for (const raw of rawModels) {
     const m = normalizeModel(raw);
@@ -1492,14 +1500,26 @@ function getBaseModelId(cd) {
 // A model is "base" if it has no cardData.base_model, or its base_model points to the same author.
 // Same-author fine-tunes appear at L2 alongside true base models, since users
 // browsing an author page already see them as part of that author's lineage.
+// Quants (GGUF, GPTQ, etc.) of same-author fine-tunes are NOT base models — they
+// should follow the base_model chain to their true L2 parent.
 function isBase(model) {
   const cd = model.cardData;
   if (!cd) return true;
   const baseId = getBaseModelId(cd);
   if (!baseId) return true;
   const author = model.id.split("/")[0];
-  if (baseId.split("/")[0] === author) return true;
+  if (baseId.split("/")[0] === author) {
+    if (isQuantModel(model)) return false;
+    return true;
+  }
   return false;
+}
+
+function isQuantModel(model) {
+  const idLower = (model.id || "").toLowerCase();
+  const tagsStr = (model.tags || []).join(" ").toLowerCase();
+  return RE_Q_EXISTS.test(idLower) || RE_Q_EXISTS.test(tagsStr) ||
+         idLower.includes('fp4') || idLower.includes('fp8');
 }
 
 // Iteratively strip trailing -segments from a model ID until a known parent is found.
@@ -1527,11 +1547,52 @@ function getOrphanQuantMethod(modelId) {
 function getQuantFilterString(model) {
   if (!model) return "derivative";
   const idLower = String(model.id || '').toLowerCase();
+  const tags = Array.isArray(model.tags) ? model.tags : [];
+  const hasBaseModel = !!(model.cardData && getBaseModelId(model.cardData));
+  const byId = getOrphanQuantMethod(model.id || "");
+  const isQuant = isQuantModel(model);
+
+  if (isQuant) {
+    // Quant model: collect quant method(s) from ID and tags
+    const methods = [];
+    if (idLower.includes('fp4')) methods.push('fp4');
+    else if (idLower.includes('fp8')) methods.push('fp8');
+    if (byId.length > 0) methods.push(...byId);
+
+    // Also scan tags for quant methods not found in the ID (e.g. models
+    // whose ID does not carry a quant suffix but are tagged gguf/awq/etc.)
+    for (const t of tags) {
+      const tl = String(t).toLowerCase();
+      if (Q_METHODS.includes(tl) && !methods.includes(tl)) methods.push(tl);
+    }
+
+    if (methods.length === 0 && tags.some(t => String(t).toLowerCase() === 'safetensors')) {
+      methods.push('safetensors');
+    }
+
+    // If this quant's parent is itself a derivative (finetune), add finetune
+    if (hasBaseModel) {
+      const parentId = getBaseModelId(model.cardData);
+      const parentRef = getModelRef(parentId);
+      if (parentRef && parentRef.cardData && getBaseModelId(parentRef.cardData)) {
+        methods.push('finetune');
+      }
+    }
+
+    return [...new Set(methods)].join(', ');
+  }
+
+  if (hasBaseModel) {
+    // Non-quant model with base_model = finetune
+    const methods = ['finetune'];
+    if (tags.some(t => String(t).toLowerCase() === 'safetensors')) methods.push('safetensors');
+    return [...new Set(methods)].join(', ');
+  }
+
+  // No base_model — existing logic for true base models
   if (idLower.includes('fp4')) return 'fp4';
   if (idLower.includes('fp8')) return 'fp8';
-  const byId = getOrphanQuantMethod(model.id || "");
   if (byId.length > 0) return byId.join(', ');
-  const tags = Array.isArray(model.tags) ? model.tags : [];
   if (tags.some(t => String(t).toLowerCase() === 'safetensors')) return 'safetensors';
   return 'derivative';
 }
@@ -2869,6 +2930,14 @@ async function loadAuthorModels(idx, author, container) {
     );
     const models = raw.map(normalizeModel).filter(Boolean);
 
+    // Sort so non-quant models are processed before quants, ensuring parent
+    // fine-tunes are in the tree before their quant children.
+    models.sort((a, b) => {
+      const aQ = isQuantModel(a);
+      const bQ = isQuantModel(b);
+      return aQ - bQ;
+    });
+
     // Upsert fetched models into tree-backed store for this author
     for (const m of models) upsertModelIntoTree(m);
 
@@ -3355,7 +3424,7 @@ function renderL4(parentId, author, container) {
     return `<tr class="l4-row" aria-rowindex="${2 + qIdx}">
       <td class="model-id-cell" aria-colindex="1"><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.displayName || q.id.split('/').slice(1).join('/'))}">${escapeHtml(q.displayName || q.id.split('/').slice(1).join('/'))}</a></td>
       <td class="center" aria-colindex="2">${escapeHtml(q.pipeline_tag || "(untagged)")}</td>
-      <td class="center" aria-colindex="3"><span class="badge ${q.q_method === 'derivative' || q.q_method === 'finetune' ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
+      <td class="center" aria-colindex="3"><span class="badge ${q.q_method === 'derivative' || q.q_method.includes('finetune') ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
       <td class="right" aria-colindex="4">${fmt(q.downloads)}</td>
       <td class="right" aria-colindex="5">${fmt(q.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
       <td class="right" aria-colindex="6">${fmtDate(q.lastModified)}</td>
