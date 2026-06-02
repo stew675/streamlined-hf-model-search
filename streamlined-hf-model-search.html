@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.41';
+const APP_VERSION = '260602.01';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -2910,7 +2910,7 @@ function buildL2TableHtml(idx, author, sorted, state) {
   l2Cols.forEach((c, i) => { html += thHtml(c, state, "2", i + 1); });
   html += `</tr></thead><tbody>`;
   html += sorted.map((m, mIdx) => {
-    const l2Node = _modelTree.byModelId.get(m.id);
+    const l2Node = getModelNode(m.id);
     const qMethods = l2Node ? l2Node._orphanQuantMethods : getOrphanQuantMethod(m.id);
     const rowIdx = 2 + mIdx * 2;
     const detailRowIdx = rowIdx + 1;
@@ -2922,7 +2922,7 @@ function buildL2TableHtml(idx, author, sorted, state) {
       <td class="center" aria-colindex="3" style="font-size:0.78rem">${paramBadgeHtml(m)}</td>
       <td class="right" aria-colindex="4">${fmt(m.downloads)}</td>
       <td class="right" aria-colindex="5">${fmt(m.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
-      <td class="updated-cell" aria-colindex="6"${(_modelTree.byModelId.get(m.id) || {})._reactivatedByChildren ? ' title="Displayed because its children match the current filters"' : ''}>${fmtDate(m.lastModified)} <span style="color:#6e7681;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
+      <td class="updated-cell" aria-colindex="6"${(getModelNode(m.id) || {})._reactivatedByChildren ? ' title="Displayed because its children match the current filters"' : ''}>${fmtDate(m.lastModified)} <span style="color:#6e7681;font-size:0.75rem">(${fmtAge(m.lastModified)})</span></td>
     </tr>
     <tr class="detail-row" id="d2-${idx}-${mIdx}" style="display:none" aria-rowindex="${detailRowIdx}"><td colspan="6"><div class="detail-inner" id="i2-${idx}-${mIdx}"></div></td></tr>`;
   }).join('');
@@ -2985,7 +2985,7 @@ function setupL2Events(container) {
       const modelKey = `${PREFIX_MODEL}${modelId}`;
       if (toggleSection(detailRow, tog, modelKey, `${PREFIX_GROUP}${modelId}|`)) {
         cacheDomRef(modelKey, { row: tr, detailRow, inner, toggle: tog });
-        const l2Node = _modelTree.byModelId.get(modelId);
+        const l2Node = getModelNode(modelId);
         const hasDisplayedChildren = l2Node && [...l2Node.children.values()].some(l3 => [...l3.children.values()].some(l4 => l4.display));
         if (hasDisplayedChildren) {
           renderL3(l2Idx, modelIdx, modelId, inner);
@@ -3158,7 +3158,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
         });
       }
       newEntry.ready = true;
-      const l2Node = _modelTree.byModelId.get(parentId);
+      const l2Node = getModelNode(parentId);
       if (l2Node) l2Node._childrenDeepened = true;
       if (isStale(gen)) return;
       if (container.isConnected) {
@@ -3180,7 +3180,7 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
 // ── Level 3: Quant Author Groups ──
 //   renderL3
 function renderL3(l2Idx, modelIdx, parentId, container) {
-  const l2Node = _modelTree.byModelId.get(parentId);
+  const l2Node = getModelNode(parentId);
   if (!l2Node || l2Node.level !== 2) return;
 
   const groups = {};
@@ -3273,7 +3273,7 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
         const l2Idx = firstRow ? parseInt(firstRow.dataset.l3L2) : 0;
         const modelIdx = firstRow ? parseInt(firstRow.dataset.l3ModelIdx) : 0;
         // Derive L1 author from the L2 model node for scoped refresh.
-        const l2NodeForScope = _modelTree.byModelId.get(parentId);
+        const l2NodeForScope = getModelNode(parentId);
         const l1Author = l2NodeForScope?.parent?.id;
         handleSortClick(th, "3", `l3-${parentId}`, "totalDownloads", true, () => {
           renderL3(l2Idx, modelIdx, parentId, this);
@@ -3310,7 +3310,7 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
 // ── Level 4: Individual Quants ──
 //   renderL4
 function renderL4(parentId, author, container) {
-  const l2Node = _modelTree.byModelId.get(parentId);
+  const l2Node = getModelNode(parentId);
   if (!l2Node || l2Node.level !== 2) return;
   const l3Node = l2Node.children.get(author);
   if (!l3Node) return;
@@ -3476,7 +3476,7 @@ function _refreshAuthorSubtree(l1Node, author, force, allowAsync) {
     if (!mDetailRow || mDetailRow.style.display !== "none") continue;
     mDetailRow.style.display = "";
     if (mTog) { mTog.classList.add("open"); mTog.setAttribute("aria-expanded", "true"); }
-    const l2NodeRef = _modelTree.byModelId.get(modelId);
+    const l2NodeRef = getModelNode(modelId);
     const hasDisplayedChildren = l2NodeRef && [...l2NodeRef.children.values()].some(l3 => [...l3.children.values()].some(l4 => l4.display));
     if (hasDisplayedChildren) {
       renderL3(l2Idx, modelIdx, modelId, mInner);
