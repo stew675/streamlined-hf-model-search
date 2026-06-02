@@ -1,5 +1,15 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.36 — JSON.parse hardening & `_asyncDeepenPass` DOM cache optimization
+
+- **Fix:** Wrapped `JSON.parse(text)` in `_dispatchFetchWithRetry` with try/catch.
+  Malformed or truncated JSON responses now fail fast with a clear rejection
+  instead of routing to the outer `.catch()` and burning retry budget on
+  unfixable parse errors.
+- **Cleanup:** `_asyncDeepenPass` now uses `_getSectionCached(PREFIX_AUTHOR + author)`
+  instead of `document.querySelector(...)` per expanded author, eliminating
+  redundant DOM traversal inside the rAF callback.
+
 ### v260601.35 — Fold `_paramCache` and `_paramSource` into tree model refs
 
 - **Architecture:** Removed `_paramCache` (`Map<modelId, paramB>`) and

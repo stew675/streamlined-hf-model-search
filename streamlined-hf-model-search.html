@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.35';
+const APP_VERSION = '260601.36';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -663,11 +663,11 @@ const RenderCoordinator = {
     // Walk tree for expanded L1 author sections and deepen unknown params.
     for (const [author, l1Node] of _modelTree.root.children) {
       if (!l1Node.expanded) continue;
-      const l1Row = document.querySelector(`tr.l1-row[data-author="${CSS.escape(author)}"]`);
-      if (!l1Row) continue;
-      const idx = parseInt(l1Row.dataset.l1Idx);
-      const inner = document.getElementById(`i1-${idx}`);
-      if (!inner?.isConnected) continue;
+      const key = `${PREFIX_AUTHOR}${author}`;
+      const ref = _getSectionCached(key);
+      if (!ref || !ref.inner?.isConnected) continue;
+      const idx = parseInt(ref.row.dataset.l1Idx);
+      const inner = ref.inner;
       // Only deepen if L2 data is cached (loadAuthorModels already ran)
       refreshAuthorL2Section(idx, author, inner, true);
     }
@@ -1103,7 +1103,13 @@ function _dispatchFetchWithRetry(item, gen, retries) {
         const text = await res.text();
         _totalBytesReceived += new TextEncoder().encode(text).length;
         incApiCalls(1);
-        const data = JSON.parse(text);
+        let data;
+        try { data = JSON.parse(text); } catch (e) {
+          _inflightCount--;
+          item.reject(new Error("Invalid JSON response"));
+          _dequeueNext();
+          return;
+        }
         if (isStale(gen)) { bailQueueItem(item, () => { _inflightCount--; _dequeueNext(); }); return; }
         _inflightCount--;
         item.resolve(data);
