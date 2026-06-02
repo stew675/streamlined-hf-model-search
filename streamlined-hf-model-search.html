@@ -1199,6 +1199,7 @@ function _initFetchState() {
 }
 function _mergeRequestResult(rawModels, gen, pipelineTag, filterFn) {
   if (isStale(gen)) return 0;
+  if (!Array.isArray(rawModels)) return 0;
   let added = 0;
   for (const raw of rawModels) {
     const m = normalizeModel(raw);
@@ -1988,7 +1989,7 @@ function walkFilterL4(node) {
 const _NUMERIC_SORT_KEYS = new Set(["downloads", "likes", "totalDownloads", "totalLikes", "count", "paramB"]);
 function sortCoerce(v, k) {
   if (_NUMERIC_SORT_KEYS.has(k)) return Number(v);
-  if (k === "created_at" || k === "updated_at" || k.includes("Modified")) { const t = new Date(v || 0).getTime(); return t === t ? t : Infinity; }
+  if (k === "created_at" || k === "updated_at" || k.includes("Modified")) { const t = new Date(v || 0).getTime(); return Number.isNaN(t) ? Infinity : t; }
   return String(v || "").toLowerCase();
 }
 
@@ -2573,9 +2574,11 @@ function buildBar(barId, options, activeSet, clickHandler) {
 function reseedActiveTaskFilters() {
   const tasks = resolveTasks();
   const resolvedSet = new Set(tasks);
+  const toDelete = [];
   for (const tag of activeTaskFilters) {
-    if (!resolvedSet.has(tag)) activeTaskFilters.delete(tag);
+    if (!resolvedSet.has(tag)) toDelete.push(tag);
   }
+  for (const tag of toDelete) activeTaskFilters.delete(tag);
   tasks.forEach(t => {
     if (DEFAULT_ACTIVE_TAGS.has(t)) activeTaskFilters.add(t);
   });
@@ -3221,6 +3224,7 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
     if (tf3 && !author.toLowerCase().includes(tf3.toLowerCase())) continue;
 
     groups[author] = {
+      id: author,
       author,
       count,
       totalDownloads: dl,
