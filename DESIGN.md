@@ -70,7 +70,7 @@ Callers push work items via `fetchJson()`; `_dequeueNext` gates on both in-fligh
 
 Deterministic 3-step pipeline in `tryResolveModelParam`: name regex → parent inheritance (iterative suffix strip) → child search API (`resolveParamFromChildren`). Free paths are always exhausted first; the expensive child-search path is an absolute last resort. Models resolved via child-name inference get a purple (`derived-param`) badge; parent inheritance gets a white/gray (`parent-inherit-param`) badge; child-data resolution gets a goldenrod (`child-data-param`) badge. Re-attempt suppression is stored on each model object (`model._inferredAttempted`).
 
-`resolveParamFromChildren` uses early exit: stops after 3 non-null results agreeing on the current max (up to `DERIVED_BATCH_SIZE`=10). Once confidence is established, further fetches are wasteful. Tries `extractParamFromId` on each child's ID before making the individual API fetch — most quant names contain B/M patterns, so the individual fetch is rarely needed.
+`resolveParamFromChildren` uses early exit: stops after 3 non-null results agreeing on the current max (up to `DERIVED_BATCH_SIZE`=6). Once confidence is established, further fetches are wasteful. Tries `extractParamFromId` on each child's ID before making the individual API fetch — most quant names contain B/M patterns, so the individual fetch is rarely needed.
 
 ### Deepening Sequencing
 
@@ -196,7 +196,7 @@ L2 text filter is applied globally in `passesTreeNodeFilters()` before L1 aggreg
 | `INFLIGHT_MAX` | 5 | Browser per-origin limit is ~6; leaves headroom for favicon etc. |
 | `ALL_FETCHED_MAX` | 16384 | Memory cap, trimmed by lastModified descending |
 | `AUTHOR_LIMIT` | 1000 | Max models fetched per author API call |
-| `DERIVED_BATCH_SIZE` | 10 | Max children searched in `resolveParamFromChildren` (early exits at 3 agreeing) |
+| `DERIVED_BATCH_SIZE` | 6 | Max children searched in `resolveParamFromChildren` (early exits at 3 agreeing) |
 | `DEBOUNCE_MS` | 200 | Popup hide delay; gives time to move cursor from trigger into popup content |
 | `POPUP_MAX_SAMPLES_L4` | 200 | L4 hidden models preview cap; L2 shows all with no cap |
 
