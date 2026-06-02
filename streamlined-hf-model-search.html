@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260601.33';
+const APP_VERSION = '260601.34';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -481,6 +481,14 @@ const PREFIX_AUTHOR = 'a|';
 const PREFIX_MODEL = 'm|';
 const PREFIX_GROUP = 'g|';
 
+// ── Level Discriminators ──
+// Used as `data-level` attribute on <th> elements and in level guard checks
+// so sort handlers reject events from nested levels even after innerHTML
+// replacement detaches the event target from the DOM.
+const LEVEL_L2 = "2";
+const LEVEL_L3 = "3";
+const LEVEL_L4 = "4";
+
 // ── Quantization Patterns ──
 const Q_METHODS = ["awq", "gptq", "bitsandbytes", "eetq", "aqlm", "gguf", "exl2", "marlin", "mlx", "bnb", "fp4", "fp8", "nf4", "int8", "int4", "q8", "q4"];
 const _Q_PATTERN = Q_METHODS.join("|");
@@ -538,7 +546,10 @@ function _formatBytes(n) {
   if (mb < 1024) return mb.toFixed(1) + " MB";
   return (mb / 1024).toFixed(1) + " GB";
 }
-function incApiCalls(n) { apiCalls += n; document.getElementById("api-counter").textContent = "API Requests: " + String(apiCalls) + " / " + _formatBytes(_totalBytesReceived); }
+function incApiCalls(n) {
+  apiCalls += n;
+  _rateLimitCounter.textContent = "API Requests: " + String(apiCalls) + " / " + _formatBytes(_totalBytesReceived);
+}
 
 // ── Dirty Flag ──
 let needsUpdate = false;
@@ -1121,7 +1132,8 @@ function _dispatchFetchWithRetry(item, gen, retries) {
           _consecutive429s++;
           updateRateLimitUI(_consecutive429s >= 3);
           const ra = res.headers.get('Retry-After');
-          delay = ra ? parseInt(ra, 10) * 1000 : Math.min(1000 * Math.pow(2, retries), 30000);
+          const raN = parseInt(ra, 10);
+          delay = (ra && !isNaN(raN)) ? raN * 1000 : Math.min(1000 * Math.pow(2, retries), 30000);
         } else {
           _consecutive429s = 0;
           updateRateLimitUI(false);
@@ -1147,6 +1159,8 @@ function _dispatchFetchWithRetry(item, gen, retries) {
       clearTimeout(timer);
       _inflightControllers.delete(item.url);
       if (isStale(gen)) { bailQueueItem(item, () => { _inflightCount--; _dequeueNext(); }); return; }
+      _consecutive429s = 0;
+      updateRateLimitUI(false);
       if (retries < CONFIG.MAX_RETRIES) {
         const delay = Math.min(1000 * Math.pow(2, retries), 30000);
         console.warn(`Network error for ${item.url}, retry ${retries + 1}/${CONFIG.MAX_RETRIES} in ${delay}ms`);
@@ -1598,6 +1612,9 @@ function getParamCount(m) {
     result = extractParamFromId(m.id);
     if (result !== null) _paramSource.set(m.id, 'name');
   }
+  // FIFO eviction by Map insertion order, not LRU. Once _paramCache
+  // exceeds 5000 entries, drop the oldest 1000. Acceptable since
+  // resolved params rarely need re-resolution within a session.
   if (_paramCache.size >= 5000) {
     let evict = 0;
     for (const key of _paramCache.keys()) {
@@ -1858,6 +1875,14 @@ function runFilterPipeline() {
   }
 }
 
+/**
+ * Aggregate L2 children into L1 author stats.
+ * Note: non-canonical L2 nodes (dedup losers across same-named models from
+ * different authors) still contribute their downloads/likes to the author's
+ * aggDownloads/aggLikes via r.downloads/r.likes below. This is intentional —
+ * the author still "owns" the model even though only one copy is displayed
+ * at L2. The visible L2 count (aggCount) does correctly skip non-canonicals.
+ */
 function walkFilterL1(node) {
   let count = 0, dl = 0, lk = 0, totalCanonical = 0;
   for (const l2Node of node.children.values()) {
@@ -2375,6 +2400,11 @@ function clampRange(fromEl, toEl, minGap, max) {
     toEl.value = String(Math.min(fv + minGap, max));
   }
 }
+// Bidirectional push: if the `from` knob advances past `to - (minGap-1)`,
+// drag the `to` knob forward to maintain the gap. Symmetric helper
+// `enforceToGap` pushes the `from` knob backwards when `to` retreats past
+// the gap. `clampRange` is the final safety net for the case where both
+// knobs reach the boundaries simultaneously. See setupDualSlider wiring.
 function enforceFromGap(fromEl, toEl, minGap, max) {
   const nv = parseInt(fromEl.value);
   const tv = parseInt(toEl.value);
@@ -2784,6 +2814,9 @@ async function deepenBatch(idx, author, container, unknownModels, gen) {
 }
 async function refreshAuthorL2Section(idx, author, container, skipRender) {
   const gen = _fetchGeneration;
+  // Composite key: a bumped _fetchGeneration in resetAppState invalidates
+  // the guard naturally as the in-flight async finally runs and removes
+  // the old gen|author entry. No manual cross-generation cleanup needed.
   const deepKey = `${gen}|${author}`;
   if (_deepeningAuthors.has(deepKey)) return;
   _deepeningAuthors.add(deepKey);
@@ -2880,17 +2913,14 @@ function thHtml(c, state, level, colindex) {
 }
 
 function renderL2Empty(idx, author, container, popupSource) {
-  const hasData = popupSource && popupSource.length > 0;
   const allBaseModels = popupSource || [];
   if (allBaseModels.length > 0) {
     const pt = makePopupTrigger(`l2-empty-${author}`, "No base models match current filters",
-      (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), 200)));
+      (p) => renderFilteredPopup(p, getFilteredOutModels(allBaseModels, new Set(), allBaseModels.length)));
     container.innerHTML = `<div class="detail-count" style="color:#6e7681">${pt.html}</div>`;
     pt.wire();
-  } else if (!hasData) {
-    container.innerHTML = '<div class="detail-count" style="color:#6e7681">No data loaded yet.</div>';
   } else {
-    container.innerHTML = '<div class="detail-count" style="color:#6e7681">No base models match current filters.</div>';
+    container.innerHTML = '<div class="detail-count" style="color:#6e7681">No data loaded yet.</div>';
   }
 }
 
@@ -2906,7 +2936,7 @@ function buildL2TableHtml(idx, author, sorted, state) {
   const l2Cols = cols.slice();
   l2Cols[0] = Object.assign({}, cols[0], { label: `Base Models for ${author}` });
   let html = `<table aria-label="Base models for ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` style="width:${c.width}px"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
-  l2Cols.forEach((c, i) => { html += thHtml(c, state, "2", i + 1); });
+  l2Cols.forEach((c, i) => { html += thHtml(c, state, LEVEL_L2, i + 1); });
   html += `</tr></thead><tbody>`;
   html += sorted.map((m, mIdx) => {
     const l2Node = _modelTree.byModelId.get(m.id);
@@ -2968,7 +2998,7 @@ function setupL2Events(container) {
       const idx = _getAuthorL1Idx(author);
       if (idx < 0) return;
       const d = _getAuthorL2Data(author);
-      handleSortClick(th, "2", `l2-${author}`, "downloads", true, () => {
+      handleSortClick(th, LEVEL_L2, `l2-${author}`, "downloads", true, () => {
         renderL2(idx, author, d.models, this, d.allBaseModels);
       });
       return;
@@ -3082,8 +3112,8 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
                 if (hasModel(m.id)) continue;
               }
               const qSet = new Set();
-              (idLower.match(RE_Q_MATCH) || []).forEach(m => qSet.add(m));
-              (tagsStr.match(RE_Q_MATCH) || []).forEach(m => qSet.add(m));
+              (idLower.match(RE_Q_MATCH) || []).forEach(q => qSet.add(q));
+              (tagsStr.match(RE_Q_MATCH) || []).forEach(q => qSet.add(q));
               const qMethods = [...qSet];
               let qMethod;
               if (childHasBase) {
@@ -3234,7 +3264,7 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
   const parentName = parentId.split("/").slice(1).join("/");
   const l3Cols = cols.map((c, i) => i === 0 ? { ...c, label: `Derivative Authors for ${parentName}` } : c);
   let html = `<table aria-label="Quant author groups for ${escapeHtml(parentId)}"><colgroup>${cols.map(c => `<col${c.width ? ` style="width:${c.width}px"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
-  l3Cols.forEach((c, i) => { html += thHtml(c, state, "3", i + 1); });
+  l3Cols.forEach((c, i) => { html += thHtml(c, state, LEVEL_L3, i + 1); });
   html += `</tr></thead><tbody>`;
 
   // Optimized: Use map + join for table rows instead of forEach + +=
@@ -3268,7 +3298,7 @@ function renderL3(l2Idx, modelIdx, parentId, container) {
         const firstRow = this.querySelector("tr.l3-row");
         const l2Idx = firstRow ? parseInt(firstRow.dataset.l3L2) : 0;
         const modelIdx = firstRow ? parseInt(firstRow.dataset.l3ModelIdx) : 0;
-        handleSortClick(th, "3", `l3-${parentId}`, "totalDownloads", true, () => {
+        handleSortClick(th, LEVEL_L3, `l3-${parentId}`, "totalDownloads", true, () => {
           renderL3(l2Idx, modelIdx, parentId, this);
         });
         return;
@@ -3344,7 +3374,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
   const l4Cols = cols.slice();
   l4Cols[0] = Object.assign({}, cols[0], { label: `Derivative Models for ${author}` });
   let html = `<table aria-label="Individual quantizations for ${escapeHtml(parentId)} by ${escapeHtml(author)}"><colgroup>${cols.map(c => `<col${c.width ? ` style="width:${c.width}px"` : ''}>`).join('')}</colgroup><thead><tr aria-rowindex="1">`;
-  l4Cols.forEach((c, i) => { html += thHtml(c, st, "4", i + 1); });
+  l4Cols.forEach((c, i) => { html += thHtml(c, st, LEVEL_L4, i + 1); });
   html += `</tr></thead><tbody>`;
 
   // Optimized: Use map + join for table rows instead of forEach + +=
@@ -3379,7 +3409,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
       const inner = e.target.closest(".detail-inner");
       if (inner && inner !== this) return;
       const th = e.target.closest("thead th");
-      if (!th || th.dataset.level !== "4") return;
+      if (!th || th.dataset.level !== LEVEL_L4) return;
       const l4Key = this.dataset.l4Key;
       if (!l4Key) return;
       const pipeIdx = l4Key.indexOf('|');
@@ -3395,7 +3425,7 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
     });
     container.addEventListener("keydown", function(e) {
       const th = e.target.closest("thead th[tabindex]");
-      if (!th || th.dataset.level !== "4" || (e.key !== "Enter" && e.key !== " ")) return;
+      if (!th || th.dataset.level !== LEVEL_L4 || (e.key !== "Enter" && e.key !== " ")) return;
       e.preventDefault();
       th.click();
     });
@@ -3406,7 +3436,8 @@ function renderL4(l2Idx, modelIdx, gIdx, parentId, author, container) {
 //   refreshAllExpanded
 function refreshAllExpanded(force, allowAsync = true) {
   if (!_modelTree.root) return;
-  // Purge stale DOM cache entries for L2/L3/L4 before re-expansion
+  // Purge stale DOM cache entries for L1/L2/L3/L4 before re-expansion
+  invalidateDomPrefix(PREFIX_AUTHOR);
   invalidateDomPrefix(PREFIX_MODEL);
   invalidateDomPrefix(PREFIX_GROUP);
   // Phase 1: re-expand L1 author rows (walk tree for expanded L1 nodes)

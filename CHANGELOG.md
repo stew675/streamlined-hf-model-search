@@ -1,5 +1,45 @@
 # Changelog — Streamlined HF Model Search
 
+### v260601.31 — Code Review Fixes Round 2: B1-B5, P3, P4, C2, C4-C7
+
+- **Fix:** L2 hidden-models popup no longer caps at 200 samples; passes
+  `allBaseModels.length` instead. Matches the L2 contract (no cap). L4
+  still uses `CONFIG.POPUP_MAX_SAMPLES_L4` (B1).
+- **Cleanup:** Removed unreachable `else` branch in `renderL2Empty`; the
+  remaining two-branch structure cleanly covers the popup vs "no data
+  loaded" cases (B2).
+- **Fix:** `_consecutive429s` now resets on the network-error catch path
+  in `_dispatchFetchWithRetry`, preventing stale amber flash on the API
+  counter after transient network failures (B3).
+- **Fix:** `Retry-After` header parser now falls back to exponential
+  backoff when the value is non-numeric (HTTP-date format) — was
+  silently using NaN as a `setTimeout` delay (B4).
+- **Docs:** Documented intentional non-canonical L2 download/like
+  aggregation in `walkFilterL1`; the author still "owns" the model even
+  when the dedup winner is a different author. Visible L2 counts
+  correctly skip non-canonicals (B5).
+- **Cleanup:** `_domCache` now also invalidates `PREFIX_AUTHOR` entries
+  on `refreshAllExpanded`, preventing stale L1 refs from accumulating
+  between renders. The existing `row.isConnected` guard was already
+  correctness-safe; this is a cache-pressure cleanup (P3).
+- **Docs:** Documented `_paramCache` eviction as FIFO-by-insertion-order,
+  not LRU. Acceptable since resolved params rarely need re-resolution
+  within a session (P4).
+- **Cleanup:** Renamed shadowed `m` to `q` in `loadChildren` quant match
+  loops; the outer `m` (API model) was being shadowed by the forEach
+  loop variable (C2).
+- **Docs:** Documented intentional `${gen}|${author}` composite key in
+  `_deepeningAuthors`; a generation bump invalidates guards naturally
+  as in-flight async finally runs (C4).
+- **Cleanup:** `incApiCalls` now reuses the cached `_rateLimitCounter`
+  ref instead of re-querying the DOM on every call (C5).
+- **Cleanup:** Extracted `LEVEL_L2`/`LEVEL_L3`/`LEVEL_L4` constants;
+  `data-level` template attributes and level guards in `handleSortClick`
+  and L4 event handlers now use typed string constants. CSS attribute
+  selectors remain literal (can't reference JS constants) (C6).
+- **Docs:** Added contract comment above `enforceFromGap` explaining the
+  bidirectional push behavior and the `clampRange` safety net (C7).
+
 ### v260601.30 — Code Review Resolution: Extract helper, byte accuracy, popup clamping, CSS cleanup, DOM cache hygiene
 
 - **Refactor:** Extracted parent-reactivation logic from `walkFilterL2` into
