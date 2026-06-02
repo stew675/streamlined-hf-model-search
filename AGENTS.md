@@ -23,7 +23,7 @@ Read `DESIGN.md` before making changes that touch: popup behavior, CONFIG values
 - **CSS.escape**: Any query selector interpolating user-controlled strings (author names, model IDs) must use `CSS.escape()` to prevent broken queries or injection.
 - **Two-tier rendering**: `UI` object handles progressive feedback (status bar, cell badges) via `setStatus`/`queueUpdate` — never touches table structure. `RenderCoordinator` (`RC`) handles structural renders (table rebuilds) via `requestRender`/`_doFullRender` — synchronous only, guarded by `_isRendering`. Async deepening runs in a separate `_asyncDeepenPass` pass after the sync render completes.
 - **No structural renders from resolution paths**: `tryResolveModelParam`, `deepenBatch`, and the inline derive loop update state/caches only, queue progressive badge updates via `UI.queueUpdate()`, and schedule structural renders via `_schedulePostDeepenRender` only when filter boundaries are crossed.
-- **`refreshAllExpanded(force, allowAsync = true)`**: New `allowAsync` parameter. When `false` (structural pass), renders L2 from cache without deepening. When `true` (user-triggered), deepens via `refreshAuthorL2Section`. The structural pass uses `false`; filter/slider/click handlers use `true` (default).
+- **`refreshAllExpanded(force, allowAsync = true, authorFilter = null)`**: The `allowAsync` parameter distinguishes structural-pass re-renders (`false`, no deepening) from user-triggered refreshes (`true`, deepens via `refreshAuthorL2Section`). When `authorFilter` is set, only that author's subtree is re-expanded via O(1) Map lookup, avoiding a full scan.
 
 ## Testing
 
@@ -52,6 +52,7 @@ Open in browser, validate:
 22. Param badge updates progressively as deepening resolves each model (no full table re-render per resolution)
 23. Burst fetch completions remain stable via render coalescing and `_isRendering` guard (no re-entrant structural renders)
 24. Tree-only path remains intact (no `_modelDb`, `buildTreePass1`, `buildTreePass2`, or `rebuildTree` references)
+25. Param badge emdash color persists across chip toggles: after Infer Missing Params fails on a model, disabling the chip and re-opening the L2 author still shows a red emdash (not orange)
 
 ## Standalone Validation Tests
 
@@ -72,15 +73,15 @@ node tests/default_model_debug_pull.js <author/model-name> [pipeline-tag]
 
 - **Data attribute names**: `data-l3-model-idx` ≠ `data-l3-model`. Always verify matching.
 - **ID collisions**: L3/L4 IDs include all parent indices (`d3-{l2}-{model}-{g}`).
-- **Filter refresh**: `refreshAllExpanded` queries DOM via `expandedSections` Set — must cascade-delete descendant IDs on parent collapse to avoid re-rendering orphaned sections.
+- **Filter refresh**: `refreshAllExpanded` walks `_modelTree.root.children` and checks `l1Node.expanded` flags (the `expandedSections` Set is only for persistence across renders). Must cascade-delete descendant `expanded` flags on parent collapse to avoid re-rendering orphaned sections.
 - **In-flight children dedup keys**: `children-{parentId}` uses the full model ID (e.g., `Qwen/Qwen2.5-7B`).
 - **Author name stripping**: L2 displays `m.id.split("/").slice(1).join("/")` to avoid repeating the author.
 - **L1 sort selector**: Uses `#main-table > thead > tr > th` to avoid L2/L3 nested `<th>` triggering. Do NOT delegate to `#main-table thead`.
 - **Param deepening**: Only fires for the single expanded author, in batches of 4, and only for models passing current date/param filters.
 - **Search endpoint limitations**: Search API (`/api/models?search=...`) never returns `safetensors` or `config` data even with `full=true`. Individual model API does — hence deepening for models without B/M suffix.
 - **Detached event target**: Capture `const inner = e.target.closest(".detail-inner")` in a variable before any `innerHTML` replacement (which detaches the target, making `closest()` return null). The `data-level` attribute on `<th>` provides a secondary guard.
-- **Progressive vs Structural separation**: Never call `UI.setStatus` or `UI.queueUpdate` from inside `_doFullRender` (structural path). Never call `RT.requestRender` from inside progressive update handlers. Resolution functions (`tryResolveModelParam`, `deepenBatch`) must only update state/caches and queue progressive feedback — no direct structural renders.
-- **`_filterBoundaryChanged` tracking**: `_lastFilteredCounts` Map tracks per-author filtered counts. `_schedulePostDeepenRender` uses this to decide whether a structural render is needed after param resolution. If no filter boundary was crossed, progressive badge updates are sufficient.
+- **Progressive vs Structural separation**: Never call `UI.setStatus` or `UI.queueUpdate` from inside `_doFullRender` (structural path). Never call `RC.requestRender` from inside progressive update handlers. Resolution functions (`tryResolveModelParam`, `deepenBatch`) must only update state/caches and queue progressive feedback — no direct structural renders.
+- **`_schedulePostDeepenRender` tracking**: After param resolution, it captures the pre-resolution set of displayed canonical L2 model IDs, re-runs `walkFilterL1`, then compares counts and (if counts match) membership. A structural render is triggered only when the displayed set changes. If no boundary was crossed, progressive badge updates are sufficient.
 - **`_deepeningAuthors` guard**: Prevents concurrent `refreshAuthorL2Section` invocations for the same author. Set is added-to at entry, removed in `finally` block.
 - **Generation guards**: Use `isStale(gen)` instead of inline `gen !== _fetchGeneration`. All call sites use this helper — don't introduce bare comparisons.
 - **Popup wiring**: Always use `makePopupTrigger(suffix, label, makeContent)` for hidden-models popup triggers. It centralizes ID sanitization (`/` → `__`) and returns `.wire()` for post-innerHTML setup. Never construct `<button id="fp-trigger-...">` inline.

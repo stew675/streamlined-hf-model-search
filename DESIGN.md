@@ -54,7 +54,7 @@ Two-tier rendering separates progressive feedback from structural DOM rebuilds:
 
 `_asyncDeepenPass()` runs post-render for async deepening of expanded sections outside the synchronous pipeline. `_schedulePostDeepenRender(author, gen)` triggers a structural render only when param resolution changes the set of displayed canonical L2 model IDs under the author (compares the pre/post filter sets, not just counts, to catch swap-in/swap-out scenarios where the total stays the same).
 
-`refreshAllExpanded(force, allowAsync = true)`: The `allowAsync` parameter distinguishes user-triggered refreshes (`true`, deepens via `refreshAuthorL2Section`) from structural-pass re-renders (`false`, renders L2 from cache without deepening).
+`refreshAllExpanded(force, allowAsync = true, authorFilter = null)`: The `allowAsync` parameter distinguishes user-triggered refreshes (`true`, deepens via `refreshAuthorL2Section`) from structural-pass re-renders (`false`, renders L2 from cache without deepening). When `authorFilter` is set, only that author's subtree is re-expanded via O(1) Map lookup on `_modelTree.root.children`, avoiding a full scan of all authors.
 
 **SkipL1Sort**: `_schedulePostDeepenRender` calls `RC.requestRender(null, true)` with `skipL1Sort=true` to prevent author rows jumping during param resolution. The flag is overwritten by the last `requestRender` before rAF fires — a user action (filter change, sort click) sets it to `false`, ensuring user intent takes priority.
 
@@ -68,7 +68,7 @@ Callers push work items via `fetchJson()`; `_dequeueNext` gates on both in-fligh
 
 ### Param Resolution Pipeline
 
-Deterministic 3-step pipeline in `tryResolveModelParam`: name regex → parent inheritance (iterative suffix strip) → child search API (`resolveParamFromChildren`). Free paths are always exhausted first; the expensive child-search path is an absolute last resort. Models resolved via parent inheritance or child search get a purple inferred badge. Re-attempt suppression is stored on each model object (`model._inferredAttempted`).
+Deterministic 3-step pipeline in `tryResolveModelParam`: name regex → parent inheritance (iterative suffix strip) → child search API (`resolveParamFromChildren`). Free paths are always exhausted first; the expensive child-search path is an absolute last resort. Models resolved via child-name inference get a purple (`derived-param`) badge; parent inheritance gets a white/gray (`parent-inherit-param`) badge; child-data resolution gets a goldenrod (`child-data-param`) badge. Re-attempt suppression is stored on each model object (`model._inferredAttempted`).
 
 `resolveParamFromChildren` uses early exit: stops after 3 non-null results agreeing on the current max (up to `DERIVED_BATCH_SIZE`=10). Once confidence is established, further fetches are wasteful. Tries `extractParamFromId` on each child's ID before making the individual API fetch — most quant names contain B/M patterns, so the individual fetch is rarely needed.
 

@@ -87,11 +87,9 @@ Above the displayed results are 4 text boxes which may be used to selectively fi
 
 The *L1 Author* box pins matching Base Model Authors to the top of the hierarchical tree rather than hiding non-matching authors.
 
-The *L2 Model ID*, *L3 Author*, and *L4 Model ID* filters act as global search terms that cascade through the hierarchy.
-For example, typing a model name in the *L2 Model ID* box will narrow base models across all authors.
-This will in turn update the list of displayed L1 authors to reflect only those with matching models.
+The *L2 Model ID* filter is a global search term that cascades through the hierarchy: typing a model name narrows base models across all authors, which in turn updates the displayed L1 authors to reflect only those with matching models.
+The *L3 Author* and *L4 Model ID* filters apply locally at their respective expansion levels within already-expanded sections — they do not cascade up to parent levels.
 This intentional behavior lets you quickly find specific models regardless of which author hosts them.
-The L3 and L4 filters apply at their respective expansion levels within already-expanded sections.
 
 ### Hidden Models Preview Popups
 
