@@ -2,7 +2,6 @@ var _modelTree = {
   root: null,       // TreeNode (level-0 synthetic root)
   byPath: new Map(),// string → TreeNode (O(1) path lookup)
   byModelId: new Map(), // lowercase model ID → TreeNode (L2 or L4 node)
-  authorByLower: new Map(), // lowercase author string → L1 TreeNode
   byModelName: new Map() // display name → L2 TreeNode[] (canonical dedup candidates)
 };
 function createTreeNode(level, type, id, modelRef) {
@@ -69,13 +68,11 @@ function ensureTreeRoot() {
 
 function ensureL1AuthorNode(author) {
   ensureTreeRoot();
-  var key = (author || '').toLowerCase();
-  var node = _modelTree.authorByLower.get(key);
+  var node = _modelTree.byPath.get(author);
   if (!node) {
     node = createTreeNode(1, 'author', author);
     node.parent = _modelTree.root;
     _modelTree.root.children.set(author, node);
-    _modelTree.authorByLower.set(key, node);
   }
   _modelTree.byPath.set(author, node);
   return node;
@@ -264,7 +261,6 @@ function resetAppState() {
   if (_uiRafId) { cancelAnimationFrame(_uiRafId); _uiRafId = null; }
   _modelTree.byPath.clear();
   _modelTree.byModelId.clear();
-  _modelTree.authorByLower.clear();
   _modelTree.byModelName.clear();
   _modelTree.root = null;
 }

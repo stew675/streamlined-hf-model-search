@@ -36,7 +36,7 @@ Single-file, zero-dependency HTML/JS/CSS application that explores HuggingFace b
 - `_fetchSeen`, `_fetchCompleted` — Shared progressive render state initialized by `_initFetchState()` at start of each "Get Results" cycle. Each request's completion handler increments `_fetchCompleted` and triggers re-render via `_onFetchComplete`.
 - `modelRef.paramB` / `modelRef._paramSource` — Parameter count and resolution method stored directly on each tree model ref. Replaces the previous `_paramCache`/`_paramSource` parallel Maps, eliminating maintenance overhead and ~1.4MB of side-map memory.
 - `_apiTimestamps` — Sliding window enforcing ≤4 req/s (1 call per 250ms, no burst). Managed inside `_dequeueNext`, not in `fetchJson`.
-- `_modelTree` — Single source of truth for fetched models and hierarchy. Holds the root node plus lookup maps (`byPath`, `byModelId`, `authorByLower`).
+- `_modelTree` — Single source of truth for fetched models and hierarchy. Holds the root node plus lookup maps (`byPath`, `byModelId`).
 - `sliderFrom/sliderTo` — 0..80 (0=Anytime, 1-79=14-day increments, 80=Now).
 - `paramSliderFrom/paramSliderTo` — 0..220 (piecewise linear 7-segment mapping).
 - `_popupTimers` — `Map<popupEl, timeoutId>` for debounced popup show/hide (150ms show, 200ms hide).
@@ -123,6 +123,8 @@ L2/L4 hidden count and popup hidden count must match exactly. `popupSource` pass
 - `byModelName` (Map: `displayName → L2Node[]`) — used by `recomputeCanonicalForName` to find canonical dedup candidates in O(k) where k = models with that name, replacing the previous O(n) full scan over all L2 nodes.
 
 `byModelId` itself uses lowercase keys so lookups are case-insensitive without a separate index. This is a deliberate design decision: HF IDs are case-sensitive, but derivative authors (and occasionally base model authors) use inconsistent casing for the same model, causing mismatches. Treating all IDs case-insensitively works around this common issue.
+
+**Author matching is case-sensitive for security:** Unlike model IDs, author names are matched with original case via `byPath`. This prevents impersonation attacks where a malicious actor uses a mixed-case variant of a known author name (e.g. `"qwEn"` vs `"Qwen"`) to inject their models into the legitimate author's subtree. The `authorByLower` map was removed in favor of case-sensitive `byPath` lookups.
 
 **displayName precomputation:** `normalizeModel` computes `displayName` (`id.split('/').slice(1).join('/')`) and `displayNameLower` at ingestion time. All render and filter hot paths read these cached fields instead of repeatedly splitting and lowercasing model IDs.
 
