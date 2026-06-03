@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260602.07';
+const APP_VERSION = '260603.01';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -971,6 +971,20 @@ function upsertModelIntoTree(model) {
     _modelTree.byModelId.set(modelRef.id.toLowerCase(), existingNode);
   } else {
     _modelTree.byModelId.set(modelRef.id.toLowerCase(), l4Node);
+  }
+
+  // Phase 2: If this model was attached under a placeholder L2 (true parent
+  // not in the tree), promote it to its own L2 node — pre-5301344 fallback
+  // for true orphans that cannot find a parent in the fetched data.
+  if (l2Node.placeholder) {
+    l3Node.children.delete(modelRef.id);
+    if (l3Node.children.size === 0) {
+      l2Node.children.delete(quantAuthor);
+    }
+    const promoted = ensureL2BaseNode(modelRef.id, modelRef);
+    promoted.placeholder = false;
+    recomputeCanonicalForName(modelRef.displayName || modelRef.id.split('/').slice(1).join('/'));
+    _modelTree.byModelId.set(modelRef.id.toLowerCase(), promoted);
   }
 }
 

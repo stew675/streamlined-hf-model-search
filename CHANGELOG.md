@@ -1,5 +1,15 @@
 # Changelog — Streamlined HF Model Search
 
+### v260603.01 — Two-phase orphan promotion: fall back to L2 when parent not in tree
+
+- **Fix:** Added Phase 2 to `upsertModelIntoTree` that promotes quant models to their
+  own L2 node when their resolved true base parent is a placeholder (i.e., not present
+  in the tree). Previously, commit 5301344 correctly re-routed quants through
+  `resolveTrueBase`, but if the parent wasn't fetched, the model was hidden under a
+  `placeholder=true, display=false` L2 stub with no way to surface. Phase 2 detects
+  this case after Phase 1 attachment and evicts/promotes the model to its own L2,
+  matching the pre-5301344 fallback behavior for true orphans.
+
 ### v260602.07 — Fix: L2 expand always fetches dedicated children on first open; filter pipeline runs after upsert
 
 - **Fix:** Removed the `hasDisplayedChildren` gating logic in `setupL2Events` and
