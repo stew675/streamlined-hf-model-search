@@ -293,7 +293,7 @@
     <h3 class="filter-label">To PipeLine Classes:</h3>
   </div>
   <div class="chip-group" id="special-bar" role="group" aria-label="Special filters">
-    <h3 class="filter-label">Untagged PipeLines:</h3>
+    <h3 class="filter-label">Unknown PipeLines:</h3>
   </div>
 </div>
 <div id="activated-types" class="task-bar-row">
@@ -356,7 +356,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 // ── App Version ──
-const APP_VERSION = '260603.01';
+const APP_VERSION = '260606.01';
 // See DESIGN.md — architecture decisions, data flow, and configuration reference.
 let _authorData = [];
 
@@ -419,8 +419,8 @@ const FROM_OPTIONS = ["text", "image", "audio", "video", "any", "all"];
 const TO_OPTIONS = ["text", "image", "audio", "video", "any", "speech", "3d", "all"];
 const activeFromFilters = new Set(["text", "image", "any"]);
 const activeToFilters = new Set(["text", "any"]);
-const SPECIAL_DISPLAY = ["include untagged"];
-const UNTAGGED_SENTINEL = '__untagged__';
+const SPECIAL_DISPLAY = ["include unknown"];
+const UNKNOWN_SENTINEL = '__unknown__';
 
 // ── Default Active Tags ──
 const DEFAULT_ACTIVE_TAGS = new Set([
@@ -772,7 +772,7 @@ function createTreeNode(level, type, id, modelRef) {
     _filterDate: true,
     _filterQuant: true,
     _filterTask: true,
-    _filterUntagged: true
+    _filterUnknown: true
   };
 }
 
@@ -1260,7 +1260,7 @@ function applyFilters(force, deep) {
   if (deep) { deepBtn.classList.remove("ready"); deepBtn.disabled = true; }
   const tasks = resolveTasks().filter(t => activeTaskFilters.has(t));
   const newTasks = tasks.filter(t => !fetchedTasks.has(t));
-  const needUntagged = activeSpecialFilters.has("include untagged") && !fetchedUntagged;
+  const needUntagged = activeSpecialFilters.has("include unknown") && !fetchedUntagged;
   const reenable = () => { quickBtn.disabled = false; deepBtn.disabled = false; };
 
   // Fast path: no new data needed, just re-render with current filters.
@@ -1631,7 +1631,7 @@ function resolveTasks() {
 function matchesTaskFilter(pipelineTag) {
   if (!pipelineTag) return true;
   const t = TO_TAGS.find(x => x.tag === pipelineTag);
-  if (!t) return false;
+  if (!t) return true; // Unknown tag — pass through; visibility gated by "include unknown" chip downstream
   const fromMatch = t.from.every(f => activeFromFilters.has(f));
   const toMatch = activeToFilters.has(t.to);
   return fromMatch && toMatch;
@@ -1902,7 +1902,7 @@ function passesTreeNodeFilters(m) {
   if (tf2 && !(m.displayNameLower || m.id.split("/").slice(1).join("/").toLowerCase()).includes(tf2.toLowerCase())) return false;
   if (!isInDateRange(m.lastModified)) return false;
   const tag = m.pipeline_tag;
-  if (!tag && !activeSpecialFilters.has("include untagged")) return false;
+  if ((!tag || !TO_TAGS.find(x => x.tag === tag)) && !activeSpecialFilters.has("include unknown")) return false;
   const pb = m.paramB != null ? m.paramB : getParamCount(m);
   if (!isInParamRange(pb)) return false;
   if (_hideMissingParamEnabled && pb === null) return false;
@@ -1917,7 +1917,7 @@ function passesTreeNodeFilters(m) {
 }
 
 // L4 filter decisions are decomposed and stored on each L4 TreeNode during
-// walkFilterL4 (see _filterDate, _filterQuant, _filterTask, _filterUntagged).
+// walkFilterL4 (see _filterDate, _filterQuant, _filterTask, _filterUnknown).
 // Render paths read node.display directly instead of re-evaluating predicates.
 
 // Single recursive tree walk: evaluates filters, propagates parent activation,
@@ -1966,9 +1966,9 @@ function shouldReactivateParent(node, childCount) {
   const tf2 = RC._state.textFilters.l2Model;
   if (tf2 && !(ref.displayNameLower || ref.id.split('/').slice(1).join('/').toLowerCase()).includes(tf2.toLowerCase())) return false;
 
-  // Blocked by untagged exclusion?
+  // Blocked by unknown pipeline exclusion (no tag or unrecognized tag)?
   const tag = ref.pipeline_tag;
-  if (!tag && !activeSpecialFilters.has("include untagged")) return false;
+  if ((!tag || !TO_TAGS.find(x => x.tag === tag)) && !activeSpecialFilters.has("include unknown")) return false;
 
   // Blocked by param range or hide-missing-params?
   const pb = ref.paramB != null ? ref.paramB : getParamCount(ref);
@@ -2073,8 +2073,8 @@ function walkFilterL4(node) {
   node._filterDate = ref ? isInDateRange(ref.lastModified) : false;
   node._filterQuant = ref ? matchesFilter(qStr) : false;
   node._filterTask = ref ? matchesTaskFilter(ref.pipeline_tag) : false;
-  node._filterUntagged = ref ? (!(!ref.pipeline_tag && !activeSpecialFilters.has("include untagged"))) : false;
-  node.display = node._filterDate && node._filterQuant && node._filterTask && node._filterUntagged;
+  node._filterUnknown = ref ? (!((!ref.pipeline_tag || !TO_TAGS.find(x => x.tag === ref.pipeline_tag)) && !activeSpecialFilters.has("include unknown"))) : false;
+  node.display = node._filterDate && node._filterQuant && node._filterTask && node._filterUnknown;
   return {
     count: node.display ? 1 : 0,
     downloads: node.display && ref ? (ref.downloads || 0) : 0,
@@ -2608,15 +2608,15 @@ function syncFilterChips() {
     if (activeTaskFilters.has(tag)) activeTags.push(tag);
     else availTags.push(tag);
   });
-  const showUntagged = activeSpecialFilters.has("include untagged");
-  if (showUntagged) activeTags.push(UNTAGGED_SENTINEL);
+  const showUnknown = activeSpecialFilters.has("include unknown");
+  if (showUnknown) activeTags.push(UNKNOWN_SENTINEL);
   while (activeContainer.lastChild !== activeLabel) activeContainer.removeChild(activeContainer.lastChild);
   while (availContainer.lastChild !== availLabel) availContainer.removeChild(availContainer.lastChild);
   activeTags.forEach(tag => {
-    if (tag === UNTAGGED_SENTINEL) {
+    if (tag === UNKNOWN_SENTINEL) {
       const span = document.createElement("span");
       span.className = "act-tag active";
-      span.textContent = "(untagged)";
+      span.textContent = "(unknown)";
       activeContainer.appendChild(span);
     } else {
       activeContainer.appendChild(createTaskTag(tag, true));
@@ -3034,7 +3034,7 @@ function buildL2TableHtml(idx, author, sorted, state) {
     const orphanBadge = qMethods.length ? qMethods.map(q => `<span class="badge orphan" title="Parent base model filtered out">${escapeHtml(q.toUpperCase())}</span>`).join(' ') + ' ' : '';
     return `<tr class="l2-row ${zebra}" data-l2-idx="${idx}" data-model-idx="${mIdx}" data-model="${escapeHtml(m.id)}" aria-rowindex="${rowIdx}">
       <td class="model-id-cell" aria-colindex="1"><button type="button" class="toggle" id="t2-${idx}-${mIdx}" aria-expanded="false" aria-label="Expand ${escapeHtml(m.id)}">▶</button>${orphanBadge}<a href="https://huggingface.co/${escapeHtml(m.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(m.displayName || m.id.split('/').slice(1).join('/'))}">${escapeHtml(m.displayName || m.id.split('/').slice(1).join('/'))}</a></td>
-      <td class="center" aria-colindex="2">${escapeHtml(m.pipeline_tag || "(untagged)")}</td>
+      <td class="center" aria-colindex="2">${escapeHtml(m.pipeline_tag || "(unknown)")}</td>
       <td class="center" aria-colindex="3" style="font-size:0.78rem">${paramBadgeHtml(m)}</td>
       <td class="right" aria-colindex="4">${fmt(m.downloads)}</td>
       <td class="right" aria-colindex="5">${fmt(m.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
@@ -3229,9 +3229,12 @@ async function loadChildren(l2Idx, modelIdx, parentId, container) {
         const p = extractParamFromId(cm.id);
         if (p !== null && (maxChildParam === null || p > maxChildParam)) maxChildParam = p;
       }
+      // Mark as attempted regardless of outcome so that later "Infer Missing Params"
+      // does not re-run resolveParamFromChildren and duplicate the child search.
+      const md = getModelRef(parentId);
+      if (md) md._inferredAttempted = true;
       if (maxChildParam !== null) {
         if (isStale(gen)) return;
-        const md = getModelRef(parentId);
         if (md && md.paramB == null) {
           md.paramB = maxChildParam;
           md._paramSource = 'child_name';
@@ -3448,7 +3451,7 @@ function renderL4(parentId, author, container) {
   html += sorted.map((q, qIdx) => {
     return `<tr class="l4-row" aria-rowindex="${2 + qIdx}">
       <td class="model-id-cell" aria-colindex="1"><a href="https://huggingface.co/${escapeHtml(q.id)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(q.displayName || q.id.split('/').slice(1).join('/'))}">${escapeHtml(q.displayName || q.id.split('/').slice(1).join('/'))}</a></td>
-      <td class="center" aria-colindex="2">${escapeHtml(q.pipeline_tag || "(untagged)")}</td>
+      <td class="center" aria-colindex="2">${escapeHtml(q.pipeline_tag || "(unknown)")}</td>
       <td class="center" aria-colindex="3"><span class="badge ${q.q_method === 'derivative' || q.q_method.includes('finetune') ? 'deriv' : ''}">${escapeHtml(q.q_method)}</span></td>
       <td class="right" aria-colindex="4">${fmt(q.downloads)}</td>
       <td class="right" aria-colindex="5">${fmt(q.likes)}<span class="likes-icon" aria-hidden="true">♥</span></td>
